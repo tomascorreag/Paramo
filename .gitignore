@@ -1,0 +1,48 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Godot export artifacts
+export.cfg
+export_presets.cfg
+build/
+exports/
+*.pck
+*.zip
+
+# Imported translations (auto-generated from CSVs)
+*.translation
+
+# Mono / .NET (unused, but in case of future addition)
+.mono/
+data_*/
+mono_crash.*.json
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# Logs and crash dumps
+*.log
+logs/
+godot.log
+*.stackdump
+
+# Local Claude state
+.claude/
+CLAUDE.md
