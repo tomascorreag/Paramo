@@ -9,14 +9,9 @@ extends CharacterBody2D
 # walks them cell-by-cell along the four grid axes. Position AND altitude are
 # lerped over each step, so stairs and half-height tiles animate smoothly.
 #
-# The player's `global_position.y` is the sum of:
-#   - the ground-level world y of the current grid position (from the
-#     reference layer's map_to_local)
-#   - minus `altitude * HALF_STEP_PX` for elevation offset
-#
-# Y-sort automatically places the player correctly against tiles because
-# lifting the body shifts its sort y by the same amount the corresponding
-# tiles are shifted.
+# `global_position` tracks the ground-level world position (lerped during
+# movement). Sorting uses `y_sort_origin` to snap the sort key to the
+# destination cell during transit, preventing mid-step tile overlap.
 #
 # Facing is picked ONCE per step from the step direction (d = to - from).
 # Since movement is strictly along one grid axis per step, there's no
@@ -178,14 +173,18 @@ func _apply_step_interp(t: float) -> void:
 	var pos := from_world.lerp(to_world, clamped)
 	var alt: float = lerpf(_step_from_alt, _step_to_alt, clamped)
 	_altitude = alt
-	global_position = pos + Pathfinder.VISUAL_SURFACE_OFFSET + Vector2(0.0, _SORT_OFFSET)
-	_apply_visual_lift(alt)
+	# Snap sort-Y to the southernmost (max Y) of origin/destination so the
+	# player stays in front of both tiles throughout the step.
+	var snap_y := maxf(from_world.y, to_world.y)
+	global_position = Vector2(pos.x, snap_y) + Pathfinder.VISUAL_SURFACE_OFFSET + Vector2(0.0, _SORT_OFFSET)
+	# Compensate the Y snap on sprite/camera so movement looks smooth.
+	_apply_visual_lift(alt, pos.y - snap_y)
 
 
 func _apply_position(cell: Vector2i, alt: float) -> void:
 	var base := _pathfinder.cell_to_world(cell)
 	global_position = base + Pathfinder.VISUAL_SURFACE_OFFSET + Vector2(0.0, _SORT_OFFSET)
-	_apply_visual_lift(alt)
+	_apply_visual_lift(alt, 0.0)
 
 
 # All tiles have y_sort_origin = -16, which shifts their sort point 16 px
@@ -200,9 +199,10 @@ const _SORT_OFFSET: float = -15.0  # tile_y_sort_origin(-16) + 1
 
 # Altitude and sort-offset both shift global_position away from the visual
 # foot position. Undo both on the sprite and camera so the player LOOKS
-# correct while sorting correctly.
-func _apply_visual_lift(alt: float) -> void:
-	var lift := -alt * Pathfinder.HALF_STEP_PX - _SORT_OFFSET
+# correct while sorting correctly. `y_visual_diff` compensates for the Y
+# snap during movement (0.0 when at rest).
+func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
+	var lift := -alt * Pathfinder.HALF_STEP_PX - _SORT_OFFSET + y_visual_diff
 	_sprite.offset.y = _base_sprite_offset_y + lift
 	_camera.position.y = lift
 

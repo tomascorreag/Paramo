@@ -1,10 +1,12 @@
 [gd_scene format=4 uid="uid://bjr3p5tb7xyy0"]
 
-[ext_resource type="TileSet" uid="uid://cvfe64siih4ge" path="res://resources/tiles/base_tileset.tres" id="2_l16oj"]
+[ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="2_l16oj"]
 [ext_resource type="PackedScene" uid="uid://b6yjeuvgxs4" path="res://scenes/entities/player.tscn" id="2_xvi33"]
 [ext_resource type="Script" uid="uid://dsgoe3t826dnu" path="res://scripts/systems/pathfinder.gd" id="4_osssn"]
 [ext_resource type="Script" uid="uid://b1gdukcvrdojy" path="res://scripts/systems/click_to_move_controller.gd" id="5_s7fjt"]
 [ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="6_tdovl"]
+[ext_resource type="Script" uid="uid://dj81k227gd1kx" path="res://scripts/systems/ux_overlay.gd" id="7_uxovr"]
+[ext_resource type="Texture2D" uid="uid://beexbf4y5e1j7" path="res://assets/sprites/UX/ISO_UX.png" id="8_isoux"]
 
 [node name="TilesetTest" type="Node2D" unique_id=35083561]
 y_sort_enabled = true
@@ -22,7 +24,7 @@ position = Vector2(192, 80)
 
 [node name="Ground" type="TileMapLayer" parent="World" unique_id=1409094919]
 y_sort_enabled = true
-tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAD//wMAAAAAAAAAAAD+/wAAAAAAAAAAAAD+/wEAAAAAAAAAAAD+/wIAAAAAAAAAAAD+/wMAAAAAAAAAAAD+/wQAAAAAAAAAAAD//wQAAAAAAAAAAAAAAAQAAAAAAAAAAAABAAQAAAAAAAAAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD/////AAAAAAAAAAD+////AAAAAAAAAAD9////AAAAAAAAAAD9/wAAAAAAAAAAAAD9/wEAAAAAAAAAAAD9/wIAAAAAAAAAAAD9/wMAAAAAAAAAAAD9/wQAAAAAAAAAAAACAP//AAADAAAAAAADAP//AAADAAAAAAAEAP//AAADAAAAAAA=")
+tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAD//wMAAAAAAAIAAAD+/wAAAAAAAAAAAAD+/wEAAAAAAAIAAAD+/wIAAAAAAAIAAAD+/wMAAAAAAAIAAAD+/wQAAAAAAAQAAAD//wQAAAAAAAQAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD/////AAAAAAAAAAD+////AAAAAAIAAAD9////AAAAAAQAAAD9/wAAAAAAAAQAAAD9/wEAAAAAAAQAAAD9/wIAAAAAAAQAAAD9/wMAAAAAAAQAAAD9/wQAAAAAAAQAAAD//wIAAAAAAAAAAAD//wEAAAAAAAYAAAD//wAAAAAAAAYAAAADAAAAAgAAAAAAAAADAAEAAgAAAAAAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAAAAAIAAAAAAAYAAAAAAAEAAgABAAIAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAAIAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAAAAAAAAgAAAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAAEAAMAAgAAAAAAAAAEAAQAAgAAAAAAAAA=")
 tile_set = ExtResource("2_l16oj")
 metadata/altitude = 0
 
@@ -54,3 +56,14 @@ player = NodePath("../World/Player")
 script = ExtResource("6_tdovl")
 pathfinder = NodePath("../Pathfinder")
 debug_label = NodePath("../DebugLabel")
+
+[node name="UXOverlay" type="Node2D" parent="." unique_id=816449398 node_paths=PackedStringArray("pathfinder")]
+z_index = 1
+script = ExtResource("7_uxovr")
+pathfinder = NodePath("../Pathfinder")
+reticle_fade_duration = 0.2
+
+[node name="Reticle" type="Sprite2D" parent="UXOverlay" unique_id=1803161632]
+texture = ExtResource("8_isoux")
+region_enabled = true
+region_rect = Rect2(0, 0, 32, 16)

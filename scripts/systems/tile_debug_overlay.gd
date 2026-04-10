@@ -34,7 +34,7 @@ extends Node2D
 
 @export var pathfinder: Pathfinder
 @export var debug_label: Label
-@export var enabled: bool = true
+@export var enabled: bool = false
 
 # Visual tweakables (kept as exports for quick calibration in the editor).
 @export var walkable_dot_radius: float = 1.5
