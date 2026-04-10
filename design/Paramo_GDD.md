@@ -4,7 +4,7 @@
 **Engine:** Godot 4
 **Platform:** Desktop (landscape)
 **Vertical Slice:** 1 level, 30-45 min run
-**Art Style:** Pixel art, serious tone. Dome Keeper aesthetic — chunky, atmospheric, detailed.
+**Art Style:** Isometric pixel art, serious tone. Dome Keeper's atmospheric weight and chunky readability, reprojected into isometric (diamond tiles, 2:1 aspect). Dense per-tile detail that holds up at strategic zoom and rewards closer inspection.
 
 ---
 
@@ -32,7 +32,7 @@ At the summit: a glacial laguna. If it dies, everything dies.
 
 ### Layout
 
-The map is a single mountain peak viewed at ~45 degrees (isometric-ish), landscape orientation. Wide at the base, narrowing toward the summit. The laguna sits at the top — a still, reflective lake surrounded by exposed rock and lichen.
+The map is a single mountain peak rendered in true isometric projection (diamond tiles, 2:1 aspect ratio), landscape orientation. Wide at the base, narrowing toward the summit. The laguna sits at the top — a still, reflective lake surrounded by exposed rock and lichen. Vertical elevation is faked by tile stacking / elevation offset, not a 3D camera — the projection is locked.
 
 Altitude is a continuous variable, not discrete zones. It modifies every system:
 
@@ -133,7 +133,7 @@ Not spent directly — acts as a global modifier.
 
 ## The Player Character
 
-A field coordinator. Physical entity on the map, like Dome Keeper's operator. Occupies a tile and must move to locations to interact with them.
+A field coordinator. A small isometric sprite you walk across the mountain — a person on the slope, not a floating strategic cursor. The same physical-presence fantasy as Dome Keeper's operator, in isometric projection. Occupies a tile and must move to locations to interact with them.
 
 ### Camera & Visibility
 
@@ -556,7 +556,13 @@ Represented sparingly and with great care. Not a game mechanic — a narrative a
 - **Dry season shift:** Warm golden haze, yellowed grasses, exposed soil tones
 - **Wet season shift:** Blue-gray fog, saturated greens, visible rain streaks
 
-Dome Keeper's pixel density — tiles should have character and individual detail. Each tile reads clearly at strategic zoom but rewards closer inspection.
+Dome Keeper's pixel density, applied to isometric diamond tiles. Each tile is a small illustrated vignette: individual frailejones, visible moss, exposed roots, water glints. Tiles read clearly at strategic zoom and reward close inspection. Altitude banding emerges from tile content, not from hand-drawn zones.
+
+**Projection & tile layout:**
+- Isometric projection, 2:1 aspect diamond tiles (e.g., 64×32 or 128×64 base — final size TBD in production)
+- Multi-layer tile stack: terrain → vegetation → infrastructure → entities → fog. Y-sorted so player, threats, and tall sprites (frailejones, trees) sort correctly against terrain.
+- Character sprites: minimum 4 facings (NE/SE/SW/NW). 8 facings if budget allows. Mirroring halves the art load.
+- Tall structures (monitoring stations, the research station, mature frailejones) extend above their tile footprint — Y-sort origin per tile must be tuned in the TileSet so sorting holds.
 
 ### Atmosphere
 

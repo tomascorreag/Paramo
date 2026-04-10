@@ -1,0 +1,56 @@
+[gd_scene format=4 uid="uid://bjr3p5tb7xyy0"]
+
+[ext_resource type="TileSet" uid="uid://cvfe64siih4ge" path="res://resources/tiles/base_tileset.tres" id="2_l16oj"]
+[ext_resource type="PackedScene" uid="uid://b6yjeuvgxs4" path="res://scenes/entities/player.tscn" id="2_xvi33"]
+[ext_resource type="Script" uid="uid://dsgoe3t826dnu" path="res://scripts/systems/pathfinder.gd" id="4_osssn"]
+[ext_resource type="Script" uid="uid://b1gdukcvrdojy" path="res://scripts/systems/click_to_move_controller.gd" id="5_s7fjt"]
+[ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="6_tdovl"]
+
+[node name="TilesetTest" type="Node2D" unique_id=35083561]
+y_sort_enabled = true
+
+[node name="BG" type="ColorRect" parent="." unique_id=1948980994]
+custom_minimum_size = Vector2(384, 216)
+offset_right = 40.0
+offset_bottom = 40.0
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="World" type="Node2D" parent="." unique_id=1193948366]
+y_sort_enabled = true
+position = Vector2(192, 80)
+
+[node name="Ground" type="TileMapLayer" parent="World" unique_id=1409094919]
+y_sort_enabled = true
+tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAD//wMAAAAAAAAAAAD+/wAAAAAAAAAAAAD+/wEAAAAAAAAAAAD+/wIAAAAAAAAAAAD+/wMAAAAAAAAAAAD+/wQAAAAAAAAAAAD//wQAAAAAAAAAAAAAAAQAAAAAAAAAAAABAAQAAAAAAAAAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD/////AAAAAAAAAAD+////AAAAAAAAAAD9////AAAAAAAAAAD9/wAAAAAAAAAAAAD9/wEAAAAAAAAAAAD9/wIAAAAAAAAAAAD9/wMAAAAAAAAAAAD9/wQAAAAAAAAAAAACAP//AAADAAAAAAADAP//AAADAAAAAAAEAP//AAADAAAAAAA=")
+tile_set = ExtResource("2_l16oj")
+metadata/altitude = 0
+
+[node name="Ground2" type="TileMapLayer" parent="World" unique_id=1597291577]
+y_sort_enabled = true
+position = Vector2(0, -16)
+tile_map_data = PackedByteArray("AAACAP7/AAAAAAAAAAADAP7/AAAAAAAAAAAEAP7/AAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAFAAIAAAAAAAAAAAA=")
+tile_set = ExtResource("2_l16oj")
+y_sort_origin = 16
+metadata/altitude = 2
+
+[node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
+position = Vector2(16, 28)
+
+[node name="DebugLabel" type="Label" parent="." unique_id=723082006]
+offset_right = 200.0
+offset_bottom = 23.0
+
+[node name="Pathfinder" type="Node" parent="." unique_id=190879584 node_paths=PackedStringArray("tile_map_layers")]
+script = ExtResource("4_osssn")
+tile_map_layers = [NodePath("../World/Ground"), NodePath("../World/Ground2")]
+
+[node name="ClickToMoveController" type="Node" parent="." unique_id=680876284 node_paths=PackedStringArray("pathfinder", "player")]
+script = ExtResource("5_s7fjt")
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")
+
+[node name="TileDebugOverlay" type="Node2D" parent="." unique_id=306206731 node_paths=PackedStringArray("pathfinder", "debug_label")]
+script = ExtResource("6_tdovl")
+pathfinder = NodePath("../Pathfinder")
+debug_label = NodePath("../DebugLabel")

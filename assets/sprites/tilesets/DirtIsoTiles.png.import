@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b8pfmxoa2dh56"
-path="res://.godot/imported/ice3.png-68cc80116186d713ae5bc2cbe008fae7.ctex"
+uid="uid://e6pvyc18cuq7"
+path="res://.godot/imported/DirtIsoTiles.png-8ea632359af6132f7941b1bd57204d38.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/tiles/ice3.png"
-dest_files=["res://.godot/imported/ice3.png-68cc80116186d713ae5bc2cbe008fae7.ctex"]
+source_file="res://assets/sprites/tilesets/DirtIsoTiles.png"
+dest_files=["res://.godot/imported/DirtIsoTiles.png-8ea632359af6132f7941b1bd57204d38.ctex"]
 
 [params]
 

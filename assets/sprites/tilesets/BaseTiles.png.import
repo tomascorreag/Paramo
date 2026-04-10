@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bem0vne1m4qei"
-path="res://.godot/imported/shrubs1.png-519a56b02c32341f3570fab2f647a6d1.ctex"
+uid="uid://cwrulorebmoud"
+path="res://.godot/imported/BaseTiles.png-1a37787efd98b417621d7901f73d9bcb.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/tiles/shrubs1.png"
-dest_files=["res://.godot/imported/shrubs1.png-519a56b02c32341f3570fab2f647a6d1.ctex"]
+source_file="res://assets/sprites/tilesets/BaseTiles.png"
+dest_files=["res://.godot/imported/BaseTiles.png-1a37787efd98b417621d7901f73d9bcb.ctex"]
 
 [params]
 

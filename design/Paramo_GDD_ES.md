@@ -4,7 +4,7 @@
 **Motor:** Godot 4
 **Plataforma:** Desktop (horizontal)
 **Duración:** 30-45 min por partida
-**Estética:** Pixel art serio y atmosférico. Referencia: Dome Keeper.
+**Estética:** Pixel art isométrico, serio y atmosférico. Densidad de píxel y peso visual estilo Dome Keeper, reproyectado a isométrico (tiles diamante, proporción 2:1). Cada tile como una pequeña viñeta ilustrada.
 
 ---
 
@@ -40,7 +40,7 @@ Toda decisión mecánica, estética y narrativa debe estar respaldada por eviden
 
 ## La Montaña
 
-Mapa de una montaña vista en perspectiva isométrica. Ancha en la base, angosta hacia la cumbre. La laguna en la cima.
+Mapa de una montaña en proyección isométrica pura (tiles diamante, 2:1), orientación horizontal. Ancha en la base, angosta hacia la cumbre. La laguna en la cima. La elevación vertical se simula con apilamiento de tiles y offsets de altura — la proyección está fija, no hay cámara 3D.
 
 La **altitud** es una variable continua que modifica todo: velocidad de crecimiento vegetal, exposición a amenazas humanas vs. ambientales, velocidad del jugador, generación de agua. No hay biomas predefinidos — la zonación emerge del gameplay.
 
