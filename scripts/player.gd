@@ -38,10 +38,16 @@ const DIR_TO_FRAME: Dictionary = {
 @export var step_duration: float = 0.3
 @export var debug_logging: bool = false
 
+@export_group("Lantern")
+## Time of day [0..1] when lantern turns on (e.g., 0.75 = dusk).
+@export var lantern_activate_time: float = 0.75
+## Time of day [0..1] when lantern turns off (e.g., 0.28 = dawn).
+@export var lantern_deactivate_time: float = 0.28
 
 @onready var _sprite: Sprite2D = $Sprite2D
 @onready var _shadow: Sprite2D = $Shadow
 @onready var _camera: Camera2D = $Camera2D
+@onready var _light: PlayerLightController = $PlayerLight
 
 # Base sprite offset from the scene (feet-to-center). Altitude lift is added
 # on top of this so the visual shifts up while global_position stays at
@@ -49,6 +55,7 @@ const DIR_TO_FRAME: Dictionary = {
 var _base_sprite_offset_y: float
 
 var _pathfinder: Pathfinder
+var _time_manager: Node  # TimeManager autoload
 
 var current_cell: Vector2i = Vector2i.ZERO
 
@@ -78,6 +85,7 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	_base_sprite_offset_y = _sprite.offset.y
+	_time_manager = get_node_or_null("/root/TimeManager")
 
 	# Reparent shadow to world level so it y-sorts independently against tiles.
 	remove_child(_shadow)
@@ -97,6 +105,12 @@ func _ready() -> void:
 # ----------------------------------------------------------------------------
 # Public API (called by ClickToMoveController, tests, or future systems)
 # ----------------------------------------------------------------------------
+
+func get_shadow_material() -> ShaderMaterial:
+	if _shadow and _shadow.material:
+		return _shadow.material as ShaderMaterial
+	return null
+
 
 func follow_path(cells: Array[Vector2i]) -> void:
 	_path = cells.duplicate()
@@ -120,6 +134,8 @@ func is_moving() -> bool:
 # ----------------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	_update_lantern()
+
 	if _pathfinder == null:
 		return
 
@@ -219,6 +235,24 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
 	_shadow.material.set_shader_parameter(&"visual_y_offset", lift + 1.0)
 	_camera.position.y = lift
+	_light.position.y = _base_sprite_offset_y + lift
+
+
+func _update_lantern() -> void:
+	if _time_manager == null:
+		return
+	var t: float = _time_manager.time_of_day
+	# activate > deactivate means the active window wraps past midnight
+	var should_be_on: bool
+	if lantern_activate_time > lantern_deactivate_time:
+		should_be_on = t >= lantern_activate_time or t < lantern_deactivate_time
+	else:
+		should_be_on = t >= lantern_activate_time and t < lantern_deactivate_time
+
+	if should_be_on:
+		_light.activate()
+	else:
+		_light.deactivate()
 
 
 func _set_facing(dir: Vector2i) -> void:

@@ -3,22 +3,35 @@
 [ext_resource type="Texture2D" uid="uid://defvn510sfulv" path="res://assets/sprites/characters/base.png" id="1"]
 [ext_resource type="Script" uid="uid://coddkp0byxhov" path="res://scripts/player.gd" id="2"]
 [ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
+[ext_resource type="Script" uid="uid://cye4auxn1pnj0" path="res://scripts/systems/player_light_controller.gd" id="4_plc"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
 shader = ExtResource("3")
 shader_parameter/shadow_color = Color(0, 0, 0.05, 0.5)
-shader_parameter/shadow_length = 22.000000855
+shader_parameter/shadow_length = 6.000000095
 shader_parameter/max_height = 4.000000142499999
 shader_parameter/taper = 0.30000001192093
 shader_parameter/cap_width = 6.0000002375
 shader_parameter/visual_y_offset = -3.0
+shader_parameter/shadow_opacity = 0.5
 
 [sub_resource type="RectangleShape2D" id="SubResource_1"]
 size = Vector2(10, 14)
 
+[sub_resource type="Curve" id="Curve_5u6hq"]
+_data = [Vector2(0.08201058, 1), 0.0, 0.0, 0, 0, Vector2(0.14814815, 0.90647495), -3.2827344, -3.2827344, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Curve" id="Curve_42nxq"]
+_limits = [0.0, 1.0, 0.0, 2.0]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.50546443, 1), 0.0, 0.0, 0, 0, Vector2(2, 0.7502668), 0.0, 0.0, 0, 0]
+point_count = 3
+
 [node name="Player" type="CharacterBody2D" unique_id=357036741]
 y_sort_enabled = true
 script = ExtResource("2")
+lantern_activate_time = 0.8
+lantern_deactivate_time = 0.2
 
 [node name="Shadow" type="Sprite2D" parent="." unique_id=1361787262]
 y_sort_enabled = true
@@ -36,3 +49,14 @@ hframes = 4
 shape = SubResource("SubResource_1")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=617833586]
+
+[node name="PlayerLight" type="PointLight2D" parent="." unique_id=406879134]
+scale = Vector2(1, 0.5)
+enabled = false
+color = Color(1, 0.725, 0.45, 1)
+energy = 0.0
+script = ExtResource("4_plc")
+falloff = SubResource("Curve_5u6hq")
+max_energy = 1.5
+energy_curve = SubResource("Curve_42nxq")
+transition_duration = 1.0
