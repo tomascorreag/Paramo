@@ -46,3 +46,4 @@ godot.log
 # Local Claude state
 .claude/
 CLAUDE.md
+TILE_SYSTEM_REWRITE.md
