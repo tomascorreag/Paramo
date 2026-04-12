@@ -1,8 +1,0 @@
-[gd_resource type="TileSet" format=3 uid="uid://doj1gyqr7gtl5"]
-
-[resource]
-tile_shape = 1
-tile_layout = 5
-tile_size = Vector2i(32, 16)
-custom_data_layer_0/name = "tile_kind"
-custom_data_layer_0/type = 4

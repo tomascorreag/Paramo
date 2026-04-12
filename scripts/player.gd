@@ -40,6 +40,7 @@ const DIR_TO_FRAME: Dictionary = {
 
 
 @onready var _sprite: Sprite2D = $Sprite2D
+@onready var _shadow: Sprite2D = $Shadow
 @onready var _camera: Camera2D = $Camera2D
 
 # Base sprite offset from the scene (feet-to-center). Altitude lift is added
@@ -70,8 +71,17 @@ func _enter_tree() -> void:
 	add_to_group(&"player")
 
 
+func _exit_tree() -> void:
+	if is_instance_valid(_shadow):
+		_shadow.queue_free()
+
+
 func _ready() -> void:
 	_base_sprite_offset_y = _sprite.offset.y
+
+	# Reparent shadow to world level so it y-sorts independently against tiles.
+	remove_child(_shadow)
+	get_parent().add_child.call_deferred(_shadow)
 
 	_pathfinder = get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if _pathfinder == null:
@@ -204,13 +214,19 @@ const _SORT_OFFSET: float = -15.0  # tile_y_sort_origin(-16) + 1
 func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	var lift := -alt * Pathfinder.HALF_STEP_PX - _SORT_OFFSET + y_visual_diff
 	_sprite.offset.y = _base_sprite_offset_y + lift
+	# Shadow sorts 1px north of the player (always behind), visual feet
+	# offset is pushed into the vertex shader so sort Y stays decoupled.
+	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
+	_shadow.material.set_shader_parameter(&"visual_y_offset", lift + 1.0)
 	_camera.position.y = lift
 
 
 func _set_facing(dir: Vector2i) -> void:
 	if not DIR_TO_FRAME.has(dir):
 		return
-	_sprite.frame = DIR_TO_FRAME[dir]
+	var f: int = DIR_TO_FRAME[dir]
+	_sprite.frame = f
+	_shadow.frame = f
 
 
 # ----------------------------------------------------------------------------

@@ -2,6 +2,16 @@
 
 [ext_resource type="Texture2D" uid="uid://defvn510sfulv" path="res://assets/sprites/characters/base.png" id="1"]
 [ext_resource type="Script" uid="uid://coddkp0byxhov" path="res://scripts/player.gd" id="2"]
+[ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
+
+[sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
+shader = ExtResource("3")
+shader_parameter/shadow_color = Color(0, 0, 0.05, 0.5)
+shader_parameter/shadow_length = 22.000000855
+shader_parameter/max_height = 4.000000142499999
+shader_parameter/taper = 0.30000001192093
+shader_parameter/cap_width = 6.0000002375
+shader_parameter/visual_y_offset = -3.0
 
 [sub_resource type="RectangleShape2D" id="SubResource_1"]
 size = Vector2(10, 14)
@@ -10,9 +20,16 @@ size = Vector2(10, 14)
 y_sort_enabled = true
 script = ExtResource("2")
 
-[node name="Sprite2D" type="Sprite2D" parent="." unique_id=511666111]
-offset = Vector2(0, -15)
+[node name="Shadow" type="Sprite2D" parent="." unique_id=1361787262]
+y_sort_enabled = true
+material = SubResource("SubResource_shadow_mat")
 texture = ExtResource("1")
+offset = Vector2(0, -15)
+hframes = 4
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=511666111]
+texture = ExtResource("1")
+offset = Vector2(0, -15)
 hframes = 4
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=787906145]
