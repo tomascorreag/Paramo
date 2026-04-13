@@ -46,7 +46,7 @@ _data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, 
 point_count = 3
 
 [sub_resource type="Curve" id="Curve_dymf4"]
-_data = [Vector2(0.12011173, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(0.9469273, 0), 0.0, 0.0, 0, 0]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
 point_count = 4
 
 [sub_resource type="Resource" id="Resource_h8h76"]

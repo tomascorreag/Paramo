@@ -90,6 +90,8 @@ func _ready() -> void:
 	# Reparent shadow to world level so it y-sorts independently against tiles.
 	remove_child(_shadow)
 	get_parent().add_child.call_deferred(_shadow)
+	_shadow.add_to_group(&"shadow")
+	_shadow.set_meta(&"shadow_scale", 1.0)
 
 	_pathfinder = get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if _pathfinder == null:

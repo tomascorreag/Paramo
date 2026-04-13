@@ -14,6 +14,7 @@ shader_parameter/taper = 0.30000001192093
 shader_parameter/cap_width = 6.0000002375
 shader_parameter/visual_y_offset = -3.0
 shader_parameter/shadow_opacity = 0.5
+shader_parameter/sprite_offset = Vector2(0, -15)
 
 [sub_resource type="RectangleShape2D" id="SubResource_1"]
 size = Vector2(10, 14)

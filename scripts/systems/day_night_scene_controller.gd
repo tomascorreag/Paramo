@@ -23,7 +23,6 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 @export var overlay_profile: DayNightProfile
 @export var overlay_weight: float = 0.0
 
-var _shadow_material: ShaderMaterial
 var _post_process_material: ShaderMaterial
 var _time_manager: Node  # TimeManager autoload
 
@@ -39,18 +38,6 @@ func _ready() -> void:
 
 	if post_process_rect and post_process_rect.material:
 		_post_process_material = post_process_rect.material as ShaderMaterial
-
-	# Player discovery (deferred so all _ready() calls have completed).
-	call_deferred(&"_find_player_nodes")
-
-
-func _find_player_nodes() -> void:
-	var player: Player = get_tree().get_first_node_in_group(&"player") as Player
-	if player == null:
-		push_warning("DayNightSceneController: no node in 'player' group.")
-		return
-
-	_shadow_material = player.get_shadow_material()
 
 
 func _process(_delta: float) -> void:
@@ -93,11 +80,16 @@ func _process(_delta: float) -> void:
 		for mat: ShaderMaterial in wind_materials:
 			mat.set_shader_parameter(&"wind_intensity", wind_val)
 
-	# --- Player shadow ---
-	if _shadow_material:
+	# --- All shadows ---
+	var shadow_nodes := get_tree().get_nodes_in_group(&"shadow")
+	for node: Node in shadow_nodes:
+		var mat := (node as CanvasItem).material as ShaderMaterial
+		if mat == null:
+			continue
+		var scale: float = node.get_meta(&"shadow_scale", 1.0)
 		if profile.shadow_opacity_curve:
-			_shadow_material.set_shader_parameter(
+			mat.set_shader_parameter(
 				&"shadow_opacity", profile.shadow_opacity_curve.sample(t))
 		if profile.shadow_length_curve:
-			_shadow_material.set_shader_parameter(
-				&"shadow_length", profile.shadow_length_curve.sample(t))
+			mat.set_shader_parameter(
+				&"shadow_length", profile.shadow_length_curve.sample(t) * scale)

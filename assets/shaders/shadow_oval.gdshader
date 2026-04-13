@@ -11,11 +11,12 @@ uniform float taper : hint_range(0.3, 3.0) = 0.7;
 uniform float cap_width : hint_range(1.0, 32.0) = 16.0;
 uniform float visual_y_offset = 0.0;
 uniform float shadow_opacity : hint_range(0.0, 1.0) = 0.5;
+uniform vec2 sprite_offset = vec2(0.0, -15.0);
 
 varying vec2 shadow_norm;
 
 void vertex() {
-	vec2 normalized = (VERTEX - vec2(0.0, -15.0)) / vec2(16.0, 16.0);
+	vec2 normalized = (VERTEX - sprite_offset) / vec2(16.0, 16.0);
 	shadow_norm = normalized;
 
 	// Effective taper = abs + cap so the taper always extends beyond the cap.

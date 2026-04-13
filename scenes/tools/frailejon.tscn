@@ -2,10 +2,30 @@
 
 [ext_resource type="Texture2D" uid="uid://cmtf3axij6tps" path="res://assets/sprites/objects/ISO_Plants.png" id="1"]
 [ext_resource type="Script" uid="uid://cb1dpudg3qej4" path="res://scripts/tools/frailejon.gd" id="2"]
+[ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_shadow"]
+resource_local_to_scene = true
+shader = ExtResource("3")
+shader_parameter/shadow_color = Color(0, 0, 0.05, 0.5)
+shader_parameter/shadow_length = 8.1330034263175
+shader_parameter/max_height = 3.000000095
+shader_parameter/taper = 0.30000001192093
+shader_parameter/cap_width = 5.00000019
+shader_parameter/visual_y_offset = 4.0
+shader_parameter/shadow_opacity = 0.5
+shader_parameter/sprite_offset = Vector2(0, -8)
 
 [node name="Frailejon" type="Node2D" unique_id=449271788]
 script = ExtResource("2")
 growth_chance = 0.1
+
+[node name="Shadow" type="Sprite2D" parent="." unique_id=1447054399]
+material = SubResource("ShaderMaterial_shadow")
+texture = ExtResource("1")
+offset = Vector2(0, -8)
+hframes = 4
+vframes = 8
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=977112557]
 texture = ExtResource("1")
