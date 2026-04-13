@@ -28,6 +28,12 @@ extends Resource
 ## Overlay tint blend strength.
 @export var tint_strength_curve: Curve
 
+# --- Wind ---
+
+@export_group("Wind")
+## Global wind intensity multiplier over time. 0 = still, 1 = full per-material wind.
+@export var wind_intensity_curve: Curve
+
 # --- Player visuals ---
 
 @export_group("Player")

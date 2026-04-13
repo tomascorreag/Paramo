@@ -12,6 +12,9 @@
 [ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
 [ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
 [ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="11_tilei"]
+[ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="12_dymf4"]
+[ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="13_4ycv7"]
+[ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="14_2amr8"]
 
 [sub_resource type="Gradient" id="Gradient_j22yb"]
 offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
@@ -42,12 +45,17 @@ point_count = 7
 _data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
 point_count = 3
 
+[sub_resource type="Curve" id="Curve_dymf4"]
+_data = [Vector2(0.12011173, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(0.9469273, 0), 0.0, 0.0, 0, 0]
+point_count = 4
+
 [sub_resource type="Resource" id="Resource_h8h76"]
 script = ExtResource("10_j22yb")
 ambient_gradient = SubResource("Gradient_j22yb")
 temperature_curve = SubResource("Curve_j22yb")
 contrast_curve = SubResource("Curve_2amr8")
 vignette_strength_curve = SubResource("Curve_h8h76")
+wind_intensity_curve = SubResource("Curve_dymf4")
 shadow_opacity_curve = SubResource("Curve_e4mmd")
 shadow_length_curve = SubResource("Curve_et33p")
 metadata/_custom_type_script = "uid://dveykjelqtor6"
@@ -145,6 +153,7 @@ script = ExtResource("9_dnctrl")
 profile = SubResource("Resource_h8h76")
 canvas_modulate = NodePath("../AmbientModulate")
 post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
+wind_materials = Array[ShaderMaterial]([ExtResource("12_dymf4"), ExtResource("13_4ycv7"), ExtResource("14_2amr8")])
 
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=500016460]
 layer = 100

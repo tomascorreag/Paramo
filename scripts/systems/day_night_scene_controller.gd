@@ -16,6 +16,9 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 @export var post_process_rect: ColorRect
 
 ## Future: assign a second profile and weight to blend/override for seasons or weather.
+@export_group("Wind")
+@export var wind_materials: Array[ShaderMaterial]
+
 @export_group("Overlay")
 @export var overlay_profile: DayNightProfile
 @export var overlay_weight: float = 0.0
@@ -83,6 +86,12 @@ func _process(_delta: float) -> void:
 		if profile.tint_strength_curve:
 			_post_process_material.set_shader_parameter(
 				&"tint_strength", profile.tint_strength_curve.sample(t))
+
+	# --- Wind ---
+	if profile.wind_intensity_curve and not wind_materials.is_empty():
+		var wind_val: float = profile.wind_intensity_curve.sample(t)
+		for mat: ShaderMaterial in wind_materials:
+			mat.set_shader_parameter(&"wind_intensity", wind_val)
 
 	# --- Player shadow ---
 	if _shadow_material:
