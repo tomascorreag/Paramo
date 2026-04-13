@@ -1,12 +1,13 @@
-[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+[gd_resource type="ShaderMaterial" format=3 uid="uid://cgvibl4w5t4r6"]
 
-[ext_resource type="Shader" path="res://assets/shaders/wind.gdshader" id="1"]
+[ext_resource type="Shader" uid="uid://2p4astgjsq3v" path="res://assets/shaders/wind.gdshader" id="1"]
 
 [resource]
 shader = ExtResource("1")
-shader_parameter/wind_strength = Vector2(1.5, 0.4)
-shader_parameter/wind_scale = 0.05
-shader_parameter/wind_speed = 2.5
-shader_parameter/wind_tiling = Vector2(1.2, 0.7)
-shader_parameter/wind_mask = 1.0
-shader_parameter/wind_tile_pixels = Vector2(32, 32)
+shader_parameter/wind_strength = Vector2(2, 1)
+shader_parameter/wind_scale = 0.02000000095
+shader_parameter/wind_speed = 2.000000095
+shader_parameter/wind_tiling = Vector2(1.5, 0.75)
+shader_parameter/wind_strength_2 = Vector2(1, 0.5)
+shader_parameter/wind_scale_2 = 0.1600000076
+shader_parameter/wind_mask = 0.0

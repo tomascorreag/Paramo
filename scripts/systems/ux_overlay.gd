@@ -98,7 +98,7 @@ func _animate_reticle(delta: float) -> void:
 	var interval := 1.0 / _RETICLE_FPS
 	if _reticle_frame_timer >= interval:
 		_reticle_frame_timer -= interval
-		_reticle_frame = (_reticle_frame + 1) % 3
+		_reticle_frame = (_reticle_frame + 1) % 6
 		_reticle.region_rect = Rect2(
 			_reticle_frame * _RETICLE_FRAME_SIZE.x, _RETICLE_FRAME_SIZE.y,
 			_RETICLE_FRAME_SIZE.x, _RETICLE_FRAME_SIZE.y

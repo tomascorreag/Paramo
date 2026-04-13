@@ -4,9 +4,10 @@
 
 [resource]
 shader = ExtResource("1")
-shader_parameter/wind_strength = Vector2(4, 2)
-shader_parameter/wind_scale = 0.010000000475
-shader_parameter/wind_speed = 0.050000002375
-shader_parameter/wind_tiling = Vector2(1, 1)
-shader_parameter/wind_mask = 0.50000002375
-shader_parameter/wind_tile_pixels = Vector2(16, 16)
+shader_parameter/wind_strength = Vector2(3, 1.5)
+shader_parameter/wind_scale = 0.0150000007125
+shader_parameter/wind_speed = 1.8000000855
+shader_parameter/wind_tiling = Vector2(0.75, 1.5)
+shader_parameter/wind_strength_2 = Vector2(1.5, 0.75)
+shader_parameter/wind_scale_2 = 0.1200000057
+shader_parameter/wind_mask = 0.4470000212325

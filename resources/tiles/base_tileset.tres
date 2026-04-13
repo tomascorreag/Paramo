@@ -3,7 +3,7 @@
 [ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="1_mojr7"]
 [ext_resource type="Texture2D" uid="uid://b5nd50f1iv3bv" path="res://assets/sprites/tilesets/GrassIsoTiles.png" id="1_ns3h2"]
 [ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="1_tie1o"]
-[ext_resource type="Material" path="res://resources/materials/wind_medium.tres" id="2_lf2yk"]
+[ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="2_lf2yk"]
 [ext_resource type="Texture2D" uid="uid://e6pvyc18cuq7" path="res://assets/sprites/tilesets/DirtIsoTiles.png" id="2_tbfl4"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_tbfl4"]
