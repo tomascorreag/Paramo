@@ -138,7 +138,7 @@ reticle_fade_duration = 0.2
 [node name="Reticle" type="Sprite2D" parent="UXOverlay" unique_id=1803161632]
 texture = ExtResource("8_isoux")
 region_enabled = true
-region_rect = Rect2(0, 0, 32, 16)
+region_rect = Rect2(0, 16, 32, 16)
 
 [node name="DayNightController" type="Node" parent="." unique_id=2047375782 node_paths=PackedStringArray("canvas_modulate", "post_process_rect")]
 script = ExtResource("9_dnctrl")

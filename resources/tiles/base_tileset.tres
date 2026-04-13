@@ -1,6 +1,9 @@
 [gd_resource type="TileSet" format=3 uid="uid://kyiktpi3leg1"]
 
+[ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="1_mojr7"]
 [ext_resource type="Texture2D" uid="uid://b5nd50f1iv3bv" path="res://assets/sprites/tilesets/GrassIsoTiles.png" id="1_ns3h2"]
+[ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="1_tie1o"]
+[ext_resource type="Material" path="res://resources/materials/wind_medium.tres" id="2_lf2yk"]
 [ext_resource type="Texture2D" uid="uid://e6pvyc18cuq7" path="res://assets/sprites/tilesets/DirtIsoTiles.png" id="2_tbfl4"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_tbfl4"]
@@ -9,6 +12,7 @@ texture_region_size = Vector2i(32, 16)
 0:0/size_in_atlas = Vector2i(1, 2)
 0:0/0 = 0
 0:0/0/texture_origin = Vector2i(0, -8)
+0:0/0/material = ExtResource("1_mojr7")
 0:0/0/y_sort_origin = -16
 0:0/0/custom_data_0 = "FULL_CUBE"
 2:0/size_in_atlas = Vector2i(1, 2)
@@ -124,11 +128,13 @@ texture_region_size = Vector2i(32, 16)
 0:2/size_in_atlas = Vector2i(1, 2)
 0:2/0 = 0
 0:2/0/texture_origin = Vector2i(0, -8)
+0:2/0/material = ExtResource("2_lf2yk")
 0:2/0/y_sort_origin = -16
 0:2/0/custom_data_0 = "FULL_CUBE"
 0:4/size_in_atlas = Vector2i(1, 2)
 0:4/0 = 0
 0:4/0/texture_origin = Vector2i(0, -8)
+0:4/0/material = ExtResource("1_tie1o")
 0:4/0/y_sort_origin = -16
 0:4/0/custom_data_0 = "FULL_CUBE"
 1:4/0 = 0
