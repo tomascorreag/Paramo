@@ -11,6 +11,7 @@
 [ext_resource type="Script" uid="uid://b7tp23uig1lpt" path="res://scripts/systems/day_night_scene_controller.gd" id="9_dnctrl"]
 [ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
 [ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
+[ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="11_tilei"]
 
 [sub_resource type="Gradient" id="Gradient_j22yb"]
 offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
@@ -67,8 +68,10 @@ y_sort_enabled = true
 
 [node name="BG" type="ColorRect" parent="." unique_id=1948980994]
 custom_minimum_size = Vector2(384, 216)
-offset_right = 40.0
-offset_bottom = 40.0
+offset_left = -237.0
+offset_top = -125.0
+offset_right = 651.0
+offset_bottom = 372.0
 mouse_filter = 2
 color = Color(0, 0, 0, 1)
 
@@ -86,7 +89,6 @@ metadata/altitude = 0
 
 [node name="Ground_Objs" type="TileMapLayer" parent="World/Ground" unique_id=1623305390]
 y_sort_enabled = true
-tile_map_data = PackedByteArray("AAD9/wAAAAADAAAAAAD9/wEAAAADAAAAAAD9/wMAAAACAAAAAAD9/wIAAAACAAAAAAD+/wMAAAABAAAAAAD9/wQAAAABAAAAAAD9////AAABAAAAAAD+/wAAAAAAAAEAAAD+/wEAAAAAAAEAAAD+/wIAAAAAAAEAAAD+/wQAAAAAAAEAAAD+////AAAAAAEAAAD//wMAAAAAAAEAAAAAAAQAAAABAAAAAAAAAAMAAAAAAAEAAAD//wQAAAAAAAEAAAD//wIAAAAAAAEAAAA=")
 tile_set = ExtResource("2_q4w1e")
 metadata/altitude = 0
 
@@ -115,6 +117,12 @@ tile_map_layers = [NodePath("../World/Ground"), NodePath("../World/Ground2")]
 script = ExtResource("5_s7fjt")
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
+
+[node name="TileInteractionController" type="Node" parent="." unique_id=1651484227 node_paths=PackedStringArray("pathfinder", "player", "world")]
+script = ExtResource("11_tilei")
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")
+world = NodePath("../World")
 
 [node name="TileDebugOverlay" type="Node2D" parent="." unique_id=306206731 node_paths=PackedStringArray("pathfinder", "debug_label")]
 script = ExtResource("6_tdovl")

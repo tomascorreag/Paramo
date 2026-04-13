@@ -21,6 +21,7 @@ const GROUP_NAME: StringName = &"ux_overlay"
 signal hovered_cell_changed(new_cell: Vector2i, old_cell: Vector2i)
 
 var hovered_cell: Vector2i = Pathfinder.NO_CELL
+var suspended: bool = false
 
 @export var reticle_fade_duration: float = 0.1
 
@@ -42,6 +43,14 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	if suspended:
+		if hovered_cell != Pathfinder.NO_CELL:
+			var old := hovered_cell
+			hovered_cell = Pathfinder.NO_CELL
+			hovered_cell_changed.emit(hovered_cell, old)
+			_update_reticle(old)
+		return
+
 	var cell := _resolve_hovered_cell()
 	if cell != hovered_cell:
 		var old := hovered_cell
