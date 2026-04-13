@@ -8,16 +8,74 @@
 [ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="6_tdovl"]
 [ext_resource type="Script" uid="uid://dj81k227gd1kx" path="res://scripts/systems/ux_overlay.gd" id="7_uxovr"]
 [ext_resource type="Texture2D" uid="uid://beexbf4y5e1j7" path="res://assets/sprites/UX/ISO_UX.png" id="8_isoux"]
+[ext_resource type="Script" uid="uid://b7tp23uig1lpt" path="res://scripts/systems/day_night_scene_controller.gd" id="9_dnctrl"]
+[ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
+[ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
+[ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="11_tilei"]
+
+[sub_resource type="Gradient" id="Gradient_j22yb"]
+offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
+colors = PackedColorArray(0.276, 0.2921999, 0.6, 1, 0.95, 0.57, 0.7663334, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.95, 0.59375, 0.475, 1, 0.276, 0.2921999, 0.6, 1)
+metadata/_snap_enabled = true
+metadata/_snap_count = 24
+
+[sub_resource type="Curve" id="Curve_2amr8"]
+_limits = [0.0, 2.0, 0.0, 1.0]
+_data = [Vector2(0.14, 0.8), 0.0, 0.0, 0, 0, Vector2(0.4972067, 1.0460021), 0.0, 0.0, 0, 0, Vector2(0.86, 0.8), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Curve" id="Curve_et33p"]
+_limits = [-42.0, 42.0, 0.0, 1.0]
+_data = [Vector2(0.15, 0), 0.0, 0.0, 0, 0, Vector2(0.32960892, 39.607887), -500.0, -500.0, 0, 0, Vector2(0.49162006, 0.47191238), 0.0, 0.0, 0, 0, Vector2(0.65, -42), -500.0, -500.0, 0, 0, Vector2(0.85, 0), 0.0, 0.0, 0, 0]
+point_count = 5
+
+[sub_resource type="Curve" id="Curve_e4mmd"]
+_data = [Vector2(0.2, 0), 0.0, 0.0, 0, 0, Vector2(0.5, 1), 0.0, 0.0, 0, 0, Vector2(0.8, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Curve" id="Curve_j22yb"]
+_limits = [-1.0, 1.0, 0.0, 1.0]
+_data = [Vector2(0.18, -0.75), 0.0, 0.0, 0, 0, Vector2(0.2681564, 0.21686745), 0.0, 0.0, 0, 0, Vector2(0.36033517, -0.0109529495), 0.0, 0.0, 0, 0, Vector2(0.5, 0.0032858849), 0.0, 0.0, 0, 0, Vector2(0.6843575, 0.0032858849), 0.0, 0.0, 0, 0, Vector2(0.7430167, 0.3023001), 0.0, 0.0, 0, 0, Vector2(0.82, -0.75), 0.0, 0.0, 0, 0]
+point_count = 7
+
+[sub_resource type="Curve" id="Curve_h8h76"]
+_data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Resource" id="Resource_h8h76"]
+script = ExtResource("10_j22yb")
+ambient_gradient = SubResource("Gradient_j22yb")
+temperature_curve = SubResource("Curve_j22yb")
+contrast_curve = SubResource("Curve_2amr8")
+vignette_strength_curve = SubResource("Curve_h8h76")
+shadow_opacity_curve = SubResource("Curve_e4mmd")
+shadow_length_curve = SubResource("Curve_et33p")
+metadata/_custom_type_script = "uid://dveykjelqtor6"
+
+[sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
+shader = ExtResource("10_ppshd")
+shader_parameter/color_temperature = 0.0
+shader_parameter/contrast = 1.0
+shader_parameter/saturation = 1.0
+shader_parameter/brightness = 0.0
+shader_parameter/vignette_strength = 0.0
+shader_parameter/vignette_radius = 0.5
+shader_parameter/tint_color = Color(1, 1, 1, 1)
+shader_parameter/tint_strength = 0.0
 
 [node name="TilesetTest" type="Node2D" unique_id=35083561]
 y_sort_enabled = true
 
 [node name="BG" type="ColorRect" parent="." unique_id=1948980994]
 custom_minimum_size = Vector2(384, 216)
-offset_right = 40.0
-offset_bottom = 40.0
+offset_left = -237.0
+offset_top = -125.0
+offset_right = 651.0
+offset_bottom = 372.0
 mouse_filter = 2
 color = Color(0, 0, 0, 1)
+
+[node name="AmbientModulate" type="CanvasModulate" parent="." unique_id=1454820378]
 
 [node name="World" type="Node2D" parent="." unique_id=1193948366]
 y_sort_enabled = true
@@ -31,7 +89,6 @@ metadata/altitude = 0
 
 [node name="Ground_Objs" type="TileMapLayer" parent="World/Ground" unique_id=1623305390]
 y_sort_enabled = true
-tile_map_data = PackedByteArray("AAD9/wAAAAADAAAAAAD9/wEAAAADAAAAAAD9/wMAAAACAAAAAAD9/wIAAAACAAAAAAD+/wMAAAABAAAAAAD9/wQAAAABAAAAAAD9////AAABAAAAAAD+/wAAAAAAAAEAAAD+/wEAAAAAAAEAAAD+/wIAAAAAAAEAAAD+/wQAAAAAAAEAAAD+////AAAAAAEAAAD//wMAAAAAAAEAAAAAAAQAAAABAAAAAAAAAAMAAAAAAAEAAAD//wQAAAAAAAEAAAD//wIAAAAAAAEAAAA=")
 tile_set = ExtResource("2_q4w1e")
 metadata/altitude = 0
 
@@ -46,7 +103,9 @@ metadata/altitude = 2
 [node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
 position = Vector2(-31, 79)
 
-[node name="DebugLabel" type="Label" parent="." unique_id=723082006]
+[node name="UILayer" type="CanvasLayer" parent="." unique_id=2008137477]
+
+[node name="DebugLabel" type="Label" parent="UILayer" unique_id=723082006]
 offset_right = 200.0
 offset_bottom = 23.0
 
@@ -59,10 +118,16 @@ script = ExtResource("5_s7fjt")
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
 
+[node name="TileInteractionController" type="Node" parent="." unique_id=1651484227 node_paths=PackedStringArray("pathfinder", "player", "world")]
+script = ExtResource("11_tilei")
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")
+world = NodePath("../World")
+
 [node name="TileDebugOverlay" type="Node2D" parent="." unique_id=306206731 node_paths=PackedStringArray("pathfinder", "debug_label")]
 script = ExtResource("6_tdovl")
 pathfinder = NodePath("../Pathfinder")
-debug_label = NodePath("../DebugLabel")
+debug_label = NodePath("../UILayer/DebugLabel")
 
 [node name="UXOverlay" type="Node2D" parent="." unique_id=816449398 node_paths=PackedStringArray("pathfinder")]
 z_index = 1
@@ -74,3 +139,21 @@ reticle_fade_duration = 0.2
 texture = ExtResource("8_isoux")
 region_enabled = true
 region_rect = Rect2(0, 0, 32, 16)
+
+[node name="DayNightController" type="Node" parent="." unique_id=2047375782 node_paths=PackedStringArray("canvas_modulate", "post_process_rect")]
+script = ExtResource("9_dnctrl")
+profile = SubResource("Resource_h8h76")
+canvas_modulate = NodePath("../AmbientModulate")
+post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
+
+[node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=500016460]
+layer = 100
+
+[node name="PostProcessRect" type="ColorRect" parent="PostProcessLayer" unique_id=571572121]
+material = SubResource("SubResource_pp_mat")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://qsbrys6j7563"
-path="res://.godot/imported/ISO_Plants.png-bc16d3d217ea300a4a9e44f600312a33.ctex"
+uid="uid://cmtf3axij6tps"
+path="res://.godot/imported/ISO_Plants.png-473e1b96a9b5f2f7bb705e633f0646b7.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/tilesets/ISO_Plants.png"
-dest_files=["res://.godot/imported/ISO_Plants.png-bc16d3d217ea300a4a9e44f600312a33.ctex"]
+source_file="res://assets/sprites/objects/ISO_Plants.png"
+dest_files=["res://.godot/imported/ISO_Plants.png-473e1b96a9b5f2f7bb705e633f0646b7.ctex"]
 
 [params]
 

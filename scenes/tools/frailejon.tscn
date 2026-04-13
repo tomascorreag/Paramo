@@ -1,0 +1,14 @@
+[gd_scene format=3 uid="uid://j1qr8tqv5f2o"]
+
+[ext_resource type="Texture2D" uid="uid://cmtf3axij6tps" path="res://assets/sprites/objects/ISO_Plants.png" id="1"]
+[ext_resource type="Script" uid="uid://cb1dpudg3qej4" path="res://scripts/tools/frailejon.gd" id="2"]
+
+[node name="Frailejon" type="Node2D" unique_id=449271788]
+script = ExtResource("2")
+growth_chance = 0.1
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=977112557]
+texture = ExtResource("1")
+offset = Vector2(0, -8)
+hframes = 4
+vframes = 8
