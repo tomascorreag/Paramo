@@ -50,7 +50,8 @@ void fragment() {
 
 	float ty = floor(tile_y * 32.0) / 32.0;
 	float snapped_mask = floor(wind_mask * 32.0) / 32.0;
-	float mask = step(ty, snapped_mask);
+	float mask = snapped_mask > 0.0 ? floor((1.0 - ty / snapped_mask) * 32.0) / 32.0 : 0.0;
+	mask = max(mask, 0.0);
 
 	vec2 offset = round((wind_strength * n1 + wind_strength_2 * n2) * mask) * TEXTURE_PIXEL_SIZE;
 

@@ -28,7 +28,7 @@ var suspended: bool = false
 @onready var _reticle: Sprite2D = $Reticle
 var _reticle_tween: Tween
 
-const _RETICLE_FPS: float = 4.0
+const _RETICLE_FPS: float = 8.0
 const _RETICLE_FRAME_SIZE := Vector2(32.0, 16.0)
 var _reticle_frame: int = 0
 var _reticle_frame_timer: float = 0.0
