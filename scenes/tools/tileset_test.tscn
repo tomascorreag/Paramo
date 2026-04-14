@@ -15,6 +15,11 @@
 [ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="12_dymf4"]
 [ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="13_4ycv7"]
 [ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="14_2amr8"]
+[ext_resource type="Material" path="res://resources/materials/water_still.tres" id="15_ws"]
+[ext_resource type="Material" path="res://resources/materials/water_flow_ne.tres" id="16_wne"]
+[ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="17_wse"]
+[ext_resource type="Material" uid="uid://c435ruakfvt7g" path="res://resources/materials/water_flow_sw.tres" id="18_wsw"]
+[ext_resource type="Material" path="res://resources/materials/water_flow_nw.tres" id="19_wnw"]
 
 [sub_resource type="Gradient" id="Gradient_j22yb"]
 offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
@@ -45,6 +50,11 @@ point_count = 7
 _data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
 point_count = 3
 
+[sub_resource type="Curve" id="Curve_gxunv"]
+_limits = [0.0, 2.0, 0.0, 1.0]
+_data = [Vector2(0.1, 0.75), 0.0, 0.0, 0, 0, Vector2(0.5, 1.5), 0.0, 0.0, 0, 0, Vector2(0.9, 0.75), 0.0, 0.0, 0, 0]
+point_count = 3
+
 [sub_resource type="Curve" id="Curve_dymf4"]
 _data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
 point_count = 4
@@ -56,6 +66,7 @@ temperature_curve = SubResource("Curve_j22yb")
 contrast_curve = SubResource("Curve_2amr8")
 vignette_strength_curve = SubResource("Curve_h8h76")
 wind_intensity_curve = SubResource("Curve_dymf4")
+water_intensity_curve = SubResource("Curve_gxunv")
 shadow_opacity_curve = SubResource("Curve_e4mmd")
 shadow_length_curve = SubResource("Curve_et33p")
 metadata/_custom_type_script = "uid://dveykjelqtor6"
@@ -91,13 +102,18 @@ position = Vector2(192, 80)
 
 [node name="Ground" type="TileMapLayer" parent="World" unique_id=1409094919]
 y_sort_enabled = true
-tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAD//wMAAAAAAAIAAAD+/wAAAAAAAAAAAAD+/wEAAAAAAAIAAAD+/wIAAAAAAAIAAAD+/wMAAAAAAAIAAAD+/wQAAAAAAAQAAAD//wQAAAAAAAQAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD/////AAAAAAAAAAD+////AAAAAAIAAAD9////AAAAAAQAAAD9/wAAAAAAAAQAAAD9/wEAAAAAAAQAAAD9/wIAAAAAAAQAAAD9/wMAAAAAAAQAAAD9/wQAAAAAAAQAAAD//wIAAAAAAAAAAAD//wEAAAAAAAYAAAD//wAAAAAAAAYAAAADAAAAAgAAAAAAAAADAAEAAgAAAAAAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAAAAAIAAAAAAAYAAAAAAAEAAgABAAIAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAAIAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAAAAAAAAgAAAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAAEAAMAAgAAAAAAAAAEAAQAAgAAAAAAAAABAAUAAAAAAAQAAAAAAAUAAAAAAAQAAAD//wUAAAAAAAQAAAD+/wUAAAAAAAQAAAD9/wUAAAAAAAQAAAD9/wYAAAAAAAQAAAD+/wYAAAAAAAQAAAD//wYAAAAAAAQAAAAAAAYAAAAAAAQAAAABAAYAAAAAAAQAAAABAAcAAAAAAAQAAAAAAAcAAAAAAAQAAAD+/wcAAAAAAAQAAAD9/wcAAAAAAAQAAAD//wcAAAAAAAQAAAACAAUAAAAAAAAAAAACAAYAAAAAAAAAAAACAAcAAAAAAAAAAAADAAcAAAAAAAAAAAAEAAcAAAAAAAAAAAAEAAYAAAAAAAAAAAAEAAUAAAAAAAAAAAADAAUAAAAAAAAAAAADAAYAAAAAAAAAAAA=")
+tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD9////AAAAAAQAAAD9/wAAAAAAAAQAAAD9/wEAAAAAAAQAAAD9/wIAAAAAAAQAAAD9/wMAAAAAAAQAAAD9/wQAAAAAAAQAAAADAAAAAgAAAAAAAAADAAEAAgAAAAAAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAAAAAIAAAAAAAYAAAAAAAEAAgABAAIAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAAIAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAAAAAAAAgAAAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAAEAAMAAgAAAAAAAAABAAUAAAAAAAQAAAAAAAUAAAAAAAQAAAD9/wUAAAAAAAQAAAD9/wYAAAAAAAQAAAAAAAYAAAAAAAQAAAABAAYAAAAAAAQAAAABAAcAAAAAAAQAAAAAAAcAAAAAAAQAAAD9/wcAAAAAAAQAAAACAAUAAAAAAAAAAAACAAYAAAAAAAAAAAACAAcAAAAAAAAAAAADAAcAAAAAAAAAAAAEAAcAAAAAAAAAAAAEAAYAAAAAAAAAAAAEAAUAAAAAAAAAAAADAAUAAAAAAAAAAAADAAYAAAAAAAAAAAAEAAQAAgAAAAAAAAD+////AwAAAAAAAAD+/wAAAwAAAAAAAAD+/wEAAwAAAAAAAAD+/wIAAwAAAAAAAAD+/wMAAwAAAAAAAAD+/wQAAwAAAAAAAAD+/wUAAwAAAAAAAAD+/wYAAwAAAAAAAAD+/wcAAwAAAAAAAAD//wcAAwABAAAAAAD//wYAAwABAAAAAAD//wUAAwABAAAAAAD//wQAAwABAAAAAAD//wMAAwABAAAAAAD//wIAAwABAAAAAAD//wEAAwABAAAAAAD//wAAAwABAAAAAAD/////AwABAAAAAAA=")
 tile_set = ExtResource("2_l16oj")
 metadata/altitude = 0
 
 [node name="Ground_Objs" type="TileMapLayer" parent="World/Ground" unique_id=1623305390]
 y_sort_enabled = true
 tile_set = ExtResource("2_q4w1e")
+metadata/altitude = 0
+
+[node name="Water" type="TileMapLayer" parent="World" unique_id=250523676]
+y_sort_enabled = true
+tile_set = ExtResource("2_l16oj")
 metadata/altitude = 0
 
 [node name="Ground2" type="TileMapLayer" parent="World" unique_id=1597291577]
@@ -154,6 +170,7 @@ profile = SubResource("Resource_h8h76")
 canvas_modulate = NodePath("../AmbientModulate")
 post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
 wind_materials = Array[ShaderMaterial]([ExtResource("12_dymf4"), ExtResource("13_4ycv7"), ExtResource("14_2amr8")])
+water_materials = Array[ShaderMaterial]([ExtResource("15_ws"), ExtResource("16_wne"), ExtResource("17_wse"), ExtResource("18_wsw"), ExtResource("19_wnw")])
 
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=500016460]
 layer = 100

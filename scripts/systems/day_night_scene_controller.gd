@@ -19,6 +19,9 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 @export_group("Wind")
 @export var wind_materials: Array[ShaderMaterial]
 
+@export_group("Water")
+@export var water_materials: Array[ShaderMaterial]
+
 @export_group("Overlay")
 @export var overlay_profile: DayNightProfile
 @export var overlay_weight: float = 0.0
@@ -79,6 +82,12 @@ func _process(_delta: float) -> void:
 		var wind_val: float = profile.wind_intensity_curve.sample(t)
 		for mat: ShaderMaterial in wind_materials:
 			mat.set_shader_parameter(&"wind_intensity", wind_val)
+
+	# --- Water ---
+	if profile.water_intensity_curve and not water_materials.is_empty():
+		var water_val: float = profile.water_intensity_curve.sample(t)
+		for mat: ShaderMaterial in water_materials:
+			mat.set_shader_parameter(&"water_intensity", water_val)
 
 	# --- All shadows ---
 	var shadow_nodes := get_tree().get_nodes_in_group(&"shadow")

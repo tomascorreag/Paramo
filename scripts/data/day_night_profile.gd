@@ -34,6 +34,12 @@ extends Resource
 ## Global wind intensity multiplier over time. 0 = still, 1 = full per-material wind.
 @export var wind_intensity_curve: Curve
 
+# --- Water ---
+
+@export_group("Water")
+## Global water intensity multiplier over time. 0 = calm, 1 = full animation.
+@export var water_intensity_curve: Curve
+
 # --- Player visuals ---
 
 @export_group("Player")
