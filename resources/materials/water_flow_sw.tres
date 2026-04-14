@@ -6,10 +6,10 @@
 shader = ExtResource("1")
 shader_parameter/flow_direction = Vector2(1, -0.5)
 shader_parameter/flow_speed = 0.800000038
-shader_parameter/base_alpha = 0.7950000377625
+shader_parameter/base_alpha = 0.70000003325
 shader_parameter/wave_scale = Vector2(0.05, 0.1)
 shader_parameter/wave_scale_2 = Vector2(0.2, 0.4)
-shader_parameter/ripple_strength = 0.2230000105925
+shader_parameter/ripple_strength = 0.250000011875
 shader_parameter/vertical_strength = 4.00000019
 shader_parameter/highlight_strength = 1.0
 shader_parameter/water_intensity = 1.0000000475

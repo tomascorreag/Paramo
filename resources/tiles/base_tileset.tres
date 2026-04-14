@@ -10,6 +10,8 @@
 [ext_resource type="Material" path="res://resources/materials/water_flow_nw.tres" id="4_wnw"]
 [ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="4_wse"]
 [ext_resource type="Material" uid="uid://c435ruakfvt7g" path="res://resources/materials/water_flow_sw.tres" id="4_wsw"]
+[ext_resource type="Material" uid="uid://cngyo1chub5q8" path="res://resources/materials/water_still.tres" id="6_7two8"]
+[ext_resource type="Material" uid="uid://bfndtsjeo30n8" path="res://resources/materials/waterfall.tres" id="11_r4tim"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_tbfl4"]
 texture = ExtResource("1_ns3h2")
@@ -175,14 +177,13 @@ use_texture_padding = false
 0:2/0/custom_data_0 = "FULL_CUBE"
 0:4/size_in_atlas = Vector2i(1, 2)
 0:4/0 = 0
-0:4/0/texture_origin = Vector2i(0, -8)
+0:4/0/texture_origin = Vector2i(0, 8)
 0:4/0/y_sort_origin = -16
 0:4/0/custom_data_0 = "FULL_CUBE"
 0:6/size_in_atlas = Vector2i(1, 2)
 0:6/0 = 0
-0:6/0/texture_origin = Vector2i(0, -8)
+0:6/0/texture_origin = Vector2i(0, 8)
 0:6/0/y_sort_origin = -16
-0:6/0/custom_data_0 = "FULL_CUBE"
 1:0/size_in_atlas = Vector2i(1, 2)
 1:0/0 = 0
 1:0/0/texture_origin = Vector2i(0, 8)
@@ -193,8 +194,10 @@ use_texture_padding = false
 1:2/0/texture_origin = Vector2i(0, -8)
 1:2/0/y_sort_origin = -16
 1:2/0/custom_data_0 = "FLAT"
+1:4/size_in_atlas = Vector2i(1, 2)
 1:4/0 = 0
-1:5/0 = 0
+1:4/0/texture_origin = Vector2i(0, 8)
+1:4/0/y_sort_origin = -32
 2:0/size_in_atlas = Vector2i(1, 2)
 2:0/0 = 0
 2:0/0/texture_origin = Vector2i(0, 8)
@@ -312,7 +315,7 @@ use_texture_padding = false
 0:0/next_alternative_id = 5
 0:0/0 = 0
 0:0/0/texture_origin = Vector2i(0, -8)
-0:0/0/material = ExtResource("4_wsw")
+0:0/0/material = ExtResource("6_7two8")
 0:0/0/y_sort_origin = -18
 0:0/0/custom_data_0 = "WATER_FLAT"
 0:0/0/custom_data_1 = 3
@@ -345,6 +348,58 @@ use_texture_padding = false
 1:0/0/texture_origin = Vector2i(0, -8)
 1:0/0/material = ExtResource("4_wsw")
 1:0/0/y_sort_origin = -18
+2:0/size_in_atlas = Vector2i(1, 2)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, -8)
+2:0/0/material = ExtResource("4_wsw")
+3:0/size_in_atlas = Vector2i(1, 2)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, -8)
+3:0/0/material = ExtResource("4_wse")
+4:0/size_in_atlas = Vector2i(1, 2)
+4:0/0 = 0
+4:0/0/texture_origin = Vector2i(0, -8)
+4:0/0/material = ExtResource("4_wse")
+0:2/size_in_atlas = Vector2i(1, 2)
+0:2/0 = 0
+0:2/0/texture_origin = Vector2i(0, -8)
+0:2/0/material = ExtResource("6_7two8")
+1:2/size_in_atlas = Vector2i(1, 2)
+1:2/0 = 0
+1:2/0/texture_origin = Vector2i(0, -8)
+1:2/0/material = ExtResource("6_7two8")
+2:2/size_in_atlas = Vector2i(1, 2)
+2:2/0 = 0
+2:2/0/texture_origin = Vector2i(0, -8)
+2:2/0/material = ExtResource("6_7two8")
+3:2/size_in_atlas = Vector2i(1, 2)
+3:2/0 = 0
+3:2/0/texture_origin = Vector2i(0, -8)
+3:2/0/material = ExtResource("6_7two8")
+4:2/size_in_atlas = Vector2i(1, 2)
+4:2/0 = 0
+4:2/0/texture_origin = Vector2i(0, -8)
+4:2/0/material = ExtResource("6_7two8")
+0:4/size_in_atlas = Vector2i(1, 2)
+0:4/0 = 0
+0:4/0/texture_origin = Vector2i(0, -8)
+0:4/0/material = ExtResource("11_r4tim")
+0:4/0/y_sort_origin = 16
+1:4/size_in_atlas = Vector2i(1, 2)
+1:4/0 = 0
+1:4/0/texture_origin = Vector2i(0, -8)
+1:4/0/material = ExtResource("11_r4tim")
+1:4/0/y_sort_origin = 16
+2:4/size_in_atlas = Vector2i(1, 2)
+2:4/0 = 0
+2:4/0/texture_origin = Vector2i(0, -8)
+2:4/0/material = ExtResource("11_r4tim")
+2:4/0/y_sort_origin = 16
+3:4/size_in_atlas = Vector2i(1, 2)
+3:4/0 = 0
+3:4/0/texture_origin = Vector2i(0, -8)
+3:4/0/material = ExtResource("11_r4tim")
+3:4/0/y_sort_origin = 16
 
 [resource]
 tile_shape = 1
