@@ -50,6 +50,10 @@ _limits = [-1.0, 2.0, 0.0, 1.0]
 _data = [Vector2(0, 0.5), 0.0, 0.0, 0, 0, Vector2(0.28, 0.1), 0.0, 0.0, 0, 0, Vector2(0.5, 0), 0.0, 0.0, 0, 0, Vector2(0.75, 0.1), 0.0, 0.0, 0, 0, Vector2(1, 0.5), 0.0, 0.0, 0, 0]
 point_count = 5
 
+[sub_resource type="Curve" id="Curve_wind1"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.25, 0.4), 0.0, 0.0, 0, 0, Vector2(0.45, 1), 0.0, 0.0, 0, 0, Vector2(0.65, 0.8), 0.0, 0.0, 0, 0, Vector2(0.8, 0.3), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 6
+
 [resource]
 script = ExtResource("1_2fq25")
 ambient_gradient = SubResource("Gradient_s28fs")
@@ -60,5 +64,6 @@ brightness_curve = SubResource("Curve_epjtt")
 vignette_strength_curve = SubResource("Curve_trmls")
 tint_gradient = SubResource("Gradient_6460r")
 tint_strength_curve = SubResource("Curve_hrghg")
+wind_intensity_curve = SubResource("Curve_wind1")
 shadow_opacity_curve = SubResource("Curve_kvn67")
 shadow_length_curve = SubResource("Curve_r0inv")

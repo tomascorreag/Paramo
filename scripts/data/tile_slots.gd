@@ -144,3 +144,7 @@ const EDGE_NW: StringName           = &"EDGE_NW"
 const EDGE_NE: StringName           = &"EDGE_NE"
 const EDGE_SE: StringName           = &"EDGE_SE"
 const EDGE_SW: StringName           = &"EDGE_SW"
+
+
+# --- Water (flat overlay tiles with flow direction via alternatives) --------
+const WATER_FLAT: StringName        = &"WATER_FLAT"

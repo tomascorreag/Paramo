@@ -28,7 +28,7 @@ var suspended: bool = false
 @onready var _reticle: Sprite2D = $Reticle
 var _reticle_tween: Tween
 
-const _RETICLE_FPS: float = 4.0
+const _RETICLE_FPS: float = 8.0
 const _RETICLE_FRAME_SIZE := Vector2(32.0, 16.0)
 var _reticle_frame: int = 0
 var _reticle_frame_timer: float = 0.0
@@ -98,9 +98,9 @@ func _animate_reticle(delta: float) -> void:
 	var interval := 1.0 / _RETICLE_FPS
 	if _reticle_frame_timer >= interval:
 		_reticle_frame_timer -= interval
-		_reticle_frame = 1 - _reticle_frame
+		_reticle_frame = (_reticle_frame + 1) % 6
 		_reticle.region_rect = Rect2(
-			_reticle_frame * _RETICLE_FRAME_SIZE.x, 0.0,
+			_reticle_frame * _RETICLE_FRAME_SIZE.x, _RETICLE_FRAME_SIZE.y,
 			_RETICLE_FRAME_SIZE.x, _RETICLE_FRAME_SIZE.y
 		)
 

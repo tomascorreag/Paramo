@@ -185,10 +185,6 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 	if _grid == null:
 		return NO_CELL
 
-	var ref := _reference_layer()
-	if ref == null:
-		return NO_CELL
-
 	for alt in _grid.altitudes_desc():
 		for i in range(tile_map_layers.size() - 1, -1, -1):
 			var layer: TileMapLayer = tile_map_layers[i]
@@ -197,10 +193,14 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 			if _grid.layer_altitude(layer) != alt:
 				continue
 			var local := layer.to_local(global_pos)
-			# How much of the altitude lift is already baked into the
-			# layer's position (undone by to_local)?
-			var layer_y_offset := ref.global_position.y - layer.global_position.y
-			var net_shift := float(alt) * HALF_STEP_PX - layer_y_offset
+			# Each layer is expected to be visually lifted to match its altitude
+			# via layer.position.y = -alt * HALF_STEP_PX. When that holds,
+			# net_shift resolves to 0 and clicks land on the correct cell. If a
+			# layer instead bakes altitude into tile texture_origin with
+			# position.y = 0, net_shift = alt * HALF_STEP_PX still compensates.
+			# Independent of any "reference" layer, so it works regardless of
+			# which altitudes exist or what order layers are wired in.
+			var net_shift := float(alt) * HALF_STEP_PX + layer.position.y
 			var shifted := local + Vector2(0.0, net_shift) - VISUAL_SURFACE_OFFSET
 			var cell := layer.local_to_map(shifted)
 			if not _grid.is_walkable(cell):
@@ -215,18 +215,27 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 # reference grid. Altitude is always applied separately by the caller — this
 # function returns the altitude-0 world position of the cell origin, BEFORE
 # VISUAL_SURFACE_OFFSET is added.
+#
+# The ref layer's own visual altitude lift (layer.position.y = -alt * HALF_STEP_PX)
+# is stripped out so the result stays in the altitude-0 frame regardless of
+# which layer happens to be the reference.
 func cell_to_world(cell: Vector2i) -> Vector2:
 	var ref := _reference_layer()
 	if ref == null:
 		return Vector2.ZERO
-	return ref.to_global(ref.map_to_local(cell))
+	var p := ref.to_global(ref.map_to_local(cell))
+	p.y -= ref.position.y
+	return p
 
 
 func world_to_cell(global_pos: Vector2) -> Vector2i:
 	var ref := _reference_layer()
 	if ref == null:
 		return NO_CELL
-	return ref.local_to_map(ref.to_local(global_pos))
+	# Inverse of cell_to_world: the input is in the altitude-0 frame, so add
+	# back the ref layer's lift before converting to its local cell grid.
+	var adjusted := Vector2(global_pos.x, global_pos.y + ref.position.y)
+	return ref.local_to_map(ref.to_local(adjusted))
 
 
 # ----------------------------------------------------------------------------

@@ -12,6 +12,14 @@
 [ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
 [ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
 [ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="11_tilei"]
+[ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="12_dymf4"]
+[ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="13_4ycv7"]
+[ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="14_2amr8"]
+[ext_resource type="Material" uid="uid://cngyo1chub5q8" path="res://resources/materials/water_still.tres" id="15_ws"]
+[ext_resource type="Material" path="res://resources/materials/water_flow_ne.tres" id="16_wne"]
+[ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="17_wse"]
+[ext_resource type="Material" uid="uid://c435ruakfvt7g" path="res://resources/materials/water_flow_sw.tres" id="18_wsw"]
+[ext_resource type="Material" path="res://resources/materials/water_flow_nw.tres" id="19_wnw"]
 
 [sub_resource type="Gradient" id="Gradient_j22yb"]
 offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
@@ -42,12 +50,23 @@ point_count = 7
 _data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
 point_count = 3
 
+[sub_resource type="Curve" id="Curve_gxunv"]
+_limits = [0.0, 2.0, 0.0, 1.0]
+_data = [Vector2(0.1, 0.75), 0.0, 0.0, 0, 0, Vector2(0.5, 1.5), 0.0, 0.0, 0, 0, Vector2(0.9, 0.75), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Curve" id="Curve_dymf4"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 4
+
 [sub_resource type="Resource" id="Resource_h8h76"]
 script = ExtResource("10_j22yb")
 ambient_gradient = SubResource("Gradient_j22yb")
 temperature_curve = SubResource("Curve_j22yb")
 contrast_curve = SubResource("Curve_2amr8")
 vignette_strength_curve = SubResource("Curve_h8h76")
+wind_intensity_curve = SubResource("Curve_dymf4")
+water_intensity_curve = SubResource("Curve_gxunv")
 shadow_opacity_curve = SubResource("Curve_e4mmd")
 shadow_length_curve = SubResource("Curve_et33p")
 metadata/_custom_type_script = "uid://dveykjelqtor6"
@@ -81,24 +100,45 @@ color = Color(0, 0, 0, 1)
 y_sort_enabled = true
 position = Vector2(192, 80)
 
-[node name="Ground" type="TileMapLayer" parent="World" unique_id=1409094919]
+[node name="Ground0" type="TileMapLayer" parent="World" unique_id=283160021]
 y_sort_enabled = true
-tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAD//wMAAAAAAAIAAAD+/wAAAAAAAAAAAAD+/wEAAAAAAAIAAAD+/wIAAAAAAAIAAAD+/wMAAAAAAAIAAAD+/wQAAAAAAAQAAAD//wQAAAAAAAQAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD/////AAAAAAAAAAD+////AAAAAAIAAAD9////AAAAAAQAAAD9/wAAAAAAAAQAAAD9/wEAAAAAAAQAAAD9/wIAAAAAAAQAAAD9/wMAAAAAAAQAAAD9/wQAAAAAAAQAAAD//wIAAAAAAAAAAAD//wEAAAAAAAYAAAD//wAAAAAAAAYAAAADAAAAAgAAAAAAAAADAAEAAgAAAAAAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAAAAAIAAAAAAAYAAAAAAAEAAgABAAIAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAAIAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAAAAAAAAgAAAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAAEAAMAAgAAAAAAAAAEAAQAAgAAAAAAAAABAAUAAAAAAAQAAAAAAAUAAAAAAAQAAAD//wUAAAAAAAQAAAD+/wUAAAAAAAQAAAD9/wUAAAAAAAQAAAD9/wYAAAAAAAQAAAD+/wYAAAAAAAQAAAD//wYAAAAAAAQAAAAAAAYAAAAAAAQAAAABAAYAAAAAAAQAAAABAAcAAAAAAAQAAAAAAAcAAAAAAAQAAAD+/wcAAAAAAAQAAAD9/wcAAAAAAAQAAAD//wcAAAAAAAQAAAACAAUAAAAAAAAAAAACAAYAAAAAAAAAAAACAAcAAAAAAAAAAAADAAcAAAAAAAAAAAAEAAcAAAAAAAAAAAAEAAYAAAAAAAAAAAAEAAUAAAAAAAAAAAADAAUAAAAAAAAAAAADAAYAAAAAAAAAAAA=")
+position = Vector2(0, 16)
+tile_map_data = PackedByteArray("AAACAP7/AAAAAAAAAAADAP7/AAAAAAAAAAD+/wcAAgABAAQAAAD+/wYAAgABAAQAAAD+/wUAAgABAAQAAAD+/wQAAgABAAQAAAD+/wMAAgABAAQAAAD+/wIAAgABAAQAAAD+/wEAAgABAAQAAAD+/wAAAgABAAQAAAD+////AgABAAQAAAD/////AgABAAQAAAD//wAAAgABAAQAAAD//wEAAgABAAQAAAD//wIAAgABAAQAAAD//wMAAgABAAQAAAD//wQAAgABAAQAAAD//wUAAgABAAQAAAD//wYAAgABAAQAAAD//wcAAgABAAQAAAAFAAQAAgACAAAAAAAFAAMAAgACAAAAAAAGAAUAAgAAAAIAAAAHAAUAAgAAAAIAAAAHAAQAAgAAAAIAAAAGAAQAAgAAAAIAAAAGAAMAAgAAAAIAAAAGAAIAAgAAAAIAAAAHAAIAAgAAAAIAAAAHAAMAAgAAAAIAAAAFAAIAAgAAAAYAAAAFAAEAAgAAAAYAAAAFAAAAAgAAAAYAAAAFAP//AgAAAAYAAAAFAP7/AgAAAAYAAAAGAAYAAgAAAAYAAAAHAAYAAgAAAAYAAAAGAAcAAgAAAAYAAAAHAAcAAgAAAAYAAAAGAAEAAgAAAAYAAAAHAAEAAgAAAAYAAAAHAAAAAgAAAAYAAAAHAP//AgAAAAYAAAAHAP7/AgAAAAYAAAAGAAAAAgAAAAYAAAAGAP//AgAAAAYAAAAGAP7/AgAAAAYAAAD+//7/AgABAAQAAAD///7/AgABAAQAAAA=")
+tile_set = ExtResource("2_l16oj")
+y_sort_origin = -16
+metadata/altitude = -2
+
+[node name="Ground1" type="TileMapLayer" parent="World" unique_id=1409094919]
+y_sort_enabled = true
+tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAD9////AAAAAAQAAAD9/wAAAAAAAAQAAAD9/wEAAAAAAAQAAAD9/wIAAAAAAAQAAAD9/wMAAAAAAAQAAAD9/wQAAAAAAAQAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAAAAAIAAAAAAAYAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAABAAUAAAAAAAQAAAAAAAUAAAAAAAQAAAD9/wUAAAAAAAQAAAD9/wYAAAAAAAQAAAAAAAYAAAAAAAQAAAABAAYAAAAAAAQAAAABAAcAAAAAAAQAAAAAAAcAAAAAAAQAAAD9/wcAAAAAAAQAAAACAAUAAAAAAAAAAAACAAYAAAAAAAAAAAACAAcAAAAAAAAAAAADAAcAAAAAAAAAAAAEAAcAAAAAAAAAAAAEAAYAAAAAAAAAAAAEAAUAAAAAAAAAAAADAAUAAAAAAAAAAAADAAYAAAAAAAAAAAAFAAUAAgAAAAAAAAAFAAYAAgAAAAAAAAAFAAcAAAAAAAYAAAACAAIAAgAAAAIAAAADAAEAAgAAAAIAAAAEAAMAAgAAAAIAAAAEAAQAAgABAAIAAAAAAAAAAgABAAIAAAAAAAEAAgAAAAIAAAADAAAAAgABAAIAAAD+/wcAAwABAAAAAAD+/wYAAwABAAAAAAD+/wUAAwABAAAAAAD+/wQAAwABAAAAAAD+/wMAAwABAAAAAAD+/wIAAwABAAAAAAD+/wEAAwABAAAAAAD+/wAAAwABAAAAAAD//wcAAwACAAAAAAD//wYAAwACAAAAAAD//wUAAwACAAAAAAD//wQAAwACAAAAAAD//wMAAwACAAAAAAD//wIAAwACAAAAAAD//wEAAwACAAAAAAD//wAAAwACAAAAAAD/////AwACAAAAAAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAD+////AwABAAAAAAAGAP7/AgAAAAQAAAAGAP3/AgAAAAQAAAAHAP3/AgAAAAQAAAAHAPz/AgAAAAQAAAAGAPz/AgAAAAQAAAA=")
 tile_set = ExtResource("2_l16oj")
 metadata/altitude = 0
 
-[node name="Ground_Objs" type="TileMapLayer" parent="World/Ground" unique_id=1623305390]
+[node name="Ground_Objs" type="TileMapLayer" parent="World/Ground1" unique_id=1623305390]
 y_sort_enabled = true
 tile_set = ExtResource("2_q4w1e")
+metadata/altitude = 0
+
+[node name="Water" type="TileMapLayer" parent="World" unique_id=250523676]
+y_sort_enabled = true
+tile_set = ExtResource("2_l16oj")
 metadata/altitude = 0
 
 [node name="Ground2" type="TileMapLayer" parent="World" unique_id=1597291577]
 y_sort_enabled = true
 position = Vector2(0, -16)
-tile_map_data = PackedByteArray("AAACAP7/AAAAAAAAAAADAP7/AAAAAAAAAAAEAP7/AAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAFAAIAAAAAAAAAAAA=")
+tile_map_data = PackedByteArray("AAAEAP7/AAAAAAAAAAAFAAAAAAAAAAAAAAD/////AwABAAQAAAD+////AwABAAQAAAD8//3/AwADAAQAAAD9//3/AwADAAQAAAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAABAP3/AgACAAAAAAABAPz/AgACAAAAAAACAP3/AgAAAAAAAAAFAP7/AAAAAAYAAAAFAP//AAAAAAYAAAAFAAEAAAAAAAIAAAAFAAIAAAAAAAQAAAAEAPz/AAAAAAQAAAACAPz/AAAAAAYAAAADAPz/AAAAAAIAAAAFAPz/AAAAAAAAAAADAP3/AAAAAAYAAAAEAP3/AAAAAAIAAAAFAP3/AAAAAAAAAAADAP7/AAAAAAYAAAACAP7/AgAAAAIAAAA=")
 tile_set = ExtResource("2_l16oj")
 y_sort_origin = 16
 metadata/altitude = 2
+
+[node name="Ground3" type="TileMapLayer" parent="World" unique_id=942670600]
+y_sort_enabled = true
+position = Vector2(0, -32)
+tile_map_data = PackedByteArray("AAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAD9//3/AwABAAAAAAD+//3/AwACAAAAAAD+////AwACAAQAAAD/////AwACAAQAAAAAAPz/AgAAAAAAAAAAAP3/AgAAAAAAAAD///z/AgAAAAAAAAD9//z/AwABAAAAAAD+//z/AwACAAAAAAA=")
+tile_set = ExtResource("2_l16oj")
+y_sort_origin = 32
+metadata/altitude = 4
 
 [node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
 position = Vector2(-31, 79)
@@ -111,7 +151,7 @@ offset_bottom = 23.0
 
 [node name="Pathfinder" type="Node" parent="." unique_id=190879584 node_paths=PackedStringArray("tile_map_layers")]
 script = ExtResource("4_osssn")
-tile_map_layers = [NodePath("../World/Ground"), NodePath("../World/Ground2")]
+tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3")]
 
 [node name="ClickToMoveController" type="Node" parent="." unique_id=680876284 node_paths=PackedStringArray("pathfinder", "player")]
 script = ExtResource("5_s7fjt")
@@ -138,13 +178,15 @@ reticle_fade_duration = 0.2
 [node name="Reticle" type="Sprite2D" parent="UXOverlay" unique_id=1803161632]
 texture = ExtResource("8_isoux")
 region_enabled = true
-region_rect = Rect2(0, 0, 32, 16)
+region_rect = Rect2(0, 16, 32, 16)
 
 [node name="DayNightController" type="Node" parent="." unique_id=2047375782 node_paths=PackedStringArray("canvas_modulate", "post_process_rect")]
 script = ExtResource("9_dnctrl")
 profile = SubResource("Resource_h8h76")
 canvas_modulate = NodePath("../AmbientModulate")
 post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
+wind_materials = Array[ShaderMaterial]([ExtResource("12_dymf4"), ExtResource("13_4ycv7"), ExtResource("14_2amr8")])
+water_materials = Array[ShaderMaterial]([ExtResource("15_ws"), ExtResource("16_wne"), ExtResource("17_wse"), ExtResource("18_wsw"), ExtResource("19_wnw")])
 
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=500016460]
 layer = 100
