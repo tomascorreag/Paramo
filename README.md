@@ -1,6 +1,6 @@
 # Páramo
 
-A tower defense / environmental strategy game built in **Godot 4.6** with GDScript.
+An environmental strategy game built in **Godot 4.6** with GDScript.
 
 <img src="assets/screenshots/Screenshot%202026-04-16.png" alt="Current build" width="600">
 
