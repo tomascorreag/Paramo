@@ -2,7 +2,7 @@
 
 A tower defense / environmental strategy game built in **Godot 4.6** with GDScript.
 
-![Current build](assets/screenshots/Screenshot%202026-04-16.png)
+<img src="assets/screenshots/Screenshot%202026-04-16.png" alt="Current build" width="600">
 
 ## Premise
 
