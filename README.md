@@ -8,7 +8,7 @@ An environmental strategy game built in **Godot 4.6** with GDScript.
 
 You are a field coordinator protecting a Colombian **páramo** — a high-altitude Andean ecosystem that functions as a natural water factory. Threats climb the mountain from below: miners, tourists, cattle, invasive species. Environmental hazards strike from all directions: drought, fire, erosion, climate shift.
 
-The paramo operates on geological time. Humans destroy on industrial time. Your job is not to win — it's to endure.
+The páramo operates on geological time. Humans destroy on industrial time. Your job is not to win — it's to endure.
 
 ## Gameplay (target)
 
