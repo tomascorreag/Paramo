@@ -2,6 +2,8 @@
 
 A tower defense / environmental strategy game built in **Godot 4.6** with GDScript.
 
+![Current build](assets/screenshots/Screenshot%202026-04-16.png)
+
 ## Premise
 
 You are a field coordinator protecting a Colombian **páramo** — a high-altitude Andean ecosystem that functions as a natural water factory. Threats climb the mountain from below: miners, tourists, cattle, invasive species. Environmental hazards strike from all directions: drought, fire, erosion, climate shift.
