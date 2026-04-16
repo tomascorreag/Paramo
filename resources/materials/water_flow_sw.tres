@@ -4,8 +4,8 @@
 
 [resource]
 shader = ExtResource("1")
-shader_parameter/flow_direction = Vector2(1, -0.5)
-shader_parameter/flow_speed = 0.800000038
+shader_parameter/flow_direction = Vector2(1, -0.75)
+shader_parameter/flow_speed = 0.670000031825
 shader_parameter/base_alpha = 0.70000003325
 shader_parameter/wave_scale = Vector2(0.05, 0.1)
 shader_parameter/wave_scale_2 = Vector2(0.2, 0.4)

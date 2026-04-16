@@ -141,7 +141,7 @@ y_sort_origin = 32
 metadata/altitude = 4
 
 [node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
-position = Vector2(-31, 79)
+position = Vector2(32.99, -2.015)
 
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=2008137477]
 

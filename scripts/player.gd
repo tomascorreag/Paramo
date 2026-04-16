@@ -20,22 +20,27 @@ extends CharacterBody2D
 # ============================================================================
 
 
-const FRAME_SW: int = 0
-const FRAME_SE: int = 1
-const FRAME_NE: int = 2
-const FRAME_NW: int = 3
+const FACING_SW: int = 0
+const FACING_SE: int = 1
+const FACING_NE: int = 2
+const FACING_NW: int = 3
 
-# Grid-axis step direction -> sprite frame. Keys cover the 4 legal path
+# Sprite sheet layout: 6 walk frames per direction, laid out contiguously.
+# Frame 0 of each block is the neutral/planted pose used when idle.
+const WALK_FRAMES_PER_DIR: int = 6
+const WALK_FPS: float = 8.0
+
+# Grid-axis step direction -> facing index. Keys cover the 4 legal path
 # transitions. Any other direction is a bug in the pathfinder.
-const DIR_TO_FRAME: Dictionary = {
-	Vector2i( 0,  1): FRAME_SW,  # step toward SW (down-left on screen)
-	Vector2i( 1,  0): FRAME_SE,  # step toward SE (down-right on screen)
-	Vector2i( 0, -1): FRAME_NE,  # step toward NE (up-right on screen)
-	Vector2i(-1,  0): FRAME_NW,  # step toward NW (up-left on screen)
+const DIR_TO_FACING: Dictionary = {
+	Vector2i( 0,  1): FACING_SW,  # step toward SW (down-left on screen)
+	Vector2i( 1,  0): FACING_SE,  # step toward SE (down-right on screen)
+	Vector2i( 0, -1): FACING_NE,  # step toward NE (up-right on screen)
+	Vector2i(-1,  0): FACING_NW,  # step toward NW (up-left on screen)
 }
 
 
-@export var step_duration: float = 0.3
+@export var step_duration: float = 0.45
 @export var debug_logging: bool = false
 
 @export_group("Lantern")
@@ -58,6 +63,15 @@ var _pathfinder: Pathfinder
 var _time_manager: Node  # TimeManager autoload
 
 var current_cell: Vector2i = Vector2i.ZERO
+
+# Current facing (0..3). The sprite frame is _facing * WALK_FRAMES_PER_DIR +
+# walk_frame. Shadow uses a 4-frame base sheet, so its frame == _facing.
+var _facing: int = FACING_SE
+
+# Continuous walk-cycle clock. Advances while moving, resets when idle. Keeps
+# the cycle at WALK_FPS regardless of step_duration, so cadence stays natural
+# even when steps are faster or slower than one cycle.
+var _walk_time: float = 0.0
 
 # Step state. _stepping == true iff we're mid-lerp between two cells.
 var _stepping: bool = false
@@ -142,6 +156,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if _stepping:
+		_walk_time += delta
 		_step_t += delta / step_duration
 		if _step_t >= 1.0:
 			_finish_step()
@@ -151,6 +166,10 @@ func _physics_process(delta: float) -> void:
 
 	if not _path.is_empty():
 		_begin_next_step()
+	elif _walk_time != 0.0:
+		# Fully idle: snap back to the planted-foot pose.
+		_walk_time = 0.0
+		_sprite.frame = _facing * WALK_FRAMES_PER_DIR
 
 
 # ----------------------------------------------------------------------------
@@ -192,6 +211,9 @@ func _finish_step() -> void:
 	_stepping = false
 	_altitude = _step_to_alt
 	_apply_position(_step_to_cell, _altitude)
+	# Intentionally don't reset sprite frame here — the walk cycle continues
+	# across step boundaries. Idle reset happens in _physics_process when the
+	# path is empty.
 
 
 func _apply_step_interp(t: float) -> void:
@@ -207,6 +229,9 @@ func _apply_step_interp(t: float) -> void:
 	global_position = Vector2(pos.x, snap_y) + Pathfinder.VISUAL_SURFACE_OFFSET + Vector2(0.0, _SORT_OFFSET)
 	# Compensate the Y snap on sprite/camera so movement looks smooth.
 	_apply_visual_lift(alt, pos.y - snap_y)
+	# Walk cycle runs at WALK_FPS independent of step_duration.
+	var walk_frame: int = int(_walk_time * WALK_FPS) % WALK_FRAMES_PER_DIR
+	_sprite.frame = _facing * WALK_FRAMES_PER_DIR + walk_frame
 
 
 func _apply_position(cell: Vector2i, alt: float) -> void:
@@ -258,11 +283,11 @@ func _update_lantern() -> void:
 
 
 func _set_facing(dir: Vector2i) -> void:
-	if not DIR_TO_FRAME.has(dir):
+	if not DIR_TO_FACING.has(dir):
 		return
-	var f: int = DIR_TO_FRAME[dir]
-	_sprite.frame = f
-	_shadow.frame = f
+	_facing = DIR_TO_FACING[dir]
+	_sprite.frame = _facing * WALK_FRAMES_PER_DIR
+	_shadow.frame = _facing
 
 
 # ----------------------------------------------------------------------------

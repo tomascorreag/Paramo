@@ -4,6 +4,7 @@
 [ext_resource type="Script" uid="uid://coddkp0byxhov" path="res://scripts/player.gd" id="2"]
 [ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
 [ext_resource type="Script" uid="uid://cye4auxn1pnj0" path="res://scripts/systems/player_light_controller.gd" id="4_plc"]
+[ext_resource type="Texture2D" path="res://assets/sprites/characters/campesino.png" id="5"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
 shader = ExtResource("3")
@@ -42,9 +43,9 @@ offset = Vector2(0, -15)
 hframes = 4
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=511666111]
-texture = ExtResource("1")
+texture = ExtResource("5")
 offset = Vector2(0, -15)
-hframes = 4
+hframes = 24
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=787906145]
 shape = SubResource("SubResource_1")
