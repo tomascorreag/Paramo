@@ -6,11 +6,11 @@
 shader = ExtResource("1")
 shader_parameter/wind_strength = Vector2(1, 0.5)
 shader_parameter/wind_scale = 0.02000000095
-shader_parameter/wind_speed = 1.0000000475
+shader_parameter/wind_scroll_per_second = Vector2(0.894, 0.447)
 shader_parameter/wind_tiling = Vector2(1.5, 0.75)
 shader_parameter/wind_strength_2 = Vector2(1, 0.5)
 shader_parameter/wind_scale_2 = 0.1600000076
-shader_parameter/wind_mask = 0.90000004275
+shader_parameter/wind_mask_inv = 1.142857
 shader_parameter/wind_intensity = 1.0
 shader_parameter/wind_tile_size = Vector2(32, 32)
 shader_parameter/wind_tile_offset = Vector2(0.5, 0)

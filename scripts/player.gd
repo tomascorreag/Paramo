@@ -59,6 +59,11 @@ const DIR_TO_FACING: Dictionary = {
 # ground level for Y-sort.
 var _base_sprite_offset_y: float
 
+# Authored shadow visual_y_offset from the scene file. _apply_visual_lift
+# adds the lift delta on top of this baseline, so the runtime shadow matches
+# the shadow position the artist set up in the player scene.
+var _base_visual_y_offset: float = 0.0
+
 var _pathfinder: Pathfinder
 var _time_manager: Node  # TimeManager autoload
 
@@ -99,6 +104,11 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	_base_sprite_offset_y = _sprite.offset.y
+	var shadow_mat := _shadow.material as ShaderMaterial
+	if shadow_mat != null:
+		var v: Variant = shadow_mat.get_shader_parameter(&"visual_y_offset")
+		if v != null:
+			_base_visual_y_offset = float(v)
 	_time_manager = get_node_or_null("/root/TimeManager")
 
 	# Reparent shadow to world level so it y-sorts independently against tiles.
@@ -260,7 +270,7 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	# Shadow sorts 1px north of the player (always behind), visual feet
 	# offset is pushed into the vertex shader so sort Y stays decoupled.
 	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
-	_shadow.material.set_shader_parameter(&"visual_y_offset", lift + 1.0)
+	_shadow.material.set_shader_parameter(&"visual_y_offset", _base_visual_y_offset + lift + 1.0)
 	_camera.position.y = lift
 	_light.position.y = _base_sprite_offset_y + lift
 
