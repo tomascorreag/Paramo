@@ -100,5 +100,9 @@ func _process(_delta: float) -> void:
 			mat.set_shader_parameter(
 				&"shadow_opacity", profile.shadow_opacity_curve.sample(t))
 		if profile.shadow_length_curve:
+			# Round to integer so the tail grows/shrinks in whole-pixel steps
+			# instead of having taper-edge pixels toggle at close fractional
+			# thresholds (which reads as sub-pixel motion).
 			mat.set_shader_parameter(
-				&"shadow_length", profile.shadow_length_curve.sample(t) * scale)
+				&"shadow_length",
+				roundf(profile.shadow_length_curve.sample(t) * scale))
