@@ -5,9 +5,13 @@ extends Node
 # Pathfinder
 # ============================================================================
 #
-# Scene-level pathfinding service for an isometric tile world. Wraps an
-# AStar2D graph built from a TileGrid, and exposes cell/world coord helpers
-# plus click-to-cell resolution for painted iso layers.
+# Scene-level pathfinding service for an isometric tile world. Runs a custom
+# A* over the 4-neighbor grid exposed by TileGrid, and exposes cell/world
+# coord helpers plus click-to-cell resolution for painted iso layers.
+#
+# Search state is (cell, incoming_direction) so a small per-turn penalty can
+# be applied: among all shortest paths, the one with the fewest direction
+# changes wins.
 #
 # Setup in the editor:
 #   1. Add a Pathfinder node as a child of the scene root.
@@ -29,15 +33,16 @@ extends Node
 
 const GROUP_NAME: StringName = &"pathfinder"
 
-# AStar2D point-id encoding. Maps Vector2i cell to positive int:
-#   id = (x + BIAS) * STRIDE + (y + BIAS)
-# Safe for maps within +/- BIAS cells of origin.
-const _ID_BIAS: int = 10000
-const _ID_STRIDE: int = 100000
-
 # Half-step pixel height. One half-step = 8 px, two half-steps = 16 px = one
 # FULL_CUBE.
 const HALF_STEP_PX: float = 8.0
+
+# Tiebreaker weight applied once per direction change along a path. Must be
+# small enough that the total turn penalty on any realistic path is strictly
+# less than 1 (the cost of a single step), so step-count stays the primary
+# sort key. With 1e-4 we're safe up to 10000-step paths — far beyond any map
+# this game will ever use.
+const _TURN_EPSILON: float = 1e-4
 
 # Constant pixel offset from a cell's `map_to_local()` origin to the visual
 # center of its walkable top surface at altitude 0. This compensates for the
@@ -62,7 +67,6 @@ const _NEIGHBOR_DIRS: Array[Vector2i] = [
 ]
 
 var _grid: TileGrid
-var _astar: AStar2D
 
 
 func _enter_tree() -> void:
@@ -89,61 +93,77 @@ func rebuild() -> void:
 	_grid = TileGrid.new()
 	_grid.build(tile_map_layers)
 
-	_astar = AStar2D.new()
-	_build_graph()
-
 	if debug_logging:
 		var walk_count := _grid.walkable_cells().size()
-		print("Pathfinder: built graph with %d walkable cells." % walk_count)
-
-
-func _build_graph() -> void:
-	var walkable := _grid.walkable_cells()
-
-	# First pass: add every walkable cell as a point. Position is the 2D cell
-	# coord — used only for A*'s default heuristic.
-	for cell in walkable:
-		var id := _cell_to_id(cell)
-		_astar.add_point(id, Vector2(cell.x, cell.y))
-
-	# Second pass: connect neighbors along the 4 grid axes when the grid
-	# allows the transition.
-	for cell in walkable:
-		var id := _cell_to_id(cell)
-		for d in _NEIGHBOR_DIRS:
-			var nb := cell + d
-			if not _grid.is_walkable(nb):
-				continue
-			var nb_id := _cell_to_id(nb)
-			if _astar.are_points_connected(id, nb_id):
-				continue
-			if _grid.can_transition(cell, nb):
-				# Bidirectional only if the reverse is also valid. Ramps are
-				# normally symmetric (walk up or down a stair), but checking
-				# explicitly lets us support future one-way tiles cleanly.
-				var reverse_ok := _grid.can_transition(nb, cell)
-				_astar.connect_points(id, nb_id, reverse_ok)
+		print("Pathfinder: built grid with %d walkable cells." % walk_count)
 
 
 # ----------------------------------------------------------------------------
 # Public queries
 # ----------------------------------------------------------------------------
 
+# Custom A* over the 4-neighbor grid. State is (cell, incoming_direction): by
+# embedding the incoming direction in the search state we can charge a tiny
+# penalty whenever a step changes direction from the previous one, producing
+# straightest-possible paths among all shortest paths. The penalty is strictly
+# less than 1 per turn, so step count remains the primary cost.
 func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
-	if _astar == null:
+	if _grid == null:
 		return []
 	if not _grid.is_walkable(from) or not _grid.is_walkable(to):
 		return []
-	var from_id := _cell_to_id(from)
-	var to_id := _cell_to_id(to)
-	if not _astar.has_point(from_id) or not _astar.has_point(to_id):
-		return []
+	if from == to:
+		var same: Array[Vector2i] = [from]
+		return same
 
-	var id_path := _astar.get_id_path(from_id, to_id)
-	var result: Array[Vector2i] = []
-	for pid in id_path:
-		result.append(_id_to_cell(pid))
-	return result
+	# State key encoding: (cell, dir). dir is -1 for the start, else 0..3.
+	var start_key := _state_key(from, -1)
+	var g_score: Dictionary = { start_key: 0.0 }
+	var came_from: Dictionary = {}  # key -> [prev_key, cell]
+
+	# Open set entries: [f, tiebreak_counter, cell, dir, key]. Lower f first;
+	# ties broken by insertion order so we behave deterministically. A linear
+	# min-scan is fine at this map scale (hundreds of tiles).
+	var open: Array = [[_heuristic(from, to), 0, from, -1, start_key]]
+	var counter: int = 0
+
+	while not open.is_empty():
+		var best_idx: int = 0
+		for i in range(1, open.size()):
+			if open[i][0] < open[best_idx][0]:
+				best_idx = i
+		var cur: Array = open[best_idx]
+		open.remove_at(best_idx)
+
+		var cur_cell: Vector2i = cur[2]
+		var cur_dir: int = cur[3]
+		var cur_key: String = cur[4]
+
+		if cur_cell == to:
+			return _reconstruct_path(came_from, cur_key, from)
+
+		var cur_g: float = g_score[cur_key]
+
+		for dir_idx in _NEIGHBOR_DIRS.size():
+			var d: Vector2i = _NEIGHBOR_DIRS[dir_idx]
+			var nb: Vector2i = cur_cell + d
+			if not _grid.is_walkable(nb):
+				continue
+			if not _grid.can_transition(cur_cell, nb):
+				continue
+
+			var turn_cost: float = 0.0 if cur_dir == -1 or cur_dir == dir_idx else _TURN_EPSILON
+			var tentative_g: float = cur_g + 1.0 + turn_cost
+			var nb_key: String = _state_key(nb, dir_idx)
+			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
+				continue
+			g_score[nb_key] = tentative_g
+			came_from[nb_key] = [cur_key, nb]
+			counter += 1
+			var f: float = tentative_g + _heuristic(nb, to)
+			open.append([f, counter, nb, dir_idx, nb_key])
+
+	return []
 
 
 func is_walkable(cell: Vector2i) -> bool:
@@ -242,14 +262,27 @@ func world_to_cell(global_pos: Vector2) -> Vector2i:
 # Internal helpers
 # ----------------------------------------------------------------------------
 
-static func _cell_to_id(cell: Vector2i) -> int:
-	return (cell.x + _ID_BIAS) * _ID_STRIDE + (cell.y + _ID_BIAS)
+static func _state_key(cell: Vector2i, dir_idx: int) -> String:
+	return "%d,%d,%d" % [cell.x, cell.y, dir_idx]
 
 
-static func _id_to_cell(id: int) -> Vector2i:
-	var y := (id % _ID_STRIDE) - _ID_BIAS
-	var x := (id / _ID_STRIDE) - _ID_BIAS
-	return Vector2i(x, y)
+static func _heuristic(a: Vector2i, b: Vector2i) -> float:
+	return float(absi(a.x - b.x) + absi(a.y - b.y))
+
+
+func _reconstruct_path(came_from: Dictionary, end_key: String, start: Vector2i) -> Array[Vector2i]:
+	# came_from[key] = [prev_key, cell_of_key]. Walk back from the goal's key,
+	# collecting destination cells; the start has no came_from entry and is
+	# appended at the end.
+	var reversed: Array[Vector2i] = []
+	var k: String = end_key
+	while came_from.has(k):
+		var entry: Array = came_from[k]
+		reversed.append(entry[1])
+		k = entry[0]
+	reversed.append(start)
+	reversed.reverse()
+	return reversed
 
 
 func _reference_layer() -> TileMapLayer:
