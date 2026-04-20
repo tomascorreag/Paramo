@@ -13,6 +13,11 @@ const REF_MAX_HEIGHT: float = 4.0
 ## Chance to grow each in-game hour. 1.0 = always, 0.5 = 50%.
 @export var growth_chance: float = 0.6
 
+## Extra pathfinding cost charged to agents stepping onto this cell. Values
+## below 1.0 nudge (paths prefer a clear tie-equivalent); higher values force
+## detours. Frailejones are meant to be stepped-over, not walls.
+@export var pathfinding_penalty: float = 0.4
+
 @onready var _sprite: Sprite2D = $Sprite2D
 @onready var _shadow: Sprite2D = $Shadow
 

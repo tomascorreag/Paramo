@@ -47,7 +47,7 @@ func _ready() -> void:
 	add_child(_overlay)
 
 
-func open(center: Vector2, items_data: Array[Dictionary]) -> void:
+func open(center: Vector2, items_data: Array[Dictionary], start_angle: float = -PI / 2.0) -> void:
 	_center = center
 	_clear_active_items()
 	_is_closing = false
@@ -75,9 +75,9 @@ func open(center: Vector2, items_data: Array[Dictionary]) -> void:
 
 		var angle: float
 		if count == 1:
-			angle = -PI / 2.0
+			angle = start_angle
 		else:
-			angle = TAU * i / count - PI / 2.0
+			angle = TAU * i / count + start_angle
 		var final_pos := _center + Vector2(cos(angle), sin(angle)) * radius - item.size / 2.0
 
 		item.position = _center - item.size / 2.0
@@ -202,6 +202,9 @@ func _open_submenu(sub_center: Vector2, submenu_data: Array) -> void:
 	if _center_icon:
 		tween.tween_property(_center_icon, "modulate:a", PARENT_DIM_ALPHA, 0.12)
 
+	# Outward direction from parent center to the clicked item — submenu fans out from here.
+	var outward_angle := (sub_center - _center).angle() if sub_center != _center else -PI / 2.0
+
 	# Clear references (they're now owned by the stack) and open submenu.
 	tween.chain().tween_callback(func() -> void:
 		_items.clear()
@@ -210,7 +213,7 @@ func _open_submenu(sub_center: Vector2, submenu_data: Array) -> void:
 		var typed: Array[Dictionary] = []
 		for d in submenu_data:
 			typed.append(d)
-		open(sub_center, typed)
+		open(sub_center, typed, outward_angle)
 	)
 
 

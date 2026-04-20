@@ -327,6 +327,93 @@ func test_can_transition_ramp_is_bidirectional() -> void:
 
 
 # ===========================================================================
+# Half-ramp permissive perpendicular entry
+# ===========================================================================
+#
+# Half-stairs and half-slopes can be entered perpendicular to the rise axis
+# from neighbors at EITHER low or high altitude. This matches real-world
+# intuition: a one-half-step rise is shallow enough to step onto from the
+# side from either adjacent altitude.
+
+func test_half_stair_perp_from_low_neighbor() -> void:
+	# HALF_STAIR_NE at (0,0): rise=(0,-1), low=0, high=1. Flat at (1,0) alt 0.
+	# Step perpendicular from flat into stair: should succeed.
+	_inject_walkable(Vector2i(0, 0), &"HALF_STAIR_NE", Vector2i(0, -1), 0, 1)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_half_stair_perp_from_high_neighbor() -> void:
+	# HALF_STAIR_NE at (0,0): low=0, high=1. Flat at (-1,0) alt 1.
+	_inject_walkable(Vector2i(0, 0), &"HALF_STAIR_NE", Vector2i(0, -1), 0, 1)
+	_inject_walkable(Vector2i(-1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
+	assert_true(grid.can_transition(Vector2i(-1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(-1, 0)))
+
+
+func test_half_stair_perp_from_mismatched_neighbor() -> void:
+	# Perpendicular neighbor at altitude 2 — neither low (0) nor high (1).
+	_inject_walkable(Vector2i(0, 0), &"HALF_STAIR_NE", Vector2i(0, -1), 0, 1)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 2, 2)
+	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_half_slope_perp_from_low_neighbor() -> void:
+	_inject_walkable(Vector2i(0, 0), &"HALF_SLOPE_SW", Vector2i(0, 1), 0, 1)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_half_slope_perp_from_high_neighbor() -> void:
+	_inject_walkable(Vector2i(0, 0), &"HALF_SLOPE_SW", Vector2i(0, 1), 0, 1)
+	_inject_walkable(Vector2i(-1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
+	assert_true(grid.can_transition(Vector2i(-1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(-1, 0)))
+
+
+func test_full_stair_perp_still_blocked() -> void:
+	# Regression: full-height STAIR_NE keeps the strict axis-lock.
+	_inject_walkable(Vector2i(0, 0), &"STAIR_NE", Vector2i(0, -1), 0, 2)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
+	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_full_slope_perp_still_blocked() -> void:
+	_inject_walkable(Vector2i(0, 0), &"SLOPE_NE", Vector2i(0, -1), 0, 2)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
+	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_half_stair_rise_axis_still_works() -> void:
+	# Regression: rise-axis entry still works normally.
+	# HALF_STAIR_NE low=0 high=1. Flat at alt 0 to the SW (dir=(0,1) from stair
+	# to flat, so from flat to stair is dir=(0,-1) = rise).
+	_inject_walkable(Vector2i(0, 0), &"HALF_STAIR_NE", Vector2i(0, -1), 0, 1)
+	_inject_walkable(Vector2i(0, 1), &"FLAT", Vector2i.ZERO, 0, 0)   # low side
+	_inject_walkable(Vector2i(0, -1), &"FLAT", Vector2i.ZERO, 1, 1)  # high side
+	assert_true(grid.can_transition(Vector2i(0, 1), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(0, 1)))
+	assert_true(grid.can_transition(Vector2i(0, -1), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(0, -1)))
+
+
+func test_half_stair_rise_axis_mismatched_altitude() -> void:
+	# Low-side neighbor at alt 1 (matching high end instead of low): rise-axis
+	# entry requires low-end match, so this is blocked even though the tile is
+	# a half-stair. Perpendicular permissiveness does NOT leak into the rise
+	# axis.
+	_inject_walkable(Vector2i(0, 0), &"HALF_STAIR_NE", Vector2i(0, -1), 0, 1)
+	_inject_walkable(Vector2i(0, 1), &"FLAT", Vector2i.ZERO, 1, 1)
+	assert_false(grid.can_transition(Vector2i(0, 1), Vector2i(0, 0)))
+	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(0, 1)))
+
+
+# ===========================================================================
 # _merge_walkable
 # ===========================================================================
 
@@ -449,3 +536,253 @@ func test_walkable_cells_mixed() -> void:
 	assert_has(cells, Vector2i(0, 0))
 	assert_has(cells, Vector2i(1, 0))
 	assert_has(cells, Vector2i(2, 0))
+
+
+# ===========================================================================
+# build() — end-to-end ingest from real TileMapLayer(s)
+# ===========================================================================
+#
+# The tests above drive _cells directly. This section drives the actual
+# production entry point: build a synthetic TileSet + TileMapLayer, paint
+# cells, and assert the resulting _cells dict.
+
+const _TILE_KIND_FIELD: String = "tile_kind"
+const _TILE_SIZE: Vector2i = Vector2i(16, 16)
+const _SOURCE_ID: int = 0
+
+
+# Build a TileSet with a tile_kind custom data layer and an atlas source that
+# has one tile painted per (kind -> coord) entry in `paints`. Returns the set
+# and a dict of kind -> atlas_coord for use by _make_layer callers.
+func _make_tile_set(paints: Dictionary) -> Array:
+	var ts := TileSet.new()
+	ts.tile_size = _TILE_SIZE
+	ts.add_custom_data_layer()
+	ts.set_custom_data_layer_name(0, _TILE_KIND_FIELD)
+	ts.set_custom_data_layer_type(0, TYPE_STRING)
+
+	var src := TileSetAtlasSource.new()
+	var image := Image.create(_TILE_SIZE.x * 8, _TILE_SIZE.y * 8, false, Image.FORMAT_RGBA8)
+	image.fill(Color.WHITE)
+	src.texture = ImageTexture.create_from_image(image)
+	src.texture_region_size = _TILE_SIZE
+	ts.add_source(src, _SOURCE_ID)
+
+	var coords: Dictionary[StringName, Vector2i] = {}
+	var i := 0
+	for kind in paints.keys():
+		var coord := Vector2i(i, 0)
+		src.create_tile(coord)
+		src.get_tile_data(coord, 0).set_custom_data_by_layer_id(0, String(kind))
+		coords[kind] = coord
+		i += 1
+	return [ts, coords]
+
+
+# Create a TileMapLayer with the given tile_set, altitude meta, and a set of
+# cells painted according to `cells` (cell -> kind StringName). Returns the
+# layer (auto-freed by GUT).
+func _make_layer(tile_set: TileSet, coords: Dictionary, cells: Dictionary, altitude: int) -> TileMapLayer:
+	var layer := TileMapLayer.new()
+	layer.tile_set = tile_set
+	layer.set_meta("altitude", altitude)
+	for cell in cells.keys():
+		var kind: StringName = cells[cell]
+		var c: Vector2i = coords.get(kind, Vector2i(-1, -1))
+		layer.set_cell(cell, _SOURCE_ID, c)
+	add_child_autofree(layer)
+	return layer
+
+
+# ---------------------------------------------------------------------------
+# build() — walkable tiles
+# ---------------------------------------------------------------------------
+
+func test_build_single_flat_tile() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 4)
+	grid.build([layer])
+
+	assert_true(grid.is_walkable(Vector2i(0, 0)))
+	var info := grid.cell_info(Vector2i(0, 0))
+	assert_eq(info["tile_kind"], &"FLAT")
+	assert_eq(info["altitude_low"], 4)
+	assert_eq(info["altitude_high"], 4)
+	assert_eq(info["altitude_center"], 4.0)
+	assert_eq(info["rise_dir"], Vector2i.ZERO)
+	assert_eq(info["layer"], layer)
+
+
+func test_build_ramp_derives_altitude_high() -> void:
+	# SLOPE_NE has ramp_size = 2 and rise (0, -1). Layer altitude 3 -> high = 5.
+	var setup := _make_tile_set({&"SLOPE_NE": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"SLOPE_NE"}, 3)
+	grid.build([layer])
+
+	var info := grid.cell_info(Vector2i(0, 0))
+	assert_eq(info["altitude_low"], 3)
+	assert_eq(info["altitude_high"], 5)
+	assert_eq(info["altitude_center"], 4.0)
+	assert_eq(info["rise_dir"], Vector2i(0, -1))
+
+
+func test_build_half_ramp_derives_altitude_high() -> void:
+	# HALF_STAIR_NE: ramp_size = 1. Low 2 -> high 3.
+	var setup := _make_tile_set({&"HALF_STAIR_NE": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"HALF_STAIR_NE"}, 2)
+	grid.build([layer])
+
+	var info := grid.cell_info(Vector2i(0, 0))
+	assert_eq(info["altitude_low"], 2)
+	assert_eq(info["altitude_high"], 3)
+
+
+# ---------------------------------------------------------------------------
+# build() — non-walkable tiles
+# ---------------------------------------------------------------------------
+
+func test_build_wall_tile_stores_blocked_entry() -> void:
+	# WALL_NE isn't in _SHAPES — ingest path records a blocked entry.
+	var setup := _make_tile_set({&"WALL_NE": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"WALL_NE"}, 0)
+	grid.build([layer])
+
+	assert_false(grid.is_walkable(Vector2i(0, 0)))
+	assert_ne(grid.cell_info(Vector2i(0, 0)).size(), 0, "cell should have a record")
+
+
+func test_build_empty_tile_kind_stores_blocked_entry() -> void:
+	# Paint a tile with an empty custom-data value (created but never set).
+	var ts := TileSet.new()
+	ts.tile_size = _TILE_SIZE
+	ts.add_custom_data_layer()
+	ts.set_custom_data_layer_name(0, _TILE_KIND_FIELD)
+	ts.set_custom_data_layer_type(0, TYPE_STRING)
+	var src := TileSetAtlasSource.new()
+	var image := Image.create(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color.WHITE)
+	src.texture = ImageTexture.create_from_image(image)
+	src.texture_region_size = _TILE_SIZE
+	ts.add_source(src, _SOURCE_ID)
+	src.create_tile(Vector2i(0, 0))  # no custom data set
+
+	var layer := TileMapLayer.new()
+	layer.tile_set = ts
+	layer.set_meta("altitude", 0)
+	layer.set_cell(Vector2i(5, 5), _SOURCE_ID, Vector2i(0, 0))
+	add_child_autofree(layer)
+
+	grid.build([layer])
+	assert_false(grid.is_walkable(Vector2i(5, 5)))
+
+
+# ---------------------------------------------------------------------------
+# build() — multi-layer column merging
+# ---------------------------------------------------------------------------
+
+func test_build_higher_layer_wins_on_same_cell() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var low := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	var high := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 4)
+	grid.build([low, high])
+
+	var info := grid.cell_info(Vector2i(0, 0))
+	assert_eq(info["altitude_low"], 4)
+	assert_eq(info["layer"], high)
+
+
+func test_build_wall_at_or_above_blocks_lower_walkable() -> void:
+	# Walkable FLAT at alt 0; WALL_NE at alt 2 on the same cell blocks column.
+	var setup := _make_tile_set({&"FLAT": true, &"WALL_NE": true})
+	var ground := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	var wall := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"WALL_NE"}, 2)
+	grid.build([ground, wall])
+
+	assert_false(grid.is_walkable(Vector2i(0, 0)))
+
+
+# ---------------------------------------------------------------------------
+# build() — layer metadata queries
+# ---------------------------------------------------------------------------
+
+func test_build_records_layer_altitude() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 7)
+	grid.build([layer])
+	assert_eq(grid.layer_altitude(layer), 7)
+
+
+func test_build_altitudes_desc_sorted() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var a := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	var b := _make_layer(setup[0], setup[1], {Vector2i(1, 0): &"FLAT"}, 4)
+	var c := _make_layer(setup[0], setup[1], {Vector2i(2, 0): &"FLAT"}, 2)
+	grid.build([a, b, c])
+
+	var desc := grid.altitudes_desc()
+	assert_eq(desc, [4, 2, 0] as Array[int])
+
+
+func test_build_layers_returns_copy() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	grid.build([layer])
+
+	var copy := grid.layers()
+	copy.clear()
+	assert_eq(grid.layers().size(), 1, "mutating returned array should not affect internal state")
+
+
+# ---------------------------------------------------------------------------
+# build() — missing custom-data layer
+# ---------------------------------------------------------------------------
+
+func test_build_tileset_without_tile_kind_records_nothing() -> void:
+	# TileSet without the "tile_kind" custom data layer: _ingest_layer errors
+	# out and no cells are added for this layer.
+	var ts := TileSet.new()
+	ts.tile_size = _TILE_SIZE
+	var src := TileSetAtlasSource.new()
+	var image := Image.create(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
+	image.fill(Color.WHITE)
+	src.texture = ImageTexture.create_from_image(image)
+	src.texture_region_size = _TILE_SIZE
+	ts.add_source(src, _SOURCE_ID)
+	src.create_tile(Vector2i(0, 0))
+
+	var layer := TileMapLayer.new()
+	layer.tile_set = ts
+	layer.set_meta("altitude", 0)
+	layer.set_cell(Vector2i(0, 0), _SOURCE_ID, Vector2i(0, 0))
+	add_child_autofree(layer)
+
+	grid.build([layer])
+	assert_false(grid.is_walkable(Vector2i(0, 0)))
+	assert_eq(grid.walkable_cells().size(), 0)
+
+
+# ---------------------------------------------------------------------------
+# build() — robustness
+# ---------------------------------------------------------------------------
+
+func test_build_skips_null_layer() -> void:
+	var setup := _make_tile_set({&"FLAT": true})
+	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	# Null-first to make sure we don't short-circuit on bad input.
+	grid.build([null, layer])
+	assert_true(grid.is_walkable(Vector2i(0, 0)))
+
+
+func test_build_is_idempotent_when_rebuilt() -> void:
+	# A second build() from scratch on different layers should NOT retain
+	# cells from the first build.
+	var setup_a := _make_tile_set({&"FLAT": true})
+	var layer_a := _make_layer(setup_a[0], setup_a[1], {Vector2i(1, 1): &"FLAT"}, 0)
+	grid.build([layer_a])
+	assert_true(grid.is_walkable(Vector2i(1, 1)))
+
+	var setup_b := _make_tile_set({&"FLAT": true})
+	var layer_b := _make_layer(setup_b[0], setup_b[1], {Vector2i(9, 9): &"FLAT"}, 0)
+	grid.build([layer_b])
+	assert_false(grid.is_walkable(Vector2i(1, 1)), "old cells should be cleared")
+	assert_true(grid.is_walkable(Vector2i(9, 9)))

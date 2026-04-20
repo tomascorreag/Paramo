@@ -96,6 +96,19 @@ const _SHAPES: Dictionary = {
 }
 
 
+# Half-height ramps (ramp_size == 1). Pathfinding treats these as permissive
+# on their perpendicular edges: a neighbor at `low` can step on/off from the
+# two sides perpendicular to the rise (in addition to the rise-axis low end),
+# and likewise a neighbor at `high` can use the perpendicular sides. Full
+# ramps (ramp_size == 2) remain strictly axis-locked.
+const _HALF_RAMPS: Dictionary = {
+	&"HALF_SLOPE_NE": true, &"HALF_SLOPE_NW": true,
+	&"HALF_SLOPE_SE": true, &"HALF_SLOPE_SW": true,
+	&"HALF_STAIR_NE": true, &"HALF_STAIR_NW": true,
+	&"HALF_STAIR_SE": true, &"HALF_STAIR_SW": true,
+}
+
+
 # Per-cell record. Dictionary for speed; all runtime state.
 #
 # Keys:
@@ -279,6 +292,17 @@ func cell_info(cell: Vector2i) -> Dictionary:
 	return _cells.get(cell, {})
 
 
+# Returns the ramp size (in half-steps) for this cell:
+#   0 for flats, unknown cells, or non-walkable cells
+#   1 for half-height ramps (HALF_SLOPE_*, HALF_STAIR_*)
+#   2 for full-height ramps (SLOPE_*, STAIR_*)
+func ramp_size(cell: Vector2i) -> int:
+	var info: Dictionary = _cells.get(cell, {})
+	if info.is_empty():
+		return 0
+	return info.altitude_high - info.altitude_low
+
+
 func layer_of(cell: Vector2i) -> TileMapLayer:
 	var info: Dictionary = _cells.get(cell, {})
 	return info.get("layer", null)
@@ -349,13 +373,44 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	if abs(dir.x) + abs(dir.y) != 1:
 		return false
 
-	var exit_from := exit_altitude(from, dir)
-	if exit_from == -9999:
+	var exit_alts := _edge_altitudes(from, dir)
+	if exit_alts.is_empty():
 		return false
-	var enter_to := enter_altitude(to, dir)
-	if enter_to == -9999:
+	var enter_alts := _edge_altitudes(to, -dir)
+	if enter_alts.is_empty():
 		return false
-	return exit_from == enter_to
+	for a in exit_alts:
+		if a in enter_alts:
+			return true
+	return false
+
+
+# Valid altitudes at the `dir`-facing edge of `cell`. Empty means the edge is
+# impassable (perpendicular exit off a full ramp, or non-walkable cell). For
+# half-ramps, perpendicular edges expose BOTH low and high so neighbors on
+# either altitude can step on/off from the sides.
+#
+# Using an outward-facing direction convention: for exits, pass the step dir;
+# for entries, pass the negation of the step dir (the side the agent came
+# from, seen from the destination cell).
+func _edge_altitudes(cell: Vector2i, dir: Vector2i) -> Array[int]:
+	var info: Dictionary = _cells.get(cell, {})
+	if not info.get("walkable", false):
+		return []
+	var rise: Vector2i = info.get("rise_dir", Vector2i.ZERO)
+	var low: int = info.get("altitude_low", 0)
+	var high: int = info.get("altitude_high", 0)
+	if rise == Vector2i.ZERO:
+		return [low]
+	if dir == rise:
+		return [high]
+	if dir == -rise:
+		return [low]
+	# Perpendicular edge: permissive for half-ramps only.
+	var kind: StringName = info.get("tile_kind", &"")
+	if _HALF_RAMPS.has(kind):
+		return [low, high]
+	return []
 
 
 # ----------------------------------------------------------------------------

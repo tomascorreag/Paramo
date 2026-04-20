@@ -13,6 +13,16 @@ extends Node
 # be applied: among all shortest paths, the one with the fewest direction
 # changes wins.
 #
+# Two additional per-step costs layer on top of the base 1.0 + turn epsilon:
+#   - RAMP PENALTY: each half-step of elevation change when stepping onto a
+#     ramp (SLOPE_*, STAIR_*, HALF_*) adds _RAMP_PENALTY_PER_STEP. Sub-step
+#     so ramps remain traversable — they only lose to flat routes of equal
+#     or near-equal length.
+#   - OBJECT PENALTY: a per-cell float registry (_cell_penalties) that
+#     placers write into via set_cell_penalty/clear_cell_penalty. Unbounded:
+#     a small value nudges, a value above ~1.0 forces detours. Pathfinder
+#     stays agnostic of what the penalty represents (plant, boulder, sign).
+#
 # Setup in the editor:
 #   1. Add a Pathfinder node as a child of the scene root.
 #   2. Drag every walkable-relevant TileMapLayer into `tile_map_layers`.
@@ -44,6 +54,13 @@ const HALF_STEP_PX: float = 8.0
 # this game will ever use.
 const _TURN_EPSILON: float = 1e-4
 
+# Extra cost charged per half-step of elevation change when stepping onto a
+# ramp cell. Full stairs/slopes (ramp_size 2) cost 2x this; half variants
+# (ramp_size 1) cost 1x. Kept sub-step so ramps never force a detour when
+# they're strictly on the shortest route — only tie-breaking flat-vs-ramp
+# cases flip.
+const _RAMP_PENALTY_PER_STEP: float = 0.15
+
 # Constant pixel offset from a cell's `map_to_local()` origin to the visual
 # center of its walkable top surface at altitude 0. This compensates for the
 # difference between where Godot considers a tile's "origin" and where the
@@ -67,6 +84,11 @@ const _NEIGHBOR_DIRS: Array[Vector2i] = [
 ]
 
 var _grid: TileGrid
+
+# Per-cell additional enter cost contributed by objects (plants, structures).
+# Cleared only via clear_cell_penalty — rebuild() intentionally leaves it
+# intact because the objects that registered entries still exist in the world.
+var _cell_penalties: Dictionary[Vector2i, float] = {}
 
 
 func _enter_tree() -> void:
@@ -153,7 +175,7 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 				continue
 
 			var turn_cost: float = 0.0 if cur_dir == -1 or cur_dir == dir_idx else _TURN_EPSILON
-			var tentative_g: float = cur_g + 1.0 + turn_cost
+			var tentative_g: float = cur_g + 1.0 + turn_cost + _cell_enter_cost(nb)
 			var nb_key: String = _state_key(nb, dir_idx)
 			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
 				continue
@@ -182,6 +204,24 @@ func cell_info(cell: Vector2i) -> Dictionary:
 	if _grid == null:
 		return {}
 	return _grid.cell_info(cell)
+
+
+# Registers an additional enter-cost on a cell. Passing 0.0 clears the entry.
+# Penalty is added to the base step cost every time a search considers moving
+# INTO `cell`, so a large value (>1.0) forces detours, a small value nudges.
+func set_cell_penalty(cell: Vector2i, penalty: float) -> void:
+	if penalty == 0.0:
+		_cell_penalties.erase(cell)
+		return
+	_cell_penalties[cell] = penalty
+
+
+func clear_cell_penalty(cell: Vector2i) -> void:
+	_cell_penalties.erase(cell)
+
+
+func get_cell_penalty(cell: Vector2i) -> float:
+	return _cell_penalties.get(cell, 0.0)
 
 
 func grid() -> TileGrid:
@@ -261,6 +301,11 @@ func world_to_cell(global_pos: Vector2) -> Vector2i:
 # ----------------------------------------------------------------------------
 # Internal helpers
 # ----------------------------------------------------------------------------
+
+func _cell_enter_cost(cell: Vector2i) -> float:
+	var elevation_cost: float = float(_grid.ramp_size(cell)) * _RAMP_PENALTY_PER_STEP
+	return elevation_cost + _cell_penalties.get(cell, 0.0)
+
 
 static func _state_key(cell: Vector2i, dir_idx: int) -> String:
 	return "%d,%d,%d" % [cell.x, cell.y, dir_idx]
