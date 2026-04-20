@@ -26,15 +26,7 @@ func after_each() -> void:
 # ---------------------------------------------------------------------------
 
 func _inject_walkable(cell: Vector2i) -> void:
-	pf._grid._cells[cell] = {
-		"walkable": true,
-		"layer": null,
-		"tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO,
-		"altitude_low": 0,
-		"altitude_high": 0,
-		"altitude_center": 0.0,
-	}
+	pf._grid._test_put(cell, CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 0))
 
 
 func _inject_rect(origin: Vector2i, size: Vector2i) -> void:
@@ -43,19 +35,12 @@ func _inject_rect(origin: Vector2i, size: Vector2i) -> void:
 			_inject_walkable(Vector2i(x, y))
 
 
-# Injects a ramp-shaped cell. altitude_low/high are both forced to 0 so
-# can_transition doesn't reject steps onto/off this cell — we only want to
-# exercise the ramp-penalty path here; altitude gating has its own tests.
+# Injects a ramp-shaped cell. altitude_low/high collapsed so can_transition
+# doesn't reject steps onto/off this cell — we only want to exercise the
+# ramp-penalty path here; altitude gating has its own tests. Pass a non-zero
+# ramp_size to register the elevation-penalty contribution.
 func _inject_ramp(cell: Vector2i, kind: StringName, ramp_size: int) -> void:
-	pf._grid._cells[cell] = {
-		"walkable": true,
-		"layer": null,
-		"tile_kind": kind,
-		"rise_dir": Vector2i.ZERO,
-		"altitude_low": 0,
-		"altitude_high": ramp_size,
-		"altitude_center": ramp_size / 2.0,
-	}
+	pf._grid._test_put(cell, CellData.make_walkable(null, kind, Vector2i.ZERO, 0, ramp_size))
 
 
 func _count_turns(path: Array[Vector2i]) -> int:
@@ -257,16 +242,8 @@ func test_find_path_forced_corner_has_one_turn() -> void:
 func test_find_path_blocked_by_altitude_mismatch() -> void:
 	# Two flats side by side at different altitudes; can_transition returns
 	# false between them, so no route exists.
-	pf._grid._cells[Vector2i(0, 0)] = {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 0, "altitude_high": 0,
-		"altitude_center": 0.0,
-	}
-	pf._grid._cells[Vector2i(1, 0)] = {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 4, "altitude_high": 4,
-		"altitude_center": 4.0,
-	}
+	pf._grid._test_put(Vector2i(0, 0), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 0))
+	pf._grid._test_put(Vector2i(1, 0), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4))
 	assert_eq(pf.find_path(Vector2i(0, 0), Vector2i(1, 0)).size(), 0)
 
 

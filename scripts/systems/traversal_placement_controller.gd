@@ -141,8 +141,8 @@ func _process(_delta: float) -> void:
 # walkability — so the preview can show (in red) over water, voids, or any
 # other invalid endpoint the player might aim at.
 func _resolve_hover_at_origin_altitude() -> Vector2i:
-	var origin_info := pathfinder.grid().cell_info(_origin_cell)
-	var alt: int = int(origin_info.get("altitude_low", 0))
+	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var adjusted := _mouse_global_position() + Vector2(0.0, alt * Pathfinder.HALF_STEP_PX)
 	return pathfinder.world_to_cell(adjusted)
 
@@ -161,7 +161,8 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 	var placer := _ensure_preview_placer()
 	if placer == null:
 		return
-	var base_alt: int = int(pathfinder.grid().cell_info(_origin_cell).get("altitude_low", 0))
+	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var plan := Bridge.plan_tiles(_origin_cell, hover, base_alt)
 	if plan.is_empty():
 		return  # non-orthogonal or same cell — show no ghost at all
@@ -269,7 +270,8 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	if _placer == null:
 		_placer = StructurePlacer.new(structure_layer_manager)
 
-	var base_alt: int = int(pathfinder.grid().cell_info(_origin_cell).get("altitude_low", 0))
+	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 
 	var inst: Bridge = bridge_scene.instantiate()
 	world.add_child(inst)

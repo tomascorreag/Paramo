@@ -13,7 +13,7 @@ config_version=5
 config/name="Paramo"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
-config/icon="res://icon.svg"
+config/icon="uid://cqg4ew8b5y73e"
 
 [autoload]
 

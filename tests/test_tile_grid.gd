@@ -8,7 +8,7 @@ func before_each() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Helper: inject a cell directly into grid._cells
+# Helper: inject a CellData instance directly via TileGrid._test_put
 # ---------------------------------------------------------------------------
 
 func _inject_walkable(
@@ -18,27 +18,11 @@ func _inject_walkable(
 	alt_low: int,
 	alt_high: int
 ) -> void:
-	grid._cells[cell] = {
-		"walkable": true,
-		"layer": null,
-		"tile_kind": tile_kind,
-		"rise_dir": rise_dir,
-		"altitude_low": alt_low,
-		"altitude_high": alt_high,
-		"altitude_center": (alt_low + alt_high) / 2.0,
-	}
+	grid._test_put(cell, CellData.make_walkable(null, tile_kind, rise_dir, alt_low, alt_high))
 
 
 func _inject_blocked(cell: Vector2i, altitude: int) -> void:
-	grid._cells[cell] = {
-		"walkable": false,
-		"layer": null,
-		"tile_kind": &"",
-		"rise_dir": Vector2i.ZERO,
-		"altitude_low": altitude,
-		"altitude_high": altitude,
-		"altitude_center": float(altitude),
-	}
+	grid._test_put(cell, CellData.make_blocked(null, altitude))
 
 
 # ===========================================================================
@@ -433,67 +417,45 @@ func test_half_stair_rise_axis_mismatched_altitude() -> void:
 # ===========================================================================
 
 func test_merge_walkable_first_entry() -> void:
-	var entry := {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 0, "altitude_high": 0,
-		"altitude_center": 0.0,
-	}
+	# Pre-expand bounds so _merge_walkable (which uses _put_raw) can write.
+	_inject_blocked(Vector2i(0, 0), -1)
+	var entry := CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 0)
 	grid._merge_walkable(Vector2i(0, 0), entry)
 	assert_true(grid.is_walkable(Vector2i(0, 0)))
 
 
 func test_merge_walkable_higher_wins() -> void:
 	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 2)
-	var higher := {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 4, "altitude_high": 4,
-		"altitude_center": 4.0,
-	}
+	var higher := CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4)
 	grid._merge_walkable(Vector2i(0, 0), higher)
 	assert_eq(grid.altitude_center(Vector2i(0, 0)), 4.0)
 
 
 func test_merge_walkable_lower_loses() -> void:
 	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 4, 4)
-	var lower := {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 0, "altitude_high": 2,
-		"altitude_center": 1.0,
-	}
+	var lower := CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 2)
 	grid._merge_walkable(Vector2i(0, 0), lower)
 	assert_eq(grid.altitude_center(Vector2i(0, 0)), 4.0)
 
 
 func test_merge_walkable_equal_keeps_first() -> void:
 	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 4, 4)
-	var same := {
-		"walkable": true, "layer": null, "tile_kind": &"FULL_CUBE",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 4, "altitude_high": 4,
-		"altitude_center": 4.0,
-	}
+	var same := CellData.make_walkable(null, &"FULL_CUBE", Vector2i.ZERO, 4, 4)
 	grid._merge_walkable(Vector2i(0, 0), same)
 	# First entry kept — tile_kind should still be FLAT, not FULL_CUBE.
-	assert_eq(grid.cell_info(Vector2i(0, 0))["tile_kind"], &"FLAT")
+	assert_eq(grid.get_tile(Vector2i(0, 0)).tile_kind, &"FLAT")
 
 
 func test_merge_walkable_over_lower_block() -> void:
 	_inject_blocked(Vector2i(0, 0), 1)
-	var walkable := {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 4, "altitude_high": 4,
-		"altitude_center": 4.0,
-	}
+	var walkable := CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4)
 	grid._merge_walkable(Vector2i(0, 0), walkable)
 	assert_true(grid.is_walkable(Vector2i(0, 0)))
 
 
 func test_merge_walkable_blocked_at_or_above() -> void:
 	_inject_blocked(Vector2i(0, 0), 6)
-	var walkable := {
-		"walkable": true, "layer": null, "tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO, "altitude_low": 4, "altitude_high": 4,
-		"altitude_center": 4.0,
-	}
+	var walkable := CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4)
 	grid._merge_walkable(Vector2i(0, 0), walkable)
 	# Block at altitude 6 >= walkable alt_high 4, so block remains.
 	assert_false(grid.is_walkable(Vector2i(0, 0)))
@@ -511,13 +473,13 @@ func test_merge_blocked_first_entry() -> void:
 func test_merge_blocked_higher_replaces() -> void:
 	_inject_blocked(Vector2i(0, 0), 2)
 	grid._merge_blocked(Vector2i(0, 0), null, 4)
-	assert_eq(grid.cell_info(Vector2i(0, 0))["altitude_low"], 4)
+	assert_eq(grid.get_tile(Vector2i(0, 0)).altitude_low, 4)
 
 
 func test_merge_blocked_lower_keeps_existing() -> void:
 	_inject_blocked(Vector2i(0, 0), 4)
 	grid._merge_blocked(Vector2i(0, 0), null, 2)
-	assert_eq(grid.cell_info(Vector2i(0, 0))["altitude_low"], 4)
+	assert_eq(grid.get_tile(Vector2i(0, 0)).altitude_low, 4)
 
 
 func test_merge_blocked_overrides_walkable_at_or_above() -> void:
@@ -619,13 +581,13 @@ func test_build_single_flat_tile() -> void:
 	grid.build([layer])
 
 	assert_true(grid.is_walkable(Vector2i(0, 0)))
-	var info := grid.cell_info(Vector2i(0, 0))
-	assert_eq(info["tile_kind"], &"FLAT")
-	assert_eq(info["altitude_low"], 4)
-	assert_eq(info["altitude_high"], 4)
-	assert_eq(info["altitude_center"], 4.0)
-	assert_eq(info["rise_dir"], Vector2i.ZERO)
-	assert_eq(info["layer"], layer)
+	var tile := grid.get_tile(Vector2i(0, 0))
+	assert_eq(tile.tile_kind, &"FLAT")
+	assert_eq(tile.altitude_low, 4)
+	assert_eq(tile.altitude_high, 4)
+	assert_eq(tile.altitude_center, 4.0)
+	assert_eq(tile.rise_dir, Vector2i.ZERO)
+	assert_eq(tile.layer, layer)
 
 
 func test_build_ramp_derives_altitude_high() -> void:
@@ -634,11 +596,11 @@ func test_build_ramp_derives_altitude_high() -> void:
 	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"SLOPE_NE"}, 3)
 	grid.build([layer])
 
-	var info := grid.cell_info(Vector2i(0, 0))
-	assert_eq(info["altitude_low"], 3)
-	assert_eq(info["altitude_high"], 5)
-	assert_eq(info["altitude_center"], 4.0)
-	assert_eq(info["rise_dir"], Vector2i(0, -1))
+	var tile := grid.get_tile(Vector2i(0, 0))
+	assert_eq(tile.altitude_low, 3)
+	assert_eq(tile.altitude_high, 5)
+	assert_eq(tile.altitude_center, 4.0)
+	assert_eq(tile.rise_dir, Vector2i(0, -1))
 
 
 func test_build_half_ramp_derives_altitude_high() -> void:
@@ -647,9 +609,9 @@ func test_build_half_ramp_derives_altitude_high() -> void:
 	var layer := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"HALF_STAIR_NE"}, 2)
 	grid.build([layer])
 
-	var info := grid.cell_info(Vector2i(0, 0))
-	assert_eq(info["altitude_low"], 2)
-	assert_eq(info["altitude_high"], 3)
+	var tile := grid.get_tile(Vector2i(0, 0))
+	assert_eq(tile.altitude_low, 2)
+	assert_eq(tile.altitude_high, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +625,7 @@ func test_build_wall_tile_stores_blocked_entry() -> void:
 	grid.build([layer])
 
 	assert_false(grid.is_walkable(Vector2i(0, 0)))
-	assert_ne(grid.cell_info(Vector2i(0, 0)).size(), 0, "cell should have a record")
+	assert_ne(grid.get_tile(Vector2i(0, 0)), null, "cell should have a record")
 
 
 func test_build_empty_tile_kind_stores_blocked_entry() -> void:
@@ -701,9 +663,9 @@ func test_build_higher_layer_wins_on_same_cell() -> void:
 	var high := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 4)
 	grid.build([low, high])
 
-	var info := grid.cell_info(Vector2i(0, 0))
-	assert_eq(info["altitude_low"], 4)
-	assert_eq(info["layer"], high)
+	var tile := grid.get_tile(Vector2i(0, 0))
+	assert_eq(tile.altitude_low, 4)
+	assert_eq(tile.layer, high)
 
 
 func test_build_wall_at_or_above_blocks_lower_walkable() -> void:

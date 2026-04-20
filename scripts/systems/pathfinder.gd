@@ -200,10 +200,10 @@ func altitude_center(cell: Vector2i) -> float:
 	return _grid.altitude_center(cell)
 
 
-func cell_info(cell: Vector2i) -> Dictionary:
+func get_tile(cell: Vector2i) -> CellData:
 	if _grid == null:
-		return {}
-	return _grid.cell_info(cell)
+		return null
+	return _grid.get_tile(cell)
 
 
 func roughness_at(cell: Vector2i) -> float:
@@ -220,10 +220,10 @@ func roughness_at(cell: Vector2i) -> float:
 func neighbor_altitude_match(cell: Vector2i) -> Vector4:
 	if _grid == null:
 		return Vector4.ZERO
-	var self_info := _grid.cell_info(cell)
-	if self_info.is_empty():
+	var self_tile := _grid.get_tile(cell)
+	if self_tile == null:
 		return Vector4.ZERO
-	var self_alt: float = self_info.get("altitude_center", 0.0)
+	var self_alt: float = self_tile.altitude_center
 	return Vector4(
 		_alt_match(cell + Vector2i(1, 0), self_alt),   # SE
 		_alt_match(cell + Vector2i(-1, 0), self_alt),  # NW
@@ -233,20 +233,18 @@ func neighbor_altitude_match(cell: Vector2i) -> Vector4:
 
 
 func _alt_match(c: Vector2i, self_alt: float) -> float:
-	var info := _grid.cell_info(c)
-	if info.is_empty():
+	var tile := _grid.get_tile(c)
+	if tile == null:
 		return 0.0
 	# Walls / EDGE_* / non-walkable cells have no ground surface to cast a
 	# shadow on, even if their blocking altitude happens to match.
-	if not info.get("walkable", false):
+	if not tile.walkable:
 		return 0.0
 	# Match when the entity's altitude intersects the neighbor's altitude
 	# RANGE. For flats low == high so this reduces to equality; for ramps
 	# adjacency to either end (low OR high) is enough to keep the shadow
 	# visible on the ramp. A tiny epsilon absorbs float round-off.
-	var n_low: float = info.get("altitude_low", 0.0)
-	var n_high: float = info.get("altitude_high", 0.0)
-	if self_alt >= n_low - 0.01 and self_alt <= n_high + 0.01:
+	if self_alt >= float(tile.altitude_low) - 0.01 and self_alt <= float(tile.altitude_high) + 0.01:
 		return 1.0
 	return 0.0
 

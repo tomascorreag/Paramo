@@ -168,16 +168,14 @@ static func validate(
 	if steps < 2:
 		return Result.TOO_SHORT
 
-	var oi := grid.cell_info(origin)
-	var fi := grid.cell_info(far)
-	var o_low: int = oi.get("altitude_low", 0)
-	var o_high: int = oi.get("altitude_high", 0)
-	var f_low: int = fi.get("altitude_low", 0)
-	var f_high: int = fi.get("altitude_high", 0)
-	# Only flats allowed as endpoints (ramps have low != high).
-	if o_low != o_high or f_low != f_high:
+	var oi := grid.get_tile(origin)
+	var fi := grid.get_tile(far)
+	if oi == null or fi == null:
 		return Result.ALTITUDE_MISMATCH
-	if o_low != f_low:
+	# Only flats allowed as endpoints (ramps have low != high).
+	if oi.altitude_low != oi.altitude_high or fi.altitude_low != fi.altitude_high:
+		return Result.ALTITUDE_MISMATCH
+	if oi.altitude_low != fi.altitude_low:
 		return Result.ALTITUDE_MISMATCH
 
 	if not blocked_cells.is_empty():

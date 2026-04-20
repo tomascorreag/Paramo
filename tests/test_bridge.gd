@@ -12,27 +12,11 @@ func before_each() -> void:
 
 
 func _inject_flat(cell: Vector2i, alt: int) -> void:
-	grid._cells[cell] = {
-		"walkable": true,
-		"layer": null,
-		"tile_kind": &"FLAT",
-		"rise_dir": Vector2i.ZERO,
-		"altitude_low": alt,
-		"altitude_high": alt,
-		"altitude_center": float(alt),
-	}
+	grid._test_put(cell, CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, alt, alt))
 
 
 func _inject_ramp(cell: Vector2i, alt_low: int, alt_high: int, rise: Vector2i) -> void:
-	grid._cells[cell] = {
-		"walkable": true,
-		"layer": null,
-		"tile_kind": &"HALF_STAIR_NE",
-		"rise_dir": rise,
-		"altitude_low": alt_low,
-		"altitude_high": alt_high,
-		"altitude_center": (alt_low + alt_high) / 2.0,
-	}
+	grid._test_put(cell, CellData.make_walkable(null, &"HALF_STAIR_NE", rise, alt_low, alt_high))
 
 
 # ===========================================================================

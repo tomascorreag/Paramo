@@ -1,9 +1,36 @@
 class_name TileInteractionController
 extends Node
 
-## Handles right-click tile interactions via a radial icon menu.
+## Handles right-click tile interactions via a radial icon menu driven by an
+## ActionRegistry: every right-click builds an ActionContext, asks the
+## registry which TileActions are available for that cell, groups them by
+## `action.group` into submenus, and shows only the resulting entries.
+## Empty availability -> no menu, UXOverlay flashes denied.
 
 const GROUP_NAME: StringName = &"tile_interaction_controller"
+
+# Action scripts — preloaded so Godot's class_name global cache is populated
+# before _ready(). Listing them explicitly here also makes the set of
+# registered actions easy to audit in one place.
+const _ACTION_INSPECT: GDScript = preload("res://scripts/systems/actions/action_inspect.gd")
+const _ACTION_PLANT_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_plant_frailejon.gd")
+const _ACTION_REMOVE_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_remove_frailejon.gd")
+const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_build_bridge.gd")
+const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
+
+# Visuals for submenu group nodes — rendered as parent items on the wheel
+# whose submenu children are the individual TileActions in that group.
+const _GROUP_META: Dictionary = {
+	&"plant": {
+		"icon_path": "res://assets/sprites/UX/icons.png",
+		"region": Rect2(0, 32, 16, 16),
+	},
+	&"build": {
+		"icon_path": "res://assets/sprites/UX/icons.png",
+		"region": Rect2(16, 32, 16, 16),
+	},
+}
+
 
 @export var pathfinder: Pathfinder
 @export var player: Player
@@ -15,11 +42,16 @@ var _pending_cell: Vector2i
 var _menu: Control  # RadialMenu instance
 var _menu_layer: CanvasLayer
 var _radial_menu_script: GDScript
+var _registry: ActionRegistry
 
 var _ux_overlay: Node2D  # UXOverlay
 var _frailejon_scene: PackedScene
 var _icons_texture: Texture2D
-var _plants_texture: Texture2D
+
+# --- Debug toast (used by ActionInspect) -----------------------------------
+var _toast_layer: CanvasLayer
+var _toast_label: Label
+var _toast_tween: Tween
 
 
 func _enter_tree() -> void:
@@ -40,11 +72,17 @@ func _ready() -> void:
 	_radial_menu_script = load("res://scripts/ui/radial_menu.gd")
 	_frailejon_scene = load("res://scenes/tools/frailejon.tscn")
 	_icons_texture = load("res://assets/sprites/UX/icons.png")
-	_plants_texture = load("res://assets/sprites/objects/ISO_Plants.png")
 
 	_menu_layer = CanvasLayer.new()
 	_menu_layer.layer = 101  # above PostProcessLayer (100)
 	add_child(_menu_layer)
+
+	_registry = ActionRegistry.new()
+	_registry.register(_ACTION_INSPECT.new())
+	_registry.register(_ACTION_PLANT_FRAILEJON.new())
+	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
+	_registry.register(_ACTION_BUILD_BRIDGE.new())
+	_registry.register(_ACTION_REMOVE_BRIDGE.new())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -65,12 +103,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_interactable(cell):
 		return
 
-	# Skip the menu entirely when there are no valid actions for this cell
-	# (e.g. clicking a bridge the player is standing on — remove_bridge is
-	# suppressed and nothing else applies).
-	var items: Array[Dictionary] = _build_menu_items(cell)
-	if items.is_empty():
+	var ctx := _build_context(cell)
+	var actions := _registry.available_for(ctx)
+	if actions.is_empty():
+		# Right-click landed on a reachable tile but nothing applies — signal
+		# the no-op so the player doesn't wonder if the click registered.
+		if _ux_overlay and _ux_overlay.has_method(&"flash_denied"):
+			_ux_overlay.flash_denied(cell)
+		get_viewport().set_input_as_handled()
 		return
+
+	var items := _assemble_menu_items(actions)
 
 	_pending_cell = cell
 	var world_pos := pathfinder.cell_to_world(cell)
@@ -90,7 +133,7 @@ func planted_cells() -> Dictionary:
 
 ## True iff `cell` is a right-clickable tile from the player's current position:
 ## resolved, walkable, and Chebyshev-adjacent to the player. Planted/bridge
-## cells stay interactable — the menu offers removal instead of placement.
+## cells stay interactable — the registry picks what (if anything) applies.
 func is_interactable(cell: Vector2i) -> bool:
 	if cell == Pathfinder.NO_CELL:
 		return false
@@ -100,6 +143,60 @@ func is_interactable(cell: Vector2i) -> bool:
 		return false
 	var diff := cell - player.current_cell
 	return maxi(abs(diff.x), abs(diff.y)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Registry-driven menu assembly
+# ---------------------------------------------------------------------------
+
+func _build_context(cell: Vector2i) -> ActionContext:
+	var ctx := ActionContext.new()
+	ctx.cell = cell
+	ctx.tile = pathfinder.get_tile(cell)
+	ctx.player_cell = player.current_cell
+	ctx.tile_interaction = self
+	ctx.traversal = traversal_placement_controller
+	ctx.pathfinder = pathfinder
+	return ctx
+
+
+# Partitions actions into top-level entries (group == &"") and submenu-wrapped
+# groups (group != &""). Group order follows registration order; within a
+# group, actions also keep registration order.
+func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
+	var top: Array[Dictionary] = []
+	var groups: Dictionary = {}            # StringName -> Array[Dictionary]
+	var group_order: Array[StringName] = []
+	for a in actions:
+		var entry := {
+			"id": String(a.id),
+			"icon": a.icon,
+			"region": a.icon_region,
+		}
+		if a.group == &"":
+			top.append(entry)
+		else:
+			if not groups.has(a.group):
+				groups[a.group] = []
+				group_order.append(a.group)
+			groups[a.group].append(entry)
+
+	for group_id in group_order:
+		var submenu: Array = groups[group_id]
+		var meta: Dictionary = _GROUP_META.get(group_id, {})
+		var parent_icon: Texture2D = _icons_texture
+		var parent_region := Rect2()
+		if meta.has("icon_path"):
+			parent_icon = load(meta["icon_path"])
+		if meta.has("region"):
+			parent_region = meta["region"]
+		top.append({
+			"id": String(group_id),
+			"icon": parent_icon,
+			"region": parent_region,
+			"submenu": submenu,
+		})
+	return top
 
 
 func _show_action_menu(screen_pos: Vector2, items: Array[Dictionary]) -> void:
@@ -127,86 +224,17 @@ func _close_menu() -> void:
 
 
 func _on_item_selected(id: String) -> void:
-	match id:
-		"frailejon":
-			_plant_frailejon(_pending_cell)
-			# Per UX spec: square clears the moment the object is added,
-			# not after the menu finishes its close animation.
-			if _ux_overlay:
-				_ux_overlay.unlock()
-		"bridge":
-			_begin_traversal(_pending_cell, &"bridge")
-		"remove_frailejon":
-			_remove_frailejon(_pending_cell)
-			if _ux_overlay:
-				_ux_overlay.unlock()
-		"remove_bridge":
-			_remove_bridge(_pending_cell)
-			if _ux_overlay:
-				_ux_overlay.unlock()
-
-
-# Cell-state-aware menu: planted → trowel only; bridge cell → trash only;
-# otherwise → the default plant+build submenus.
-func _build_menu_items(cell: Vector2i) -> Array[Dictionary]:
-	if _planted.has(cell):
-		return [
-			{
-				"id": "remove_frailejon",
-				"icon": _icons_texture,
-				"region": Rect2(48, 32, 16, 16),
-			},
-		]
-
-	if traversal_placement_controller:
-		var t := traversal_placement_controller.find_traversal_at(cell)
-		if t != null:
-			# Suppress the option entirely when the player is anywhere on
-			# this traversal — _remove_bridge would refuse the action, so
-			# exposing it as a menu entry is just noise.
-			if _is_player_on_traversal(t):
-				return []
-			return [
-				{
-					"id": "remove_bridge",
-					"icon": _icons_texture,
-					"region": Rect2(32, 32, 16, 16),
-				},
-			]
-
-	return [
-		{
-			"id": "plant",
-			"icon": _icons_texture,
-			"region": Rect2(0, 32, 16, 16),
-			"submenu": [
-				{
-					"id": "frailejon",
-					"icon": _plants_texture,
-					"region": Rect2(96, 0, 32, 32),
-				},
-			],
-		},
-		{
-			"id": "build",
-			"icon": _icons_texture,
-			"region": Rect2(16, 32, 16, 16),
-			"submenu": [
-				{
-					"id": "bridge",
-					"icon": _icons_texture,
-					"region": Rect2(16, 48, 16, 16),
-				},
-			],
-		},
-	]
-
-
-func _begin_traversal(origin: Vector2i, kind: StringName) -> void:
-	if traversal_placement_controller == null:
-		push_warning("TileInteractionController: no TraversalPlacementController wired.")
+	var action := _registry.find(StringName(id))
+	if action == null:
+		# Unknown id — could be a stale submenu parent click; ignore.
 		return
-	traversal_placement_controller.begin(origin, kind)
+	var ctx := _build_context(_pending_cell)
+	action.execute(ctx)
+	# Per UX spec: the lock square should clear the instant a placement
+	# commits, not wait for the menu's close animation. Placement/removal
+	# actions carry no residual state, so unlock unconditionally here.
+	if _ux_overlay:
+		_ux_overlay.unlock()
 
 
 func _on_menu_closed() -> void:
@@ -215,7 +243,11 @@ func _on_menu_closed() -> void:
 		_ux_overlay.unlock()
 
 
-func _plant_frailejon(cell: Vector2i) -> void:
+# ---------------------------------------------------------------------------
+# Actions called via ActionContext (previously private)
+# ---------------------------------------------------------------------------
+
+func plant_frailejon(cell: Vector2i) -> void:
 	var frailejon: Node2D = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 
@@ -228,7 +260,7 @@ func _plant_frailejon(cell: Vector2i) -> void:
 		pathfinder.set_cell_penalty(cell, frailejon.pathfinding_penalty)
 
 
-func _remove_frailejon(cell: Vector2i) -> void:
+func remove_frailejon(cell: Vector2i) -> void:
 	var node: Node2D = _planted.get(cell)
 	if node == null:
 		return
@@ -239,28 +271,75 @@ func _remove_frailejon(cell: Vector2i) -> void:
 		node.queue_free()
 
 
-func _remove_bridge(cell: Vector2i) -> void:
+func begin_traversal(origin: Vector2i, kind: StringName) -> void:
+	if traversal_placement_controller == null:
+		push_warning("TileInteractionController: no TraversalPlacementController wired.")
+		return
+	traversal_placement_controller.begin(origin, kind)
+
+
+func remove_bridge(cell: Vector2i) -> void:
 	if traversal_placement_controller == null:
 		return
 	var t: Traversal = traversal_placement_controller.find_traversal_at(cell)
 	if t == null:
 		return
-	# Defense in depth — the menu should already hide this option when the
-	# player is on the traversal (see _build_menu_items), but check again so
-	# scripted callers or future input paths can't strand the player.
-	if _is_player_on_traversal(t):
+	# Defense in depth — the registry should already hide this option when
+	# the player is on the traversal (ActionRemoveBridge.is_available), but
+	# check again so scripted callers can't strand the player.
+	if is_player_on_traversal(t):
 		push_warning("TileInteractionController: refusing to remove bridge — player stands on it.")
 		return
 	traversal_placement_controller.remove_traversal(t)
 
 
-func _is_player_on_traversal(t: Traversal) -> bool:
+func is_player_on_traversal(t: Traversal) -> bool:
 	if player == null or t == null:
 		return false
 	for entry in t.painted_cells():
 		if entry["cell"] == player.current_cell:
 			return true
 	return false
+
+
+# ---------------------------------------------------------------------------
+# Debug toast (used by ActionInspect)
+# ---------------------------------------------------------------------------
+
+## Shows `text` as a bottom-screen label for `duration` seconds, then fades.
+## Cheap stand-in for a proper tile-info panel; tied to ActionInspect for now.
+func show_debug_toast(text: String, duration: float) -> void:
+	_ensure_toast()
+	_toast_label.text = text
+	_toast_label.modulate.a = 1.0
+	_toast_label.visible = true
+	if _toast_tween and _toast_tween.is_valid():
+		_toast_tween.kill()
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(duration)
+	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.35)
+	_toast_tween.tween_callback(func() -> void: _toast_label.visible = false)
+	# Also echo to stdout so the info is visible when UI is off.
+	print("[inspect] ", text)
+
+
+func _ensure_toast() -> void:
+	if _toast_layer != null and is_instance_valid(_toast_layer):
+		return
+	_toast_layer = CanvasLayer.new()
+	_toast_layer.layer = 100  # below the radial menu's 101
+	add_child(_toast_layer)
+	_toast_label = Label.new()
+	_toast_label.add_theme_color_override(&"font_color", Color.WHITE)
+	_toast_label.add_theme_color_override(&"font_shadow_color", Color(0, 0, 0, 0.85))
+	_toast_label.add_theme_constant_override(&"shadow_offset_x", 1)
+	_toast_label.add_theme_constant_override(&"shadow_offset_y", 1)
+	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_toast_label.offset_top = -28.0
+	_toast_label.offset_bottom = -8.0
+	_toast_label.visible = false
+	_toast_layer.add_child(_toast_label)
 
 
 func _event_global_position(mb: InputEventMouseButton) -> Vector2:

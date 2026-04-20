@@ -64,6 +64,7 @@ var _x_frame: int = 0
 var _x_frame_timer: float = 0.0
 
 var _base_x_tween: Tween
+var _denied_tween: Tween
 
 
 func _enter_tree() -> void:
@@ -141,6 +142,28 @@ func enter_bridge_mode(
 	_state = State.BRIDGE
 	_rebuild_candidate_sprites()
 	_apply_state_visibility()
+
+
+## Brief red flash on `cell` to signal a right-click had no applicable action.
+## Uses the LockedX reticle so it visually matches the normal lock UX without
+## actually entering LOCKED state. Ignored while already in LOCKED or BRIDGE.
+func flash_denied(cell: Vector2i) -> void:
+	if _state != State.HOVER:
+		return
+	if cell == Pathfinder.NO_CELL:
+		return
+	if _denied_tween and _denied_tween.is_valid():
+		_denied_tween.kill()
+	_locked_x.region_rect = _x_frame_rect(0)
+	_locked_x.global_position = cell_visual_center(cell)
+	_locked_x.modulate = Color(1.0, 0.3, 0.3, 1.0)
+	_locked_x.visible = true
+	_denied_tween = create_tween()
+	_denied_tween.tween_property(_locked_x, "modulate:a", 0.0, 0.25)
+	_denied_tween.tween_callback(func() -> void:
+		_locked_x.visible = false
+		_locked_x.modulate = Color.WHITE
+	)
 
 
 func exit_bridge_mode() -> void:

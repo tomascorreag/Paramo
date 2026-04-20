@@ -11,8 +11,25 @@ extends RefCounted
 #   1. Owns the SHAPE lookup table (tile_kind -> rise direction / ramp size).
 #   2. Reads altitude from each TileMapLayer's "altitude" metadata (int,
 #      half-steps). All tiles on a layer share the layer's altitude.
-#   3. Builds the per-cell state dict by scanning a set of TileMapLayers.
+#   3. Builds the per-cell state (a 2D CellData array) by scanning a set of
+#      TileMapLayers.
 #   4. Answers walkability, altitude, and transition queries for pathfinding.
+#
+# ----------------------------------------------------------------------------
+# Storage: 2D CellData array
+# ----------------------------------------------------------------------------
+#
+# Cells are held in `_tiles: Array[Array[CellData]]` sized to the union of all
+# TileMapLayer used_rects, with the origin offset stored in `_bounds`. Cells
+# with no tile on any layer are `null` slots.
+#
+# Assumption: no new cell positions are added at runtime — only the contents
+# of existing cells change (health, moisture, biodiversity, occupancy). The
+# TileMap footprint is the whole playfield. If that assumption breaks, call
+# rebuild() with the expanded layer set.
+#
+# Mutating per-cell runtime fields: `get_tile(cell)` returns the live
+# CellData; change fields on it in place (RefCounted, shared instance).
 #
 # ----------------------------------------------------------------------------
 # Altitude unit
@@ -109,17 +126,13 @@ const _HALF_RAMPS: Dictionary = {
 }
 
 
-# Per-cell record. Dictionary for speed; all runtime state.
-#
-# Keys:
-#   walkable:        bool
-#   layer:           TileMapLayer (which layer contributed the winning tile)
-#   tile_kind:       StringName
-#   rise_dir:        Vector2i    (ZERO for flats)
-#   altitude_low:    int         (half-steps; the layer's altitude meta)
-#   altitude_high:   int         (half-steps; low + ramp_size)
-#   altitude_center: float       (half-steps; (low + high) / 2.0)
-var _cells: Dictionary[Vector2i, Dictionary] = {}
+# Union of all layer used_rects, computed in build(). The 2D array indexes
+# off `_bounds.position` so a cell `c` maps to `_tiles[c.y - _bounds.position.y][c.x - _bounds.position.x]`.
+var _bounds: Rect2i = Rect2i(0, 0, 0, 0)
+
+# 2D grid of cell state. `_tiles[y_idx][x_idx]` is a CellData or null (no tile
+# painted at that cell on any layer).
+var _tiles: Array[Array] = []  # Array[Array[CellData]] — typed inner arrays
 
 # Layers in paint order as provided to build().
 var _layers: Array[TileMapLayer] = []
@@ -136,12 +149,14 @@ var _altitudes_desc: Array[int] = []
 # ----------------------------------------------------------------------------
 
 func build(layers: Array[TileMapLayer]) -> void:
-	_cells.clear()
 	_layers.clear()
 	_layer_altitudes.clear()
 	_altitudes_desc.clear()
+	_tiles.clear()
+	_bounds = Rect2i(0, 0, 0, 0)
 
 	var alt_set: Dictionary[int, bool] = {}
+	var valid_layers: Array[TileMapLayer] = []
 
 	for layer in layers:
 		if layer == null:
@@ -162,6 +177,7 @@ func build(layers: Array[TileMapLayer]) -> void:
 		_layers.append(layer)
 		_layer_altitudes[layer] = alt
 		alt_set[alt] = true
+		valid_layers.append(layer)
 
 	# Cache sorted altitude list for resolve_click.
 	for a in alt_set.keys():
@@ -169,8 +185,37 @@ func build(layers: Array[TileMapLayer]) -> void:
 	_altitudes_desc.sort()
 	_altitudes_desc.reverse()
 
+	# Compute bounds as the union of every layer's used_rect. Empty bounds
+	# stays as (0,0,0,0) — queries return null / false.
+	_bounds = _compute_bounds_union(valid_layers)
+	if _bounds.size.x > 0 and _bounds.size.y > 0:
+		_allocate_tiles(_bounds.size)
+
 	for layer in _layers:
 		_ingest_layer(layer)
+
+
+func _compute_bounds_union(layers: Array[TileMapLayer]) -> Rect2i:
+	var has_any := false
+	var result := Rect2i()
+	for layer in layers:
+		var r := layer.get_used_rect()
+		if r.size.x <= 0 or r.size.y <= 0:
+			continue
+		if not has_any:
+			result = r
+			has_any = true
+		else:
+			result = result.merge(r)
+	return result
+
+
+func _allocate_tiles(size: Vector2i) -> void:
+	_tiles.resize(size.y)
+	for y in size.y:
+		var row: Array[CellData] = []
+		row.resize(size.x)  # fills with null
+		_tiles[y] = row
 
 
 func _ingest_layer(layer: TileMapLayer) -> void:
@@ -208,70 +253,68 @@ func _ingest_layer(layer: TileMapLayer) -> void:
 		var ramp_size: int = shape["ramp_size"]
 		var rise_dir: Vector2i = shape["rise"]
 		var altitude_high: int = altitude_low + ramp_size
-		var entry := {
-			"walkable": true,
-			"layer": layer,
-			"tile_kind": kind,
-			"rise_dir": rise_dir,
-			"altitude_low": altitude_low,
-			"altitude_high": altitude_high,
-			"altitude_center": (altitude_low + altitude_high) / 2.0,
-		}
+		var entry := CellData.make_walkable(layer, kind, rise_dir, altitude_low, altitude_high)
 		_merge_walkable(cell, entry)
 
 
-# Merge a walkable tile into _cells[cell] using the "tallest wins" rule.
-func _merge_walkable(cell: Vector2i, entry: Dictionary) -> void:
-	if not _cells.has(cell):
-		_cells[cell] = entry
+# Merge a walkable tile into `cell`'s slot using the "tallest wins" rule.
+func _merge_walkable(cell: Vector2i, entry: CellData) -> void:
+	var existing := _get_raw(cell)
+	if existing == null:
+		_put_raw(cell, entry)
 		return
 
-	var existing: Dictionary = _cells[cell]
-	if not existing.get("walkable", false):
-		var block_alt: int = existing.get("altitude_low", 0)
-		if block_alt >= int(entry["altitude_high"]):
+	if not existing.walkable:
+		if existing.altitude_low >= entry.altitude_high:
 			return
-		_cells[cell] = entry
+		_put_raw(cell, entry)
 		return
 
-	var existing_high: int = existing.get("altitude_high", 0)
-	var new_high: int = entry["altitude_high"]
-	if new_high > existing_high:
-		_cells[cell] = entry
-	elif new_high == existing_high:
+	if entry.altitude_high > existing.altitude_high:
+		_put_raw(cell, entry)
+	elif entry.altitude_high == existing.altitude_high:
 		push_warning(
 			"TileGrid: cell %s has two walkable tiles at altitude_high=%d; keeping first."
-			% [cell, existing_high]
+			% [cell, existing.altitude_high]
 		)
 
 
 func _merge_blocked(cell: Vector2i, layer: TileMapLayer, altitude: int) -> void:
-	if not _cells.has(cell):
-		_cells[cell] = _make_blocked_entry(layer, altitude)
+	var existing := _get_raw(cell)
+	if existing == null:
+		_put_raw(cell, CellData.make_blocked(layer, altitude))
 		return
 
-	var existing: Dictionary = _cells[cell]
-	if not existing.get("walkable", false):
-		var cur_alt: int = existing.get("altitude_low", 0)
-		if altitude > cur_alt:
-			_cells[cell] = _make_blocked_entry(layer, altitude)
+	if not existing.walkable:
+		if altitude > existing.altitude_low:
+			_put_raw(cell, CellData.make_blocked(layer, altitude))
 		return
 
-	var existing_high: int = existing.get("altitude_high", 0)
-	if altitude >= existing_high:
-		_cells[cell] = _make_blocked_entry(layer, altitude)
+	if altitude >= existing.altitude_high:
+		_put_raw(cell, CellData.make_blocked(layer, altitude))
 
 
-func _make_blocked_entry(layer: TileMapLayer, altitude: int) -> Dictionary:
-	return {
-		"walkable": false,
-		"layer": layer,
-		"tile_kind": &"",
-		"rise_dir": Vector2i.ZERO,
-		"altitude_low": altitude,
-		"altitude_high": altitude,
-		"altitude_center": float(altitude),
-	}
+# Raw 2D-array write. Caller must have ensured `cell` is in bounds. Used only
+# internally by merge logic during build.
+func _put_raw(cell: Vector2i, data: CellData) -> void:
+	var dx := cell.x - _bounds.position.x
+	var dy := cell.y - _bounds.position.y
+	if dx < 0 or dy < 0 or dx >= _bounds.size.x or dy >= _bounds.size.y:
+		push_error("TileGrid: cell %s out of bounds %s — skipping." % [cell, _bounds])
+		return
+	_tiles[dy][dx] = data
+
+
+# Raw 2D-array read. Returns null when the cell is out of bounds OR when no
+# tile exists at that cell on any layer.
+func _get_raw(cell: Vector2i) -> CellData:
+	if _bounds.size.x <= 0 or _bounds.size.y <= 0:
+		return null
+	var dx := cell.x - _bounds.position.x
+	var dy := cell.y - _bounds.position.y
+	if dx < 0 or dy < 0 or dx >= _bounds.size.x or dy >= _bounds.size.y:
+		return null
+	return _tiles[dy][dx]
 
 
 # ----------------------------------------------------------------------------
@@ -279,17 +322,30 @@ func _make_blocked_entry(layer: TileMapLayer, altitude: int) -> Dictionary:
 # ----------------------------------------------------------------------------
 
 func is_walkable(cell: Vector2i) -> bool:
-	var info: Dictionary = _cells.get(cell, {})
-	return info.get("walkable", false)
+	var t := _get_raw(cell)
+	return t != null and t.walkable
 
 
 func altitude_center(cell: Vector2i) -> float:
-	var info: Dictionary = _cells.get(cell, {})
-	return info.get("altitude_center", 0.0)
+	var t := _get_raw(cell)
+	if t == null:
+		return 0.0
+	return t.altitude_center
 
 
-func cell_info(cell: Vector2i) -> Dictionary:
-	return _cells.get(cell, {})
+## Live CellData for `cell`, or null when out of bounds / unpainted.
+## Callers can mutate runtime fields (health, moisture, biodiversity) on the
+## returned instance — it's the grid's stored reference.
+func get_tile(cell: Vector2i) -> CellData:
+	return _get_raw(cell)
+
+
+func in_bounds(cell: Vector2i) -> bool:
+	return _bounds.has_point(cell)
+
+
+func bounds() -> Rect2i:
+	return _bounds
 
 
 # Returns the ramp size (in half-steps) for this cell:
@@ -297,15 +353,17 @@ func cell_info(cell: Vector2i) -> Dictionary:
 #   1 for half-height ramps (HALF_SLOPE_*, HALF_STAIR_*)
 #   2 for full-height ramps (SLOPE_*, STAIR_*)
 func ramp_size(cell: Vector2i) -> int:
-	var info: Dictionary = _cells.get(cell, {})
-	if info.is_empty():
+	var t := _get_raw(cell)
+	if t == null:
 		return 0
-	return info.altitude_high - info.altitude_low
+	return t.altitude_high - t.altitude_low
 
 
 func layer_of(cell: Vector2i) -> TileMapLayer:
-	var info: Dictionary = _cells.get(cell, {})
-	return info.get("layer", null)
+	var t := _get_raw(cell)
+	if t == null:
+		return null
+	return t.layer
 
 
 # Roughness of the winning tile at `cell` (from the "roughness" custom_data
@@ -316,14 +374,13 @@ func layer_of(cell: Vector2i) -> TileMapLayer:
 # data defaults to 0.0 for unset tiles, so adding the layer to a tileset is
 # safe without immediately authoring every tile.
 func roughness_at(cell: Vector2i) -> float:
-	var info: Dictionary = _cells.get(cell, {})
-	var layer: TileMapLayer = info.get("layer", null)
-	if layer == null:
+	var t := _get_raw(cell)
+	if t == null or t.layer == null:
 		return 0.0
-	var data := layer.get_cell_tile_data(cell)
+	var data := t.layer.get_cell_tile_data(cell)
 	if data == null:
 		return 0.0
-	var tile_set := layer.tile_set
+	var tile_set := t.layer.tile_set
 	var rough_id := _find_custom_data_layer(tile_set, "roughness")
 	if rough_id < 0:
 		return 0.0
@@ -349,9 +406,14 @@ func altitudes_desc() -> Array[int]:
 
 func walkable_cells() -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for cell in _cells:
-		if _cells[cell].get("walkable", false):
-			out.append(cell)
+	if _bounds.size.x <= 0 or _bounds.size.y <= 0:
+		return out
+	for y in _bounds.size.y:
+		var row: Array = _tiles[y]
+		for x in _bounds.size.x:
+			var t: CellData = row[x]
+			if t != null and t.walkable:
+				out.append(Vector2i(x + _bounds.position.x, y + _bounds.position.y))
 	return out
 
 
@@ -359,36 +421,30 @@ func walkable_cells() -> Array[Vector2i]:
 # For flats: exit == enter == altitude_low (== altitude_high).
 # For ramps: depends on whether dir matches the rise direction.
 func exit_altitude(cell: Vector2i, dir: Vector2i) -> int:
-	var info: Dictionary = _cells.get(cell, {})
-	if not info.get("walkable", false):
+	var t := _get_raw(cell)
+	if t == null or not t.walkable:
 		return -9999
-	var rise: Vector2i = info.get("rise_dir", Vector2i.ZERO)
-	var low: int = info.get("altitude_low", 0)
-	var high: int = info.get("altitude_high", 0)
-	if rise == Vector2i.ZERO:
-		return low
-	if dir == rise:
-		return high
-	if dir == -rise:
-		return low
+	if t.rise_dir == Vector2i.ZERO:
+		return t.altitude_low
+	if dir == t.rise_dir:
+		return t.altitude_high
+	if dir == -t.rise_dir:
+		return t.altitude_low
 	return -9999  # perpendicular exit — forbidden
 
 
 # Altitude at the edge of `cell` when entered from step direction `from_dir`.
 # `from_dir` is the step vector (to - from) that brought the agent into cell.
 func enter_altitude(cell: Vector2i, from_dir: Vector2i) -> int:
-	var info: Dictionary = _cells.get(cell, {})
-	if not info.get("walkable", false):
+	var t := _get_raw(cell)
+	if t == null or not t.walkable:
 		return -9999
-	var rise: Vector2i = info.get("rise_dir", Vector2i.ZERO)
-	var low: int = info.get("altitude_low", 0)
-	var high: int = info.get("altitude_high", 0)
-	if rise == Vector2i.ZERO:
-		return low
-	if from_dir == rise:
-		return low
-	if from_dir == -rise:
-		return high
+	if t.rise_dir == Vector2i.ZERO:
+		return t.altitude_low
+	if from_dir == t.rise_dir:
+		return t.altitude_low
+	if from_dir == -t.rise_dir:
+		return t.altitude_high
 	return -9999
 
 
@@ -421,23 +477,64 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 # for entries, pass the negation of the step dir (the side the agent came
 # from, seen from the destination cell).
 func _edge_altitudes(cell: Vector2i, dir: Vector2i) -> Array[int]:
-	var info: Dictionary = _cells.get(cell, {})
-	if not info.get("walkable", false):
+	var t := _get_raw(cell)
+	if t == null or not t.walkable:
 		return []
-	var rise: Vector2i = info.get("rise_dir", Vector2i.ZERO)
-	var low: int = info.get("altitude_low", 0)
-	var high: int = info.get("altitude_high", 0)
-	if rise == Vector2i.ZERO:
-		return [low]
-	if dir == rise:
-		return [high]
-	if dir == -rise:
-		return [low]
+	if t.rise_dir == Vector2i.ZERO:
+		return [t.altitude_low]
+	if dir == t.rise_dir:
+		return [t.altitude_high]
+	if dir == -t.rise_dir:
+		return [t.altitude_low]
 	# Perpendicular edge: permissive for half-ramps only.
-	var kind: StringName = info.get("tile_kind", &"")
-	if _HALF_RAMPS.has(kind):
-		return [low, high]
+	if _HALF_RAMPS.has(t.tile_kind):
+		return [t.altitude_low, t.altitude_high]
 	return []
+
+
+# ----------------------------------------------------------------------------
+# Test-only injection
+# ----------------------------------------------------------------------------
+
+## TEST-ONLY. Unit tests that exercise primitive queries without going through
+## build() inject cells via this helper. Grows `_bounds` and reallocates
+## `_tiles` as needed so tests don't have to manage bounds themselves.
+func _test_put(cell: Vector2i, data: CellData) -> void:
+	if _bounds.size.x <= 0 or _bounds.size.y <= 0:
+		_bounds = Rect2i(cell, Vector2i(1, 1))
+		_allocate_tiles(_bounds.size)
+	elif not _bounds.has_point(cell):
+		_expand_bounds_to_include(cell)
+	_put_raw(cell, data)
+
+
+func _expand_bounds_to_include(cell: Vector2i) -> void:
+	var new_min_x := mini(_bounds.position.x, cell.x)
+	var new_min_y := mini(_bounds.position.y, cell.y)
+	var new_max_x := maxi(_bounds.position.x + _bounds.size.x, cell.x + 1)
+	var new_max_y := maxi(_bounds.position.y + _bounds.size.y, cell.y + 1)
+	var new_bounds := Rect2i(
+		Vector2i(new_min_x, new_min_y),
+		Vector2i(new_max_x - new_min_x, new_max_y - new_min_y),
+	)
+
+	var new_tiles: Array[Array] = []
+	new_tiles.resize(new_bounds.size.y)
+	for y in new_bounds.size.y:
+		var row: Array[CellData] = []
+		row.resize(new_bounds.size.x)
+		new_tiles[y] = row
+
+	for y in _bounds.size.y:
+		var old_row: Array = _tiles[y]
+		var dst_y := y + (_bounds.position.y - new_bounds.position.y)
+		var dst_row: Array = new_tiles[dst_y]
+		var dst_x_off := _bounds.position.x - new_bounds.position.x
+		for x in _bounds.size.x:
+			dst_row[x + dst_x_off] = old_row[x]
+
+	_bounds = new_bounds
+	_tiles = new_tiles
 
 
 # ----------------------------------------------------------------------------

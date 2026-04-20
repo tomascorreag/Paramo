@@ -37,15 +37,16 @@ func _init() -> void:
 		Vector2i(6, 2), Vector2i(7, 2), Vector2i(5, 3), Vector2i(5, 4),       # Ground0 plateau + ramps
 	]
 	for c in keys:
-		var info := grid.cell_info(c)
-		var walk: bool = info.get("walkable", false)
-		var layer: TileMapLayer = info.get("layer", null)
-		var lname: String = layer.name if layer != null else "<none>"
+		var tile := grid.get_tile(c)
+		if tile == null:
+			print("  %s  <no tile>" % str(c))
+			continue
+		var lname: String = tile.layer.name if tile.layer != null else "<none>"
 		print("  %s  walk=%s  layer=%s  kind=%s  low=%s  high=%s" % [
-			str(c), str(walk), lname,
-			str(info.get("tile_kind", "")),
-			str(info.get("altitude_low", "?")),
-			str(info.get("altitude_high", "?")),
+			str(c), str(tile.walkable), lname,
+			str(tile.tile_kind),
+			str(tile.altitude_low),
+			str(tile.altitude_high),
 		])
 
 	print("--- transitions of interest ---")

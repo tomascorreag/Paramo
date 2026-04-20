@@ -108,7 +108,8 @@ func _update_label() -> void:
 	if _hover_cell == Pathfinder.NO_CELL:
 		debug_label.text = "cell: —    kind: —    alt: —"
 		return
-	var info := pathfinder.cell_info(_hover_cell)
-	var kind: StringName = info.get("tile_kind", &"?")
-	var alt_center: float = info.get("altitude_center", 0.0)
-	debug_label.text = "cell: %s    kind: %s    alt: %s" % [_hover_cell, kind, alt_center]
+	var tile := pathfinder.get_tile(_hover_cell)
+	if tile == null:
+		debug_label.text = "cell: %s    kind: —    alt: —" % _hover_cell
+		return
+	debug_label.text = "cell: %s    kind: %s    alt: %s" % [_hover_cell, tile.tile_kind, tile.altitude_center]
