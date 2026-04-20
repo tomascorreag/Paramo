@@ -212,6 +212,7 @@ func _begin_next_step() -> void:
 	# mid-step produce paths from the cell the player is committed to
 	# reaching, which is the only sensible anchor point.
 	current_cell = next_cell
+	_update_shadow_roughness()
 
 	_set_facing(dir)
 	_apply_step_interp(0.0)
@@ -275,6 +276,21 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	_light.position.y = _base_sprite_offset_y + lift
 
 
+func _update_shadow_roughness() -> void:
+	# Push the current cell's ground roughness to the shadow shader. Called on
+	# step start and initial snap — commits as soon as `current_cell` advances
+	# so the jaggedness visibly flips the moment the player crosses materials.
+	if _pathfinder == null or _shadow == null:
+		return
+	var mat := _shadow.material as ShaderMaterial
+	if mat == null:
+		return
+	mat.set_shader_parameter(&"roughness", _pathfinder.roughness_at(current_cell))
+	mat.set_shader_parameter(
+		&"neighbor_match", _pathfinder.neighbor_altitude_match(current_cell)
+	)
+
+
 func _update_lantern() -> void:
 	if _time_manager == null:
 		return
@@ -320,5 +336,6 @@ func _snap_to_starting_cell() -> void:
 	current_cell = start
 	_altitude = _pathfinder.altitude_center(start)
 	_apply_position(current_cell, _altitude)
+	_update_shadow_roughness()
 	if debug_logging:
 		print("Player: snapped to cell %s at altitude %s" % [current_cell, _altitude])

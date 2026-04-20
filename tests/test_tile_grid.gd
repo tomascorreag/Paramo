@@ -119,6 +119,21 @@ func test_is_walkable_blocked_cell() -> void:
 	assert_false(grid.is_walkable(Vector2i(0, 0)))
 
 
+# ===========================================================================
+# roughness_at
+# ===========================================================================
+
+func test_roughness_at_missing_cell_returns_zero() -> void:
+	assert_eq(grid.roughness_at(Vector2i(5, 5)), 0.0)
+
+
+func test_roughness_at_cell_with_null_layer_returns_zero() -> void:
+	# _inject_walkable stores layer=null — helper must tolerate that without
+	# crashing (happens in tests and for cells with no winning tilemap layer).
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_eq(grid.roughness_at(Vector2i(0, 0)), 0.0)
+
+
 func test_is_walkable_nonexistent_cell() -> void:
 	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
 	assert_false(grid.is_walkable(Vector2i(99, 99)))

@@ -39,6 +39,7 @@ var _preview_cells: Array[Dictionary] = []
 var _preview_hover_cell: Vector2i = Pathfinder.NO_CELL
 var _preview_valid: bool = false
 var _blocked_cells: Dictionary = {}
+var _traversals: Array[Traversal] = []
 
 
 func _enter_tree() -> void:
@@ -274,8 +275,36 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	world.add_child(inst)
 	Bridge.configure(inst, _origin_cell, far_cell, base_alt, _placer, pathfinder)
 	inst.build()
+	_traversals.append(inst)
 
 	cancel()
+
+
+# ----------------------------------------------------------------------------
+# Removal
+# ----------------------------------------------------------------------------
+
+## Returns the Traversal whose painted cells cover `cell`, or null.
+func find_traversal_at(cell: Vector2i) -> Traversal:
+	for t in _traversals:
+		if not is_instance_valid(t):
+			continue
+		for entry in t.painted_cells():
+			if entry["cell"] == cell:
+				return t
+	return null
+
+
+## Erase a traversal's tiles, free its node, and rebuild pathfinding.
+func remove_traversal(t: Traversal) -> void:
+	if t == null or not is_instance_valid(t):
+		return
+	if _placer == null:
+		_placer = StructurePlacer.new(structure_layer_manager)
+	t.despawn(_placer)
+	_traversals.erase(t)
+	if pathfinder:
+		pathfinder.rebuild()
 
 
 # ----------------------------------------------------------------------------

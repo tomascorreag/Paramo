@@ -16,6 +16,9 @@ shader_parameter/cap_width = 6.0000002375
 shader_parameter/visual_y_offset = -2.0
 shader_parameter/shadow_opacity = 0.5
 shader_parameter/sprite_offset = Vector2(0, -15)
+shader_parameter/roughness = 0.0
+shader_parameter/noise_cell_px = 3.00000011875
+shader_parameter/noise_world_follow = 0.5
 
 [sub_resource type="RectangleShape2D" id="SubResource_1"]
 size = Vector2(10, 14)

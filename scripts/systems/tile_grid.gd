@@ -308,6 +308,33 @@ func layer_of(cell: Vector2i) -> TileMapLayer:
 	return info.get("layer", null)
 
 
+# Roughness of the winning tile at `cell` (from the "roughness" custom_data
+# layer on the tileset). 0.0 when: the cell has no tile, no tile_data, the
+# tileset lacks the "roughness" layer, or the value is unset.
+#
+# Used by shadow shaders to scale vertical-displacement noise. Float custom
+# data defaults to 0.0 for unset tiles, so adding the layer to a tileset is
+# safe without immediately authoring every tile.
+func roughness_at(cell: Vector2i) -> float:
+	var info: Dictionary = _cells.get(cell, {})
+	var layer: TileMapLayer = info.get("layer", null)
+	if layer == null:
+		return 0.0
+	var data := layer.get_cell_tile_data(cell)
+	if data == null:
+		return 0.0
+	var tile_set := layer.tile_set
+	var rough_id := _find_custom_data_layer(tile_set, "roughness")
+	if rough_id < 0:
+		return 0.0
+	var v: Variant = data.get_custom_data_by_layer_id(rough_id)
+	if v is float:
+		return v
+	if v is int:
+		return float(v)
+	return 0.0
+
+
 func layers() -> Array[TileMapLayer]:
 	return _layers.duplicate()
 

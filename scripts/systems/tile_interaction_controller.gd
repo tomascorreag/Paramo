@@ -65,12 +65,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_interactable(cell):
 		return
 
+	# Skip the menu entirely when there are no valid actions for this cell
+	# (e.g. clicking a bridge the player is standing on — remove_bridge is
+	# suppressed and nothing else applies).
+	var items: Array[Dictionary] = _build_menu_items(cell)
+	if items.is_empty():
+		return
+
 	_pending_cell = cell
 	var world_pos := pathfinder.cell_to_world(cell)
 	var alt := pathfinder.altitude_center(cell)
 	var tile_world := world_pos + Vector2(0.0, -alt * Pathfinder.HALF_STEP_PX)
 	var tile_screen := get_viewport().get_canvas_transform() * tile_world
-	_show_action_menu(tile_screen)
+	_show_action_menu(tile_screen, items)
 	get_viewport().set_input_as_handled()
 
 
@@ -82,7 +89,8 @@ func planted_cells() -> Dictionary:
 
 
 ## True iff `cell` is a right-clickable tile from the player's current position:
-## resolved, walkable, unplanted, and Chebyshev-adjacent to the player.
+## resolved, walkable, and Chebyshev-adjacent to the player. Planted/bridge
+## cells stay interactable — the menu offers removal instead of placement.
 func is_interactable(cell: Vector2i) -> bool:
 	if cell == Pathfinder.NO_CELL:
 		return false
@@ -90,41 +98,12 @@ func is_interactable(cell: Vector2i) -> bool:
 		return false
 	if not pathfinder.is_walkable(cell):
 		return false
-	if _planted.has(cell):
-		return false
 	var diff := cell - player.current_cell
 	return maxi(abs(diff.x), abs(diff.y)) == 1
 
 
-func _show_action_menu(screen_pos: Vector2) -> void:
+func _show_action_menu(screen_pos: Vector2, items: Array[Dictionary]) -> void:
 	_close_menu()
-
-	var items: Array[Dictionary] = [
-		{
-			"id": "plant",
-			"icon": _icons_texture,
-			"region": Rect2(0, 32, 16, 16),
-			"submenu": [
-				{
-					"id": "frailejon",
-					"icon": _plants_texture,
-					"region": Rect2(96, 0, 32, 32),
-				},
-			],
-		},
-		{
-			"id": "build",
-			"icon": _icons_texture,
-			"region": Rect2(16, 32, 16, 16),
-			"submenu": [
-				{
-					"id": "bridge",
-					"icon": _icons_texture,
-					"region": Rect2(16, 48, 16, 16),
-				},
-			],
-		},
-	]
 
 	_menu = _radial_menu_script.new()
 	_menu.center_icon_texture = _icons_texture
@@ -157,6 +136,70 @@ func _on_item_selected(id: String) -> void:
 				_ux_overlay.unlock()
 		"bridge":
 			_begin_traversal(_pending_cell, &"bridge")
+		"remove_frailejon":
+			_remove_frailejon(_pending_cell)
+			if _ux_overlay:
+				_ux_overlay.unlock()
+		"remove_bridge":
+			_remove_bridge(_pending_cell)
+			if _ux_overlay:
+				_ux_overlay.unlock()
+
+
+# Cell-state-aware menu: planted → trowel only; bridge cell → trash only;
+# otherwise → the default plant+build submenus.
+func _build_menu_items(cell: Vector2i) -> Array[Dictionary]:
+	if _planted.has(cell):
+		return [
+			{
+				"id": "remove_frailejon",
+				"icon": _icons_texture,
+				"region": Rect2(48, 32, 16, 16),
+			},
+		]
+
+	if traversal_placement_controller:
+		var t := traversal_placement_controller.find_traversal_at(cell)
+		if t != null:
+			# Suppress the option entirely when the player is anywhere on
+			# this traversal — _remove_bridge would refuse the action, so
+			# exposing it as a menu entry is just noise.
+			if _is_player_on_traversal(t):
+				return []
+			return [
+				{
+					"id": "remove_bridge",
+					"icon": _icons_texture,
+					"region": Rect2(32, 32, 16, 16),
+				},
+			]
+
+	return [
+		{
+			"id": "plant",
+			"icon": _icons_texture,
+			"region": Rect2(0, 32, 16, 16),
+			"submenu": [
+				{
+					"id": "frailejon",
+					"icon": _plants_texture,
+					"region": Rect2(96, 0, 32, 32),
+				},
+			],
+		},
+		{
+			"id": "build",
+			"icon": _icons_texture,
+			"region": Rect2(16, 32, 16, 16),
+			"submenu": [
+				{
+					"id": "bridge",
+					"icon": _icons_texture,
+					"region": Rect2(16, 48, 16, 16),
+				},
+			],
+		},
+	]
 
 
 func _begin_traversal(origin: Vector2i, kind: StringName) -> void:
@@ -181,9 +224,43 @@ func _plant_frailejon(cell: Vector2i) -> void:
 	world.add_child(frailejon)
 	frailejon.global_position = base + Vector2(0.0, -alt * Pathfinder.HALF_STEP_PX)
 	_planted[cell] = frailejon
-	# TODO: when a removal/unplant flow lands, call pathfinder.clear_cell_penalty(cell).
 	if pathfinder and frailejon.pathfinding_penalty != 0.0:
 		pathfinder.set_cell_penalty(cell, frailejon.pathfinding_penalty)
+
+
+func _remove_frailejon(cell: Vector2i) -> void:
+	var node: Node2D = _planted.get(cell)
+	if node == null:
+		return
+	_planted.erase(cell)
+	if pathfinder:
+		pathfinder.clear_cell_penalty(cell)
+	if is_instance_valid(node):
+		node.queue_free()
+
+
+func _remove_bridge(cell: Vector2i) -> void:
+	if traversal_placement_controller == null:
+		return
+	var t: Traversal = traversal_placement_controller.find_traversal_at(cell)
+	if t == null:
+		return
+	# Defense in depth — the menu should already hide this option when the
+	# player is on the traversal (see _build_menu_items), but check again so
+	# scripted callers or future input paths can't strand the player.
+	if _is_player_on_traversal(t):
+		push_warning("TileInteractionController: refusing to remove bridge — player stands on it.")
+		return
+	traversal_placement_controller.remove_traversal(t)
+
+
+func _is_player_on_traversal(t: Traversal) -> bool:
+	if player == null or t == null:
+		return false
+	for entry in t.painted_cells():
+		if entry["cell"] == player.current_cell:
+			return true
+	return false
 
 
 func _event_global_position(mb: InputEventMouseButton) -> Vector2:

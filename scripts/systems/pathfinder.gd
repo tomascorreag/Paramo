@@ -206,6 +206,51 @@ func cell_info(cell: Vector2i) -> Dictionary:
 	return _grid.cell_info(cell)
 
 
+func roughness_at(cell: Vector2i) -> float:
+	if _grid == null:
+		return 0.0
+	return _grid.roughness_at(cell)
+
+
+# Vector4 mask of which of the 4 iso-diamond neighbors of `cell` share the
+# same walkable altitude as `cell` itself: (SE, NW, SW, NE) → (x, y, z, w),
+# 1.0 for match, 0.0 otherwise. Empty / non-walkable neighbors return 0.0.
+# Used by the shadow shader to discard shadow pixels that would land on
+# ground at a different altitude than the one the entity stands on.
+func neighbor_altitude_match(cell: Vector2i) -> Vector4:
+	if _grid == null:
+		return Vector4.ZERO
+	var self_info := _grid.cell_info(cell)
+	if self_info.is_empty():
+		return Vector4.ZERO
+	var self_alt: float = self_info.get("altitude_center", 0.0)
+	return Vector4(
+		_alt_match(cell + Vector2i(1, 0), self_alt),   # SE
+		_alt_match(cell + Vector2i(-1, 0), self_alt),  # NW
+		_alt_match(cell + Vector2i(0, 1), self_alt),   # SW
+		_alt_match(cell + Vector2i(0, -1), self_alt),  # NE
+	)
+
+
+func _alt_match(c: Vector2i, self_alt: float) -> float:
+	var info := _grid.cell_info(c)
+	if info.is_empty():
+		return 0.0
+	# Walls / EDGE_* / non-walkable cells have no ground surface to cast a
+	# shadow on, even if their blocking altitude happens to match.
+	if not info.get("walkable", false):
+		return 0.0
+	# Match when the entity's altitude intersects the neighbor's altitude
+	# RANGE. For flats low == high so this reduces to equality; for ramps
+	# adjacency to either end (low OR high) is enough to keep the shadow
+	# visible on the ramp. A tiny epsilon absorbs float round-off.
+	var n_low: float = info.get("altitude_low", 0.0)
+	var n_high: float = info.get("altitude_high", 0.0)
+	if self_alt >= n_low - 0.01 and self_alt <= n_high + 0.01:
+		return 1.0
+	return 0.0
+
+
 # Registers an additional enter-cost on a cell. Passing 0.0 clears the entry.
 # Penalty is added to the base step cost every time a search considers moving
 # INTO `cell`, so a large value (>1.0) forces detours, a small value nudges.

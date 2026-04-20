@@ -35,6 +35,7 @@ func _ready() -> void:
 
 	_shadow.frame = _sprite.frame
 	_update_shadow_params()
+	_update_shadow_roughness()
 
 	# Reparent shadow for independent y-sorting (same pattern as Player).
 	remove_child(_shadow)
@@ -85,6 +86,24 @@ func _update_shadow_params() -> void:
 
 	_shadow_scale = h_ratio
 	_shadow.set_meta(&"shadow_scale", _shadow_scale)
+
+
+func _update_shadow_roughness() -> void:
+	# Stationary entity: sample once at spawn. Frailejones don't move, and
+	# growth-stage changes don't relocate them, so a single set is enough.
+	if not is_instance_valid(_shadow):
+		return
+	var mat: ShaderMaterial = _shadow.material as ShaderMaterial
+	if mat == null:
+		return
+	var pathfinder := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
+	var r: float = pathfinder.roughness_at(cell) if pathfinder != null else 0.0
+	mat.set_shader_parameter(&"roughness", r)
+	var nm: Vector4 = (
+		pathfinder.neighbor_altitude_match(cell) if pathfinder != null
+		else Vector4.ONE
+	)
+	mat.set_shader_parameter(&"neighbor_match", nm)
 
 
 func _measure_frame_dimensions() -> Vector2:
