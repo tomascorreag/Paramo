@@ -5,13 +5,9 @@ extends TileAction
 # Second click (handled by TraversalPlacementController) picks the far end.
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
-
-
 func _init() -> void:
 	id = &"build_bridge"
-	icon = load(_ICON_PATH)
-	icon_region = Rect2(16, 48, 16, 16)
+	icon = preload("res://assets/sprites/UX/icons/bridge.tres")
 	group = &"build"
 
 

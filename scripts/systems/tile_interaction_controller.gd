@@ -22,16 +22,12 @@ const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/a
 
 # Visuals for submenu group nodes — rendered as parent items on the wheel
 # whose submenu children are the individual TileActions in that group.
-const _GROUP_META: Dictionary = {
-	&"plant": {
-		"icon_path": "res://assets/sprites/UX/icons.png",
-		"region": Rect2(0, 32, 16, 16),
-	},
-	&"build": {
-		"icon_path": "res://assets/sprites/UX/icons.png",
-		"region": Rect2(16, 32, 16, 16),
-	},
+const _GROUP_ICONS: Dictionary = {
+	&"plant": preload("res://assets/sprites/UX/icons/group_plant.tres"),
+	&"build": preload("res://assets/sprites/UX/icons/group_build.tres"),
 }
+
+const _CENTER_ICON: Texture2D = preload("res://assets/sprites/UX/icons/center.tres")
 
 
 @export var pathfinder: Pathfinder
@@ -48,7 +44,6 @@ var _registry: ActionRegistry
 
 var _ux_overlay: Node2D  # UXOverlay
 var _frailejon_scene: PackedScene
-var _icons_texture: Texture2D
 
 # --- Debug toast (used by ActionInspect) -----------------------------------
 var _toast_layer: CanvasLayer
@@ -73,7 +68,6 @@ func _ready() -> void:
 		) as TraversalPlacementController
 	_radial_menu_script = load("res://scripts/ui/radial_menu.gd")
 	_frailejon_scene = load("res://scenes/tools/frailejon.tscn")
-	_icons_texture = load("res://assets/sprites/UX/icons.png")
 
 	_menu_layer = CanvasLayer.new()
 	_menu_layer.layer = 101  # above PostProcessLayer (100)
@@ -175,7 +169,6 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 		var entry := {
 			"id": String(a.id),
 			"icon": a.icon,
-			"region": a.icon_region,
 		}
 		if a.group == &"":
 			top.append(entry)
@@ -187,17 +180,9 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 
 	for group_id in group_order:
 		var submenu: Array = groups[group_id]
-		var meta: Dictionary = _GROUP_META.get(group_id, {})
-		var parent_icon: Texture2D = _icons_texture
-		var parent_region := Rect2()
-		if meta.has("icon_path"):
-			parent_icon = load(meta["icon_path"])
-		if meta.has("region"):
-			parent_region = meta["region"]
 		top.append({
 			"id": String(group_id),
-			"icon": parent_icon,
-			"region": parent_region,
+			"icon": _GROUP_ICONS.get(group_id),
 			"submenu": submenu,
 		})
 	return top
@@ -207,8 +192,7 @@ func _show_action_menu(screen_pos: Vector2, items: Array[Dictionary]) -> void:
 	_close_menu()
 
 	_menu = _radial_menu_script.new()
-	_menu.center_icon_texture = _icons_texture
-	_menu.center_icon_region = Rect2(0, 0, 16, 16)
+	_menu.center_icon_texture = _CENTER_ICON
 	_menu_layer.add_child(_menu)
 	_menu.item_selected.connect(_on_item_selected)
 	_menu.closed.connect(_on_menu_closed)

@@ -6,15 +6,12 @@ extends TileAction
 # debugging aid during development.
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
 const _DISPLAY_DURATION: float = 2.5
 
 
 func _init() -> void:
 	id = &"inspect"
-	icon = load(_ICON_PATH)
-	# Fifth slot on the action row (after plant/build/trash/trowel).
-	icon_region = Rect2(64, 32, 16, 16)
+	icon = preload("res://assets/sprites/UX/icons/inspect.tres")
 	group = &""
 
 

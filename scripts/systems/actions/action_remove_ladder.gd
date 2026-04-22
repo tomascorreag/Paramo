@@ -5,16 +5,10 @@ extends TileAction
 # standing on the ladder's origin or top cell (would strand them).
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
-
-
 func _init() -> void:
 	id = &"remove_ladder"
-	icon = load(_ICON_PATH)
-	# Reuses the generic trash glyph — only one of RemoveBridge / RemoveLadder
-	# is ever available at a cell, so the shared icon never appears twice in
-	# the same menu.
-	icon_region = Rect2(32, 32, 16, 16)
+	# Shares trash.tres with ActionRemoveBridge.
+	icon = preload("res://assets/sprites/UX/icons/trash.tres")
 	group = &""  # top-level
 
 

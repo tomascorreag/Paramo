@@ -4,13 +4,9 @@ extends TileAction
 # Plant a frailejon on an empty walkable tile. Grouped under "plant".
 
 
-const _ICON_PATH: String = "res://assets/sprites/objects/ISO_Plants.png"
-
-
 func _init() -> void:
 	id = &"plant_frailejon"
-	icon = load(_ICON_PATH)
-	icon_region = Rect2(96, 0, 32, 32)
+	icon = preload("res://assets/sprites/UX/icons/frailejon.tres")
 	group = &"plant"
 
 

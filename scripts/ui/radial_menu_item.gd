@@ -19,17 +19,14 @@ var _scale_tween: Tween
 func setup(data: Dictionary) -> void:
 	item_data = data
 
-	var atlas := AtlasTexture.new()
-	atlas.atlas = data["icon"]
-	atlas.region = data.get("region", Rect2())
-
+	var tex: Texture2D = data["icon"]
 	_icon = TextureRect.new()
-	_icon.texture = atlas
+	_icon.texture = tex
 	_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_icon)
 
-	var icon_size := atlas.region.size
+	var icon_size := tex.get_size()
 	custom_minimum_size = icon_size
 	size = icon_size
 	pivot_offset = icon_size / 2.0

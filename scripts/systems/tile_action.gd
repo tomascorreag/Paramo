@@ -21,7 +21,6 @@ extends RefCounted
 
 var id: StringName = &""
 var icon: Texture2D
-var icon_region: Rect2 = Rect2()
 
 ## Empty = top-level wheel entry. Non-empty = groups with sibling actions
 ## under a submenu identified by this StringName.

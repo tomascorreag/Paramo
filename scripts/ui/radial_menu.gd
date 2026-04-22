@@ -3,10 +3,11 @@ extends Control
 
 ## Animated radial icon wheel. Call open() with a screen position and an array
 ## of item dicts. Each dict: { "id": String, "icon": Texture2D,
-## "region": Rect2, "submenu": Array[Dictionary] (optional) }.
+## "submenu": Array[Dictionary] (optional) }.
 ##
-## Set center_icon_texture / center_icon_region before calling open() to display
-## a hub icon at the center of every wheel level.
+## Set center_icon_texture before calling open() to display a hub icon at the
+## center of every wheel level. The texture carries its own region
+## (AtlasTexture / AnimatedTexture).
 
 signal item_selected(id: String)
 signal closed
@@ -20,9 +21,8 @@ const OVERLAY_COLOR: Color = Color(0.0, 0.0, 0.0, 0.25)
 
 var _item_script: GDScript = preload("res://scripts/ui/radial_menu_item.gd")
 
-## Set these before calling open() to show a center hub icon.
+## Set before calling open() to show a center hub icon.
 var center_icon_texture: Texture2D
-var center_icon_region: Rect2
 
 var _center: Vector2
 var _items: Array[Control] = []
@@ -221,16 +221,14 @@ func _spawn_center_icon(center: Vector2) -> void:
 	if center_icon_texture == null:
 		return
 
-	var atlas := AtlasTexture.new()
-	atlas.atlas = center_icon_texture
-	atlas.region = center_icon_region
+	var icon_size := center_icon_texture.get_size()
 
 	_center_icon = TextureRect.new()
-	_center_icon.texture = atlas
+	_center_icon.texture = center_icon_texture
 	_center_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_center_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_center_icon.position = center - center_icon_region.size / 2.0
-	_center_icon.pivot_offset = center_icon_region.size / 2.0
+	_center_icon.position = center - icon_size / 2.0
+	_center_icon.pivot_offset = icon_size / 2.0
 	_center_icon.scale = Vector2.ZERO
 	_center_icon.modulate.a = 0.0
 	add_child(_center_icon)

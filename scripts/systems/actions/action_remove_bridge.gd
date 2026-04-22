@@ -5,13 +5,9 @@ extends TileAction
 # standing anywhere on that bridge (would strand them).
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
-
-
 func _init() -> void:
 	id = &"remove_bridge"
-	icon = load(_ICON_PATH)
-	icon_region = Rect2(32, 32, 16, 16)
+	icon = preload("res://assets/sprites/UX/icons/trash.tres")
 	group = &""  # top-level
 
 

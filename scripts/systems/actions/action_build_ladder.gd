@@ -6,14 +6,9 @@ extends TileAction
 # on the other side of a NE or NW camera-facing wall.
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
-
-
 func _init() -> void:
 	id = &"build_ladder"
-	icon = load(_ICON_PATH)
-	# Ladder glyph (authored at col 0, row 4 of icons.png).
-	icon_region = Rect2(0, 64, 16, 16)
+	icon = preload("res://assets/sprites/UX/icons/ladder.tres")
 	group = &"build"
 
 

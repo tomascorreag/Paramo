@@ -4,13 +4,9 @@ extends TileAction
 # Trowel: remove a planted frailejon from the clicked cell.
 
 
-const _ICON_PATH: String = "res://assets/sprites/UX/icons.png"
-
-
 func _init() -> void:
 	id = &"remove_frailejon"
-	icon = load(_ICON_PATH)
-	icon_region = Rect2(48, 32, 16, 16)
+	icon = preload("res://assets/sprites/UX/icons/trowel.tres")
 	group = &""  # top-level
 
 
