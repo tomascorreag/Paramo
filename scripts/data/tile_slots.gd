@@ -139,6 +139,13 @@ const WALL_SE: StringName           = &"WALL_SE"
 const WALL_SW: StringName           = &"WALL_SW"
 
 
+# --- Ladders (camera-facing variants — hang on NE/NW walls, Minecraft-style)
+# Non-walkable like walls (absent from tile_grid._SHAPES); traversal wiring is
+# handled by the Ladder traversal + Pathfinder.add_traversal_edge.
+const LADDER_NE: StringName         = &"LADDER_NE"
+const LADDER_NW: StringName         = &"LADDER_NW"
+
+
 # --- Edges (tile-edge features along the named diagonal side) ---------------
 const EDGE_NW: StringName           = &"EDGE_NW"
 const EDGE_NE: StringName           = &"EDGE_NE"

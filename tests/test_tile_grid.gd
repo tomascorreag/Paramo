@@ -678,6 +678,69 @@ func test_build_wall_at_or_above_blocks_lower_walkable() -> void:
 	assert_false(grid.is_walkable(Vector2i(0, 0)))
 
 
+# Regression for the ladder-won't-traverse bug: LADDER_* tiles are painted on
+# the lower floor's cell (so the back-face sprite drapes across the shared
+# diamond plane). They must NOT mark that cell non-walkable, otherwise
+# TileGrid.can_transition() short-circuits at its walkability guard before
+# reaching the traversal-edge override that Pathfinder installs for ladders.
+func test_build_ladder_tile_does_not_block_lower_floor() -> void:
+	var setup := _make_tile_set({&"FLAT": true, &"LADDER_NE": true})
+	var ground := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	var ladder := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"LADDER_NE"}, 1)
+	grid.build([ground, ladder])
+
+	assert_true(
+		grid.is_walkable(Vector2i(0, 0)),
+		"ladder tile must be transparent to walkability — floor stays walkable"
+	)
+	var tile := grid.get_tile(Vector2i(0, 0))
+	assert_eq(tile.tile_kind, &"FLAT")
+	assert_eq(tile.altitude_low, 0)
+
+
+# Same shape for the NW variant, since both LADDER_NE and LADDER_NW must be
+# in TileGrid._DECORATIVE.
+func test_build_ladder_nw_tile_does_not_block_lower_floor() -> void:
+	var setup := _make_tile_set({&"FLAT": true, &"LADDER_NW": true})
+	var ground := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0)
+	var ladder := _make_layer(setup[0], setup[1], {Vector2i(0, 0): &"LADDER_NW"}, 1)
+	grid.build([ground, ladder])
+
+	assert_true(grid.is_walkable(Vector2i(0, 0)))
+
+
+# End-to-end: FLAT at alt 0, FLAT at alt 4 one cell NE, LADDER_NE painted on
+# the lower cell at alt 1 and alt 3 (what Ladder.plan_tiles produces for a
+# 2-cube climb). With the traversal edge registered, can_transition must
+# return true in both directions.
+func test_build_ladder_allows_transition_with_traversal_edge() -> void:
+	var setup := _make_tile_set({&"FLAT": true, &"LADDER_NE": true})
+	var lower := _make_layer(
+		setup[0], setup[1], {Vector2i(0, 0): &"FLAT"}, 0
+	)
+	var upper := _make_layer(
+		setup[0], setup[1], {Vector2i(0, -1): &"FLAT"}, 4
+	)
+	var rung_a := _make_layer(
+		setup[0], setup[1], {Vector2i(0, 0): &"LADDER_NE"}, 1
+	)
+	var rung_b := _make_layer(
+		setup[0], setup[1], {Vector2i(0, 0): &"LADDER_NE"}, 3
+	)
+	grid.build([lower, upper, rung_a, rung_b])
+
+	# Sanity: both endpoints stay walkable despite the ladder rungs.
+	assert_true(grid.is_walkable(Vector2i(0, 0)))
+	assert_true(grid.is_walkable(Vector2i(0, -1)))
+
+	# Without the edge, the 4-half-step altitude jump blocks the transition.
+	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(0, -1)))
+
+	grid.add_traversal_edge(Vector2i(0, 0), Vector2i(0, -1))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(0, -1)))
+	assert_true(grid.can_transition(Vector2i(0, -1), Vector2i(0, 0)))
+
+
 # ---------------------------------------------------------------------------
 # build() — layer metadata queries
 # ---------------------------------------------------------------------------

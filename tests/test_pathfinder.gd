@@ -338,6 +338,65 @@ func test_find_path_penalty_tiebreaks_against_clean_route() -> void:
 		assert_ne(c, Vector2i(1, 0), "path crossed the penalised cell")
 
 
+# ===========================================================================
+# find_path — ladder traversal-edge cost
+# ===========================================================================
+#
+# Per design: a ladder step costs one unit per half-step of altitude climbed,
+# so one full cube (altitude delta 2) costs the same as 2 flat tile steps.
+# Normal 4-neighbor flat steps stay at cost 1.0.
+
+
+func test_find_path_uses_ladder_when_only_route() -> void:
+	# Two flats separated by altitude 4 (2 cubes). Only a traversal edge
+	# connects them — no flats in between. Path must route through the edge.
+	pf._grid._test_put(
+		Vector2i(0, 0), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 0)
+	)
+	pf._grid._test_put(
+		Vector2i(0, -1), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4)
+	)
+	pf.add_traversal_edge(Vector2i(0, 0), Vector2i(0, -1))
+	var path := pf.find_path(Vector2i(0, 0), Vector2i(0, -1))
+	assert_eq(path.size(), 2)
+	assert_eq(path[0], Vector2i(0, 0))
+	assert_eq(path[1], Vector2i(0, -1))
+
+
+func test_find_path_prefers_two_short_ladders_over_one_tall_ladder() -> void:
+	# Shape:
+	#                (1,-1)=2 --lad2-- (2,-1)=4      <-- upper row
+	#                  |                 |
+	#                 lad1              lad3 (Δ=4)
+	#                  |                 |
+	#   (0,0)=0 --- (1,0)=0 --- (2,0)=0                 <-- lower row
+	#
+	# Route A (tall ladder): (0,0)→(1,0)→(2,0)→(2,-1)[Δ=4, cost 4].
+	#   Total step cost = 1 + 1 + 4 = 6.
+	# Route B (two short ladders):
+	#   (0,0)→(1,0)→(1,-1)[Δ=2, cost 2]→(2,-1)[Δ=2, cost 2].
+	#   Total step cost = 1 + 2 + 2 = 5.
+	# Without height-proportional ladder cost, both routes would tie at ~4
+	# (each ladder just 1 unit), and turn-penalty would decide. With the fix,
+	# route B is strictly cheaper.
+	for x in range(3):
+		pf._grid._test_put(
+			Vector2i(x, 0), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 0, 0)
+		)
+	pf._grid._test_put(
+		Vector2i(1, -1), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 2, 2)
+	)
+	pf._grid._test_put(
+		Vector2i(2, -1), CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 4)
+	)
+	pf.add_traversal_edge(Vector2i(1, 0), Vector2i(1, -1))  # Δ=2
+	pf.add_traversal_edge(Vector2i(1, -1), Vector2i(2, -1))  # Δ=2
+	pf.add_traversal_edge(Vector2i(2, 0), Vector2i(2, -1))  # Δ=4
+	var path := pf.find_path(Vector2i(0, 0), Vector2i(2, -1))
+	assert_true(path.has(Vector2i(1, -1)), "expected route via the two shorter ladders")
+	assert_false(path.has(Vector2i(2, 0)), "tall ladder route should lose on cost")
+
+
 func test_cell_penalty_api_roundtrip() -> void:
 	var cell := Vector2i(2, 3)
 	assert_eq(pf.get_cell_penalty(cell), 0.0)

@@ -134,7 +134,9 @@ func unlock() -> void:
 ## the cursor X shows there alone and all candidate hints hide; when hovering
 ## an invalid cell, the cursor X is hidden and all candidate hints stay visible.
 func enter_bridge_mode(
-	origin: Vector2i, candidates: Array[Vector2i], is_valid_endpoint: Callable = Callable()
+	origin: Vector2i,
+	candidates: Array[Vector2i],
+	is_valid_endpoint: Callable = Callable(),
 ) -> void:
 	_locked_cell = origin
 	_candidate_cells = candidates.duplicate()

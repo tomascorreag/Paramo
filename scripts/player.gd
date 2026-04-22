@@ -41,6 +41,9 @@ const DIR_TO_FACING: Dictionary = {
 
 
 @export var step_duration: float = 0.45
+## Multiplier applied to step_duration when the step crosses a Pathfinder
+## traversal edge (ladders). >1.0 slows the climb; 1.0 matches a normal step.
+@export var climb_duration_multiplier: float = 3.0
 @export var debug_logging: bool = false
 
 @export_group("Lantern")
@@ -85,6 +88,13 @@ var _step_to_cell: Vector2i
 var _step_from_alt: float = 0.0
 var _step_to_alt: float = 0.0
 var _step_t: float = 0.0
+var _step_duration_effective: float = 0.45
+# True when this step crosses a Pathfinder traversal edge (ladder). Triggers
+# L-shaped interpolation in _apply_step_interp instead of a straight lerp.
+var _step_is_climb: bool = false
+# Set once per descent step when the player flips from walk-direction facing
+# to ladder-facing (see _apply_step_interp). Resets each _begin_next_step.
+var _step_climb_turned: bool = false
 
 # Queued future destinations (excluding the step currently in progress).
 var _path: Array[Vector2i] = []
@@ -167,7 +177,7 @@ func _physics_process(delta: float) -> void:
 
 	if _stepping:
 		_walk_time += delta
-		_step_t += delta / step_duration
+		_step_t += delta / _step_duration_effective
 		if _step_t >= 1.0:
 			_finish_step()
 		else:
@@ -206,6 +216,15 @@ func _begin_next_step() -> void:
 	_step_to_alt = _pathfinder.altitude_center(next_cell)
 	_step_t = 0.0
 	_stepping = true
+	# Ladder steps (any step that crosses a Pathfinder traversal edge) take
+	# longer than a normal grid step — the player is climbing, not walking —
+	# and follow an L-shaped visual path (see _apply_step_interp).
+	_step_is_climb = _pathfinder.has_traversal_edge(current_cell, next_cell)
+	_step_climb_turned = false
+	if _step_is_climb:
+		_step_duration_effective = step_duration * climb_duration_multiplier
+	else:
+		_step_duration_effective = step_duration
 
 	# Commit the "logical" cell now: future pathfinds will plan from
 	# _step_to_cell, not from the cell we're leaving. This lets reclicks
@@ -231,8 +250,51 @@ func _apply_step_interp(t: float) -> void:
 	var clamped := clampf(t, 0.0, 1.0)
 	var from_world := _pathfinder.cell_to_world(_step_from_cell)
 	var to_world := _pathfinder.cell_to_world(_step_to_cell)
-	var pos := from_world.lerp(to_world, clamped)
-	var alt: float = lerpf(_step_from_alt, _step_to_alt, clamped)
+	var pos: Vector2
+	var alt: float
+	if _step_is_climb:
+		# L-shaped ladder path. The ladder sprite sits on the LOWER cell, so
+		# the vertical climb happens "over" that cell's (x, y), then a
+		# screen-diagonal slide covers the grid step at the HIGH altitude.
+		#   Going up  : phase 1 rise in place over from_world, phase 2 slide to to_world at high alt.
+		#   Going down: phase 1 slide from from_world to lower_world at high alt, phase 2 descend in place.
+		# _CLIMB_VERTICAL_FRAC makes the vertical leg "mostly over the base
+		# tile" — the horizontal slide gets the remaining fraction.
+		var going_up := _step_to_alt > _step_from_alt
+		var lower_world: Vector2 = from_world if going_up else to_world
+		var high_alt: float = _step_to_alt if going_up else _step_from_alt
+		var low_alt: float = _step_from_alt if going_up else _step_to_alt
+		var vfrac: float = _CLIMB_VERTICAL_FRAC
+		if going_up:
+			if clamped < vfrac:
+				var ph := clamped / vfrac
+				pos = lower_world
+				alt = lerpf(low_alt, high_alt, ph)
+			else:
+				var ph := (clamped - vfrac) / (1.0 - vfrac)
+				pos = lower_world.lerp(to_world, ph)
+				alt = high_alt
+		else:
+			var hfrac: float = 1.0 - vfrac
+			if clamped < hfrac:
+				var ph := clamped / hfrac
+				pos = from_world.lerp(lower_world, ph)
+				alt = high_alt
+			else:
+				# At the top of the ladder, turn around to face it before
+				# descending. Fires once per descent step.
+				if not _step_climb_turned:
+					# _step_from_cell is the upper cell on descent; flipping
+					# the subtraction gives the lower→upper direction (NE/NW).
+					var ladder_dir := _step_from_cell - _step_to_cell
+					_set_facing(ladder_dir)
+					_step_climb_turned = true
+				var ph := (clamped - hfrac) / vfrac
+				pos = lower_world
+				alt = lerpf(high_alt, low_alt, ph)
+	else:
+		pos = from_world.lerp(to_world, clamped)
+		alt = lerpf(_step_from_alt, _step_to_alt, clamped)
 	_altitude = alt
 	# Snap sort-Y to the southernmost (max Y) of origin/destination so the
 	# player stays in front of both tiles throughout the step.
@@ -259,6 +321,12 @@ func _apply_position(cell: Vector2i, alt: float) -> void:
 #
 # If per-tile y_sort_origin changes in the tileset, update this constant.
 const _SORT_OFFSET: float = -15.0  # tile_y_sort_origin(-16) + 1
+
+
+# Fraction of a climb step spent on the vertical leg (over the lower cell's
+# (x, y)). The remainder is the screen-diagonal slide at the high altitude.
+# >0.5 → "mostly over the base tile" per the design intent.
+const _CLIMB_VERTICAL_FRAC: float = 0.65
 
 
 # Altitude and sort-offset both shift global_position away from the visual

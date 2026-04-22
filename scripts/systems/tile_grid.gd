@@ -67,6 +67,7 @@ extends RefCounted
 
 
 const _TILE_KIND_FIELD: String = "tile_kind"
+const _WALKABLE_FIELD: String = "walkable"
 const _ALTITUDE_META: String = "altitude"
 
 
@@ -123,6 +124,17 @@ const _HALF_RAMPS: Dictionary = {
 	&"HALF_SLOPE_SE": true, &"HALF_SLOPE_SW": true,
 	&"HALF_STAIR_NE": true, &"HALF_STAIR_NW": true,
 	&"HALF_STAIR_SE": true, &"HALF_STAIR_SW": true,
+}
+
+
+# Purely visual tile kinds that must NOT participate in the walkability grid.
+# Their gameplay behavior is wired by separate systems (Ladder registers a
+# Pathfinder traversal edge). Ingest skips them so they don't overwrite the
+# walkable floor they're painted on top of — the ladder sprite lives on the
+# lower floor's cell by design, and treating it as a blocking tile would mark
+# the floor non-walkable and defeat can_transition()'s traversal-edge override.
+const _DECORATIVE: Dictionary = {
+	&"LADDER_NE": true, &"LADDER_NW": true,
 }
 
 
@@ -228,6 +240,12 @@ func _ingest_layer(layer: TileMapLayer) -> void:
 		)
 		return
 
+	# Optional per-tile walkable override. When the layer exists and holds
+	# `false` for a tile, AND-combines with the shape's baseline walkability:
+	# shape-walkable + walkable=false → blocked. When the layer is absent on
+	# the tileset, walkability is shape-only (back-compat).
+	var walkable_layer_id := _find_custom_data_layer(tile_set, _WALKABLE_FIELD)
+
 	var altitude_low: int = _layer_altitudes.get(layer, 0)
 
 	for cell in layer.get_used_cells():
@@ -240,21 +258,65 @@ func _ingest_layer(layer: TileMapLayer) -> void:
 		if kind_raw is String:
 			kind_str = kind_raw as String
 
+		var tex_origin_y: int = data.texture_origin.y
+
 		if kind_str.is_empty():
-			_merge_blocked(cell, layer, altitude_low)
+			_merge_blocked(cell, layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y))
 			continue
 
 		var kind := StringName(kind_str)
+		if _DECORATIVE.has(kind):
+			continue
 		if not _SHAPES.has(kind):
-			_merge_blocked(cell, layer, altitude_low)
+			_merge_blocked(cell, layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y))
+			continue
+
+		if walkable_layer_id >= 0 and not _read_walkable_bool(data, walkable_layer_id):
+			_merge_blocked(cell, layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y))
 			continue
 
 		var shape: Dictionary = _SHAPES[kind]
 		var ramp_size: int = shape["ramp_size"]
 		var rise_dir: Vector2i = shape["rise"]
 		var altitude_high: int = altitude_low + ramp_size
-		var entry := CellData.make_walkable(layer, kind, rise_dir, altitude_low, altitude_high)
+		var visual_top := _visual_top_for_walkable(altitude_high, ramp_size, tex_origin_y)
+		var entry := CellData.make_walkable(
+			layer, kind, rise_dir, altitude_low, altitude_high, visual_top
+		)
 		_merge_walkable(cell, entry)
+
+
+static func _read_walkable_bool(data: TileData, layer_id: int) -> bool:
+	var raw: Variant = data.get_custom_data_by_layer_id(layer_id)
+	if raw is bool:
+		return raw
+	return false
+
+
+# For walkable tiles:
+#   - Ramps (ramp_size > 0): walkable surface reaches altitude_high regardless
+#     of texture_origin.
+#   - Flats/cubes (ramp_size == 0): texture_origin.y determines whether the
+#     art extends DOWN from walkable (tex_y < 0 → visual_top == altitude_high,
+#     e.g. FULL_CUBE default) or extends UP with walkable at the top of the
+#     art (tex_y > 0 → visual_top == altitude_high + 2, e.g. FULL_CUBE
+#     high-variant). A positive-texture_origin FLAT has no side art and
+#     behaves as a top-only face at altitude_high.
+static func _visual_top_for_walkable(alt_high: int, ramp_size: int, tex_origin_y: int) -> int:
+	if ramp_size > 0:
+		return alt_high
+	if tex_origin_y > 0:
+		return alt_high + 2
+	return alt_high
+
+
+# Non-walkable tiles with positive texture_origin (WALL_*, LADDER_*, edges)
+# extend art UP from paint altitude by one full cube. Flip sign → art extends
+# downward (rare) keeps visual_top at paint altitude.
+static func _visual_top_for_blocked(altitude: int, tex_origin_y: int) -> int:
+	if tex_origin_y > 0:
+		return altitude + 2
+	return altitude
 
 
 # Merge a walkable tile into `cell`'s slot using the "tallest wins" rule.
@@ -279,19 +341,21 @@ func _merge_walkable(cell: Vector2i, entry: CellData) -> void:
 		)
 
 
-func _merge_blocked(cell: Vector2i, layer: TileMapLayer, altitude: int) -> void:
+func _merge_blocked(
+	cell: Vector2i, layer: TileMapLayer, altitude: int, visual_top_alt: int = -1
+) -> void:
 	var existing := _get_raw(cell)
 	if existing == null:
-		_put_raw(cell, CellData.make_blocked(layer, altitude))
+		_put_raw(cell, CellData.make_blocked(layer, altitude, visual_top_alt))
 		return
 
 	if not existing.walkable:
 		if altitude > existing.altitude_low:
-			_put_raw(cell, CellData.make_blocked(layer, altitude))
+			_put_raw(cell, CellData.make_blocked(layer, altitude, visual_top_alt))
 		return
 
 	if altitude >= existing.altitude_high:
-		_put_raw(cell, CellData.make_blocked(layer, altitude))
+		_put_raw(cell, CellData.make_blocked(layer, altitude, visual_top_alt))
 
 
 # Raw 2D-array write. Caller must have ensured `cell` is in bounds. Used only
@@ -338,6 +402,53 @@ func altitude_center(cell: Vector2i) -> float:
 ## returned instance — it's the grid's stored reference.
 func get_tile(cell: Vector2i) -> CellData:
 	return _get_raw(cell)
+
+
+## Build a CellData for whatever is painted on `layer` at `cell`, bypassing the
+## tallest-wins merge. Useful for hover resolution, which must consider every
+## tile in the altitude stack (e.g. the sides of a cube under another cube are
+## visible even though only the top cube is stored in _tiles). Returns null
+## when the layer has no tile at that cell or is missing the tile_kind custom
+## data layer.
+func inspect_tile_at(layer: TileMapLayer, cell: Vector2i) -> CellData:
+	if layer == null:
+		return null
+	var tile_set := layer.tile_set
+	if tile_set == null:
+		return null
+	var data := layer.get_cell_tile_data(cell)
+	if data == null:
+		return null
+	var kind_layer_id := _find_custom_data_layer(tile_set, _TILE_KIND_FIELD)
+	if kind_layer_id < 0:
+		return null
+	var kind_raw: Variant = data.get_custom_data_by_layer_id(kind_layer_id)
+	var kind_str: String = ""
+	if kind_raw is String:
+		kind_str = kind_raw as String
+	var tex_origin_y: int = data.texture_origin.y
+	var altitude_low: int = _layer_altitudes.get(layer, 0)
+
+	if kind_str.is_empty() or not _SHAPES.has(StringName(kind_str)):
+		return CellData.make_blocked(
+			layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y)
+		)
+
+	var walkable_layer_id := _find_custom_data_layer(tile_set, _WALKABLE_FIELD)
+	if walkable_layer_id >= 0 and not _read_walkable_bool(data, walkable_layer_id):
+		return CellData.make_blocked(
+			layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y)
+		)
+
+	var kind := StringName(kind_str)
+	var shape: Dictionary = _SHAPES[kind]
+	var ramp_size: int = shape["ramp_size"]
+	var rise_dir: Vector2i = shape["rise"]
+	var altitude_high: int = altitude_low + ramp_size
+	var visual_top := _visual_top_for_walkable(altitude_high, ramp_size, tex_origin_y)
+	return CellData.make_walkable(
+		layer, kind, rise_dir, altitude_low, altitude_high, visual_top
+	)
 
 
 func in_bounds(cell: Vector2i) -> bool:
@@ -456,6 +567,13 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	if abs(dir.x) + abs(dir.y) != 1:
 		return false
 
+	# Traversal-edge override (ladders): if a structure has declared a
+	# walkable edge between these two 4-connected cells, skip the shape-based
+	# altitude check entirely. Shape-based transitions still apply on every
+	# other edge of the same cell.
+	if _has_traversal_edge(from, to):
+		return true
+
 	var exit_alts := _edge_altitudes(from, dir)
 	if exit_alts.is_empty():
 		return false
@@ -466,6 +584,48 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 		if a in enter_alts:
 			return true
 	return false
+
+
+# ----------------------------------------------------------------------------
+# Traversal edges (ladders, future: teleporters, etc.)
+# ----------------------------------------------------------------------------
+#
+# Bidirectional edges between 4-connected cells that bypass shape/altitude
+# checks. Owner (Ladder) registers on build, removes on despawn. Edges live
+# on the grid and are re-applied by Pathfinder after rebuild.
+
+var _traversal_edges: Dictionary = {}  # Vector2i -> Dictionary[Vector2i, bool]
+
+
+func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
+	_add_edge_one_way(a, b)
+	_add_edge_one_way(b, a)
+
+
+func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
+	_remove_edge_one_way(a, b)
+	_remove_edge_one_way(b, a)
+
+
+func _add_edge_one_way(a: Vector2i, b: Vector2i) -> void:
+	var s: Dictionary = _traversal_edges.get(a, {})
+	s[b] = true
+	_traversal_edges[a] = s
+
+
+func _remove_edge_one_way(a: Vector2i, b: Vector2i) -> void:
+	if not _traversal_edges.has(a):
+		return
+	var s: Dictionary = _traversal_edges[a]
+	s.erase(b)
+	if s.is_empty():
+		_traversal_edges.erase(a)
+
+
+func _has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
+	if not _traversal_edges.has(a):
+		return false
+	return (_traversal_edges[a] as Dictionary).has(b)
 
 
 # Valid altitudes at the `dir`-facing edge of `cell`. Empty means the edge is

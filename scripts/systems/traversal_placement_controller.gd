@@ -28,6 +28,12 @@ enum Mode { IDLE, AWAITING_ENDPOINT }
 @export var world: Node2D
 @export var ux_overlay: Node2D
 @export var bridge_scene: PackedScene
+@export var ladder_scene: PackedScene
+## When true, prints a one-line diagnostic on every left-click during
+## placement: the resolved cell, hover cell, preview-valid state, and the
+## specific Ladder/Bridge validate Result for the click target. Cheap but
+## spammy — leave off in normal play.
+@export var debug_logging: bool = true
 
 
 var _mode: Mode = Mode.IDLE
@@ -55,6 +61,8 @@ func _ready() -> void:
 		) as StructureLayerManager
 	if bridge_scene == null:
 		bridge_scene = load("res://scenes/traversals/bridge.tscn")
+	if ladder_scene == null:
+		ladder_scene = load("res://scenes/traversals/ladder.tscn")
 
 
 # ----------------------------------------------------------------------------
@@ -83,6 +91,15 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 					return Bridge.validate(
 						origin, cell, pathfinder.grid(), blocked
 					) == Bridge.Result.OK
+			&"ladder":
+				candidates = Ladder.find_candidates(
+					origin, pathfinder.grid(), Ladder.MAX_HEIGHT_CUBES, _blocked_cells
+				)
+				var blocked_l := _blocked_cells
+				is_valid_endpoint = func(cell: Vector2i) -> bool:
+					return Ladder.validate(
+						origin, cell, pathfinder.grid(), blocked_l
+					) == Ladder.Result.OK
 		ux_overlay.enter_bridge_mode(origin, candidates, is_valid_endpoint)
 
 
@@ -129,17 +146,29 @@ func _process(_delta: float) -> void:
 		return
 	if pathfinder == null:
 		return
-	var hover := _resolve_hover_at_origin_altitude()
+	var hover := _resolve_preview_hover_cell()
 	if hover == _preview_hover_cell:
 		return
 	_preview_hover_cell = hover
 	_refresh_preview(hover)
 
 
-# Project the cursor onto the origin cell's altitude plane. Unlike
-# `pathfinder.resolve_click`, this returns a cell coordinate regardless of
-# walkability — so the preview can show (in red) over water, voids, or any
-# other invalid endpoint the player might aim at.
+# Preview hover cell, chosen per traversal kind:
+#   bridge — project cursor onto origin's altitude plane. Returns a cell
+#     regardless of walkability so the preview can turn red over water /
+#     voids / non-walkable endpoints.
+#   ladder — use `pathfinder.resolve_click`, the same resolver the commit
+#     click path uses, so preview target == click target. Ladder endpoints
+#     live on a different altitude than the origin, so the origin-plane
+#     projection used by bridges would resolve to the wrong cell.
+func _resolve_preview_hover_cell() -> Vector2i:
+	match _traversal_kind:
+		&"ladder":
+			return pathfinder.resolve_click(_mouse_global_position())
+		_:
+			return _resolve_hover_at_origin_altitude()
+
+
 func _resolve_hover_at_origin_altitude() -> Vector2i:
 	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
 	var alt: int = origin_tile.altitude_low if origin_tile != null else 0
@@ -155,6 +184,8 @@ func _refresh_preview(hover: Vector2i) -> void:
 	match _traversal_kind:
 		&"bridge":
 			_paint_bridge_preview(hover)
+		&"ladder":
+			_paint_ladder_preview(hover)
 
 
 func _paint_bridge_preview(hover: Vector2i) -> void:
@@ -171,6 +202,32 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 			_preview_cells.append(entry)
 	var result := Bridge.validate(_origin_cell, hover, pathfinder.grid(), _blocked_cells)
 	_preview_valid = result == Bridge.Result.OK
+	if _preview_valid:
+		structure_layer_manager.set_preview_valid()
+	else:
+		structure_layer_manager.set_preview_invalid()
+
+
+func _paint_ladder_preview(hover: Vector2i) -> void:
+	var placer := _ensure_preview_placer()
+	if placer == null:
+		return
+	var grid := pathfinder.grid()
+	var origin_tile := grid.get_tile(_origin_cell)
+	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
+	var top_tile := grid.get_tile(hover)
+	# Without a resolvable top tile we can't decide an altitude — skip ghost.
+	if top_tile == null:
+		return
+	var top_alt: int = top_tile.altitude_low
+	var plan := Ladder.plan_tiles(_origin_cell, hover, base_alt, top_alt)
+	if plan.is_empty():
+		return
+	for entry in plan:
+		if placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
+			_preview_cells.append(entry)
+	var result := Ladder.validate(_origin_cell, hover, grid, _blocked_cells)
+	_preview_valid = result == Ladder.Result.OK
 	if _preview_valid:
 		structure_layer_manager.set_preview_valid()
 	else:
@@ -235,6 +292,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	var far_cell := pathfinder.resolve_click(global_pos)
 	get_viewport().set_input_as_handled()
 
+	if debug_logging:
+		_log_click_diagnostic(far_cell)
+
 	# Invalid click (unresolved cell or a painted-but-invalid preview): flash
 	# the preview red and stay in placement mode so the player can re-aim.
 	if far_cell == Pathfinder.NO_CELL or not _preview_valid:
@@ -245,6 +305,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	match _traversal_kind:
 		&"bridge":
 			_place_bridge(far_cell)
+		&"ladder":
+			_place_ladder(far_cell)
 		_:
 			push_warning("Traversal placement: unknown kind '%s'." % _traversal_kind)
 			cancel()
@@ -276,6 +338,44 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	var inst: Bridge = bridge_scene.instantiate()
 	world.add_child(inst)
 	Bridge.configure(inst, _origin_cell, far_cell, base_alt, _placer, pathfinder)
+	inst.build()
+	_traversals.append(inst)
+
+	cancel()
+
+
+func _place_ladder(target_cell: Vector2i) -> void:
+	# Re-gather occupancy just before commit (parity with bridge).
+	_blocked_cells = _gather_blocked_cells()
+	var grid := pathfinder.grid()
+	var result: int = Ladder.validate(_origin_cell, target_cell, grid, _blocked_cells)
+	if result != Ladder.Result.OK:
+		push_warning(
+			"Ladder placement rejected: %s (origin=%s, target=%s)."
+			% [Ladder.result_name(result), _origin_cell, target_cell]
+		)
+		cancel()
+		return
+
+	if _placer == null:
+		_placer = StructurePlacer.new(structure_layer_manager)
+
+	# Canonicalize to Ladder's internal contract: origin_cell = lower floor,
+	# top_cell = upper floor. The first-click (`_origin_cell`) may be either
+	# end — top-down builds clicked the upper floor first.
+	var a_tile := grid.get_tile(_origin_cell)
+	var b_tile := grid.get_tile(target_cell)
+	var lower_cell: Vector2i = _origin_cell
+	var upper_cell: Vector2i = target_cell
+	var base_alt: int = a_tile.altitude_low
+	if b_tile.altitude_low < a_tile.altitude_low:
+		lower_cell = target_cell
+		upper_cell = _origin_cell
+		base_alt = b_tile.altitude_low
+
+	var inst: Ladder = ladder_scene.instantiate()
+	world.add_child(inst)
+	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
 	inst.build()
 	_traversals.append(inst)
 
@@ -317,3 +417,37 @@ func _event_global_position(mb: InputEventMouseButton) -> Vector2:
 	var viewport := get_viewport()
 	var canvas_xform := viewport.get_canvas_transform()
 	return canvas_xform.affine_inverse() * mb.position
+
+
+# Print why a second-click would fail. Called from _unhandled_input before the
+# preview-valid gate, so the user sees a specific rejection reason rather than
+# just a red flash.
+func _log_click_diagnostic(far_cell: Vector2i) -> void:
+	var hover_alt_cell := _resolve_hover_at_origin_altitude()
+	var grid := pathfinder.grid()
+	var origin_tile := grid.get_tile(_origin_cell)
+	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
+	var target_tile := grid.get_tile(far_cell) if far_cell != Pathfinder.NO_CELL else null
+	var target_alt_str: String = "-"
+	if target_tile != null:
+		target_alt_str = "%d..%d" % [target_tile.altitude_low, target_tile.altitude_high]
+
+	var reason := "n/a"
+	match _traversal_kind:
+		&"bridge":
+			if far_cell == Pathfinder.NO_CELL:
+				reason = "NO_CELL (click off grid)"
+			else:
+				reason = Bridge.result_name(Bridge.validate(
+					_origin_cell, far_cell, grid, _blocked_cells))
+		&"ladder":
+			if far_cell == Pathfinder.NO_CELL:
+				reason = "NO_CELL (click off grid)"
+			else:
+				reason = Ladder.result_name(Ladder.validate(
+					_origin_cell, far_cell, grid, _blocked_cells))
+
+	print("[TPC] kind=%s origin=%s base_alt=%d click_cell=%s target_alt=%s hover_cell=%s preview_valid=%s -> %s" % [
+		_traversal_kind, _origin_cell, base_alt, far_cell,
+		target_alt_str, hover_alt_cell, _preview_valid, reason,
+	])

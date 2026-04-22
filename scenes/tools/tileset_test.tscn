@@ -23,6 +23,7 @@
 [ext_resource type="Script" uid="uid://c7dopy3rarct7" path="res://scripts/systems/structure_layer_manager.gd" id="20_slm"]
 [ext_resource type="Script" uid="uid://bxivfefcu5f78" path="res://scripts/systems/traversal_placement_controller.gd" id="21_tpc"]
 [ext_resource type="PackedScene" uid="uid://dq8bridge000" path="res://scenes/traversals/bridge.tscn" id="22_brscn"]
+[ext_resource type="PackedScene" uid="uid://dq8ladder000" path="res://scenes/traversals/ladder.tscn" id="22_ldscn"]
 
 [sub_resource type="Gradient" id="Gradient_j22yb"]
 offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
@@ -199,6 +200,7 @@ structure_layer_manager = NodePath("../StructureLayerManager")
 world = NodePath("../World")
 ux_overlay = NodePath("../UXOverlay")
 bridge_scene = ExtResource("22_brscn")
+ladder_scene = ExtResource("22_ldscn")
 
 [node name="TileDebugOverlay" type="Node2D" parent="." unique_id=306206731 node_paths=PackedStringArray("pathfinder", "debug_label")]
 script = ExtResource("6_tdovl")

@@ -90,6 +90,12 @@ var _grid: TileGrid
 # intact because the objects that registered entries still exist in the world.
 var _cell_penalties: Dictionary[Vector2i, float] = {}
 
+# Traversal edges registered by Ladder (and future traversals) that bypass the
+# shape-based altitude check in TileGrid.can_transition. Stored here (not on
+# the grid) because rebuild() creates a fresh TileGrid; we re-apply these
+# after the grid is built so the owner doesn't have to re-register.
+var _traversal_edges: Array[Array] = []  # [[Vector2i, Vector2i], ...]
+
 
 func _enter_tree() -> void:
 	# Join the group in _enter_tree (runs top-down before sibling _readys) so
@@ -114,6 +120,10 @@ func rebuild() -> void:
 
 	_grid = TileGrid.new()
 	_grid.build(tile_map_layers)
+
+	# Re-apply traversal edges that survived the rebuild (ladders, etc.).
+	for pair in _traversal_edges:
+		_grid.add_traversal_edge(pair[0], pair[1])
 
 	if debug_logging:
 		var walk_count := _grid.walkable_cells().size()
@@ -175,7 +185,17 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 				continue
 
 			var turn_cost: float = 0.0 if cur_dir == -1 or cur_dir == dir_idx else _TURN_EPSILON
-			var tentative_g: float = cur_g + 1.0 + turn_cost + _cell_enter_cost(nb)
+			# Ladder steps (traversal edges) cost one unit per half-step of
+			# altitude climbed, so one full cube (2 half-steps) costs the same
+			# as 2 horizontal tile steps. Normal steps stay at the flat 1.0.
+			var step_cost: float = 1.0
+			if has_traversal_edge(cur_cell, nb):
+				var alt_delta: float = absf(
+					_grid.altitude_center(nb) - _grid.altitude_center(cur_cell)
+				)
+				if alt_delta > step_cost:
+					step_cost = alt_delta
+			var tentative_g: float = cur_g + step_cost + turn_cost + _cell_enter_cost(nb)
 			var nb_key: String = _state_key(nb, dir_idx)
 			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
 				continue
@@ -267,6 +287,41 @@ func get_cell_penalty(cell: Vector2i) -> float:
 	return _cell_penalties.get(cell, 0.0)
 
 
+# Register a bidirectional traversal edge between two 4-connected cells that
+# bypasses shape-based altitude checks. Ladders use this to let the player
+# step between a floor at altitude A and a floor at altitude A+2k on the
+# adjacent cell. Survives Pathfinder.rebuild(). The caller is responsible
+# for calling rebuild() (or the equivalent) if the edge should take effect
+# immediately — adding the edge here mutates the current grid so it's live
+# without rebuild, but any subsequent rebuild preserves it.
+func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
+	for pair in _traversal_edges:
+		if pair[0] == a and pair[1] == b:
+			return
+	_traversal_edges.append([a, b])
+	if _grid != null:
+		_grid.add_traversal_edge(a, b)
+
+
+## True iff a bidirectional traversal edge exists between `a` and `b`. Used by
+## movers (Player) to detect ladder steps and adjust per-step timing.
+func has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
+	for pair in _traversal_edges:
+		if (pair[0] == a and pair[1] == b) or (pair[0] == b and pair[1] == a):
+			return true
+	return false
+
+
+func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
+	for i in range(_traversal_edges.size()):
+		var pair: Array = _traversal_edges[i]
+		if pair[0] == a and pair[1] == b:
+			_traversal_edges.remove_at(i)
+			break
+	if _grid != null:
+		_grid.remove_traversal_edge(a, b)
+
+
 func grid() -> TileGrid:
 	return _grid
 
@@ -312,6 +367,28 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 				continue
 			return cell
 	return NO_CELL
+
+
+# Projects a global-space point onto the iso plane at altitude `alt` and
+# returns the cell whose visual footprint contains that point on that plane.
+# Walkability-agnostic. Returns NO_CELL if no layers are configured.
+#
+# Primitive used by the UX overlay to iterate altitudes when classifying which
+# face (top / SW / SE) of a cube the cursor is over.
+func project_to_altitude(global_pos: Vector2, alt: int) -> Vector2i:
+	if tile_map_layers.is_empty():
+		return NO_CELL
+	var ref: TileMapLayer = null
+	for L in tile_map_layers:
+		if L != null:
+			ref = L
+			break
+	if ref == null:
+		return NO_CELL
+	var local := ref.to_local(global_pos)
+	var net_shift := float(alt) * HALF_STEP_PX + ref.position.y
+	var shifted := local + Vector2(0.0, net_shift) - VISUAL_SURFACE_OFFSET
+	return ref.local_to_map(shifted)
 
 
 # World space (global) <-> cell conversion. Uses the first layer as the

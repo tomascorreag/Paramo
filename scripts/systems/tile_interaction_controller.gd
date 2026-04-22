@@ -17,6 +17,8 @@ const _ACTION_PLANT_FRAILEJON: GDScript = preload("res://scripts/systems/actions
 const _ACTION_REMOVE_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_remove_frailejon.gd")
 const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_build_bridge.gd")
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
+const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/action_build_ladder.gd")
+const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
 
 # Visuals for submenu group nodes — rendered as parent items on the wheel
 # whose submenu children are the individual TileActions in that group.
@@ -82,7 +84,9 @@ func _ready() -> void:
 	_registry.register(_ACTION_PLANT_FRAILEJON.new())
 	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
 	_registry.register(_ACTION_BUILD_BRIDGE.new())
+	_registry.register(_ACTION_BUILD_LADDER.new())
 	_registry.register(_ACTION_REMOVE_BRIDGE.new())
+	_registry.register(_ACTION_REMOVE_LADDER.new())
 
 
 func _unhandled_input(event: InputEvent) -> void:
