@@ -12,7 +12,10 @@ shader_type canvas_item;
 // Low-end-GPU notes:
 //  - `wind_scroll_per_second` precomputed on CPU.
 //  - Probe loop early-outs on first transparent sample and on mask saturation.
-//  - Debug branch guarded by a const bool (stripped at compile time).
+//  - Debug branch keyed by the project-level `shader_debug` int:
+//      0 = off (default), 1 = mask viz, 2 = opaque_below viz. The shader
+//      global is declared in project.godot [shader_globals]; all water/wind
+//      materials read the same value so diagnostics toggle in lockstep.
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
 
@@ -40,8 +43,9 @@ uniform float wind_intensity : hint_range(0.0, 2.0) = 1.0;
 // Loop bound must be a compile-time constant for GLES3 / WebGL2 targets.
 const int WIND_PROBE_PX = 48;
 
-const bool DEBUG_ENABLED = true;
-uniform int wind_debug : hint_range(0, 2) = 0;
+// 0 = off, 1 = mask viz, 2 = opaque_below viz. See project.godot
+// [shader_globals] — same uniform is read by water.gdshader.
+global uniform int shader_debug;
 
 varying vec2 world_pos;
 
@@ -72,9 +76,9 @@ void fragment() {
 
 	vec2 offset = round((wind_strength * n1 + wind_strength_2 * n2) * mask * wind_intensity) * TEXTURE_PIXEL_SIZE;
 
-	if (DEBUG_ENABLED && wind_debug == 1) {
+	if (shader_debug == 1) {
 		COLOR = vec4(vec3(mask), texture(TEXTURE, UV).a);
-	} else if (DEBUG_ENABLED && wind_debug == 2) {
+	} else if (shader_debug == 2) {
 		COLOR = vec4(vec3(opaque_below / float(WIND_PROBE_PX)), texture(TEXTURE, UV).a);
 	} else {
 		COLOR = texture(TEXTURE, UV + offset);

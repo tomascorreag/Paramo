@@ -415,5 +415,21 @@ func _snap_to_starting_cell() -> void:
 	_altitude = _pathfinder.altitude_center(start)
 	_apply_position(current_cell, _altitude)
 	_update_shadow_roughness()
+
+	# Opening camera pan: start above the target and glide down linearly.
+	# Built-in position_smoothing uses exponential decay (fast→slow), which
+	# reads as accelerated for an opening shot — so disable it for the pan
+	# and drive motion with a linear Tween. Re-enable smoothing once the
+	# pan completes so in-game follow keeps its inertia.
+	const OPENING_PAN_PX := 80.0
+	const OPENING_PAN_DURATION := 1.5
+	var pan_target_y := _camera.position.y
+	_camera.position.y = pan_target_y - OPENING_PAN_PX
+	_camera.position_smoothing_enabled = false
+	var tween := create_tween()
+	tween.set_trans(Tween.TRANS_LINEAR)
+	tween.tween_property(_camera, "position:y", pan_target_y, OPENING_PAN_DURATION)
+	tween.tween_callback(func() -> void: _camera.position_smoothing_enabled = true)
+
 	if debug_logging:
 		print("Player: snapped to cell %s at altitude %s" % [current_cell, _altitude])

@@ -6,7 +6,8 @@ extends Node2D
 ##
 ##   - BaseX: 6-frame rotating X (16x16) follows the cursor on walkable cells.
 ##   - Circle: static circle (32x16) overlays BaseX when the cursor cell is
-##     right-clickable (Chebyshev-adjacent to the player, walkable, unplanted).
+##     pathfinding-reachable from the player. Solid row when the cell is also
+##     right-clickable (Chebyshev-adjacent); dim row when only movable.
 ##   - LockedSquare + LockedX: static square (32x16) + frame-0 X anchored at a
 ##     committed cell while the radial menu is open or a multi-click build mode
 ##     is active.
@@ -39,6 +40,7 @@ enum State { HOVER, LOCKED, PLACEMENT }
 
 @export var pathfinder: Pathfinder
 @export var tile_interaction_controller: TileInteractionController
+@export var player: Player
 
 @export var reticle_fade_duration: float = 0.1
 
@@ -80,6 +82,8 @@ func _ready() -> void:
 		tile_interaction_controller = get_tree().get_first_node_in_group(
 			TileInteractionController.GROUP_NAME
 		) as TileInteractionController
+	if player == null:
+		player = get_tree().get_first_node_in_group(&"player") as Player
 
 	_locked_x.region_enabled = true
 	_locked_x.region_rect = _x_frame_rect(0)
@@ -229,15 +233,31 @@ func _refresh_circle() -> void:
 	if _state != State.HOVER or hovered_cell == Pathfinder.NO_CELL:
 		_circle.visible = false
 		return
-	# Walkable + right-clickable → solid circle. Walkable but not right-clickable
-	# → dim circle (signals "you can move here" without claiming interactivity).
-	var interactable := (
+	# Three tiers:
+	#   unreachable                   → no circle (BaseX only)
+	#   reachable, no real action     → dim circle (movable only)
+	#   reachable + meaningful action → solid circle
+	# "Meaningful" = anything beyond inspect (debug). Decided by the registry
+	# via TileInteractionController.has_meaningful_action().
+	if not _is_hovered_cell_reachable():
+		_circle.visible = false
+		return
+	var actionable := (
 		tile_interaction_controller != null
-		and tile_interaction_controller.is_interactable(hovered_cell)
+		and tile_interaction_controller.has_meaningful_action(hovered_cell)
 	)
-	_circle.region_rect = _ROW_CIRCLE if interactable else _ROW_CIRCLE_DIM
+	_circle.region_rect = _ROW_CIRCLE if actionable else _ROW_CIRCLE_DIM
 	_circle.global_position = cell_visual_center(hovered_cell)
 	_circle.visible = true
+
+
+func _is_hovered_cell_reachable() -> bool:
+	if pathfinder == null or player == null:
+		return false
+	if hovered_cell == player.current_cell:
+		return false
+	# AStar returns a path including both endpoints; size < 2 means no route.
+	return pathfinder.find_path(player.current_cell, hovered_cell).size() >= 2
 
 
 # ---------------------------------------------------------------------------

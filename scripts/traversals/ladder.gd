@@ -105,9 +105,17 @@ func build() -> bool:
 		)
 		return false
 
+	var painted_ok: int = 0
 	for entry in plan:
 		if _placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_record(entry["cell"], entry["altitude"])
+			painted_ok += 1
+	if painted_ok != plan.size():
+		for rec in _painted:
+			_placer.erase(rec["cell"], rec["altitude"])
+		_painted.clear()
+		push_warning("Ladder.build(): partial paint failure — rolled back.")
+		return false
 
 	# add_traversal_edge already mutates the live grid (Pathfinder delegates to
 	# TileGrid.add_traversal_edge on the current grid). The painted LADDER_*
@@ -126,6 +134,14 @@ func despawn(placer: StructurePlacer) -> void:
 	if _pathfinder != null:
 		_pathfinder.remove_traversal_edge(origin_cell, top_cell)
 	super.despawn(placer)
+
+
+# Ladder paints only on the lower cell (the sprite hangs on the wall between
+# lower and upper). The top_cell is a functional endpoint — pathfinding
+# traverses to it via the registered edge — so the player standing there is
+# still "on" the ladder for the purposes of remove-stranding checks.
+func occupies_cell(cell: Vector2i) -> bool:
+	return cell == origin_cell or cell == top_cell
 
 
 # Returns the (cell, kind, altitude) entries a ladder would paint between

@@ -57,6 +57,8 @@ hframes = 24
 shape = SubResource("SubResource_1")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=617833586]
+position_smoothing_enabled = true
+position_smoothing_speed = 1.0
 
 [node name="PlayerLight" type="PointLight2D" parent="." unique_id=406879134]
 scale = Vector2(1, 0.5)

@@ -14,7 +14,10 @@ shader_type canvas_item;
 // Low-end-GPU notes:
 //  - `scroll_velocity` is precomputed on the CPU (= normalize(flow_direction) * flow_speed
 //    for flowing water, or a small drift for still water).
-//  - Debug branch is guarded by a const bool so release builds strip it at compile time.
+//  - Debug branch keyed by the project-level `shader_debug` int:
+//      0 = off (default), 1 = disp viz. Declared in project.godot
+//      [shader_globals] — shared with wind.gdshader so diagnostics toggle in
+//      lockstep.
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
 
@@ -41,9 +44,9 @@ uniform float hi_threshold : hint_range(-1.0, 1.0) = 0.15;
 uniform vec3 wave_mid : source_color = vec3(0.588, 0.663, 0.757); // #96a9c1
 uniform vec3 wave_hi : source_color = vec3(0.733, 0.765, 0.816);  // #bbc3d0
 
-// Compile-time stripped in release builds; set true when diagnosing.
-const bool DEBUG_ENABLED = false;
-uniform int debug : hint_range(0, 1) = 0;
+// 0 = off, 1 = disp viz. See project.godot [shader_globals] — same uniform
+// is read by wind.gdshader (mode 2 is wind-only; water treats 2 as off).
+global uniform int shader_debug;
 
 varying vec2 world_pos;
 
@@ -88,7 +91,7 @@ void fragment() {
 
 	float alpha = tex.a * base_alpha;
 
-	if (DEBUG_ENABLED && debug == 1) {
+	if (shader_debug == 1) {
 		COLOR = vec4(disp * 0.5 + 0.5, 0.0, tex.a);
 	} else {
 		COLOR = vec4(col, alpha);

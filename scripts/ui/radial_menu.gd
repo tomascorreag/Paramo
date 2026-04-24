@@ -187,8 +187,9 @@ func _on_close_finished() -> void:
 
 func _on_item_clicked(item: Control) -> void:
 	var data: Dictionary = item.item_data
-	if data.has("submenu") and not data["submenu"].is_empty():
-		_open_submenu(item.position + item.size / 2.0, data["submenu"])
+	var submenu: Array = data.get("submenu", [])
+	if not submenu.is_empty():
+		_open_submenu(item.position + item.size / 2.0, submenu)
 	else:
 		item_selected.emit(data["id"])
 		close()

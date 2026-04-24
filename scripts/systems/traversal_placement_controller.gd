@@ -46,6 +46,8 @@ var _preview_hover_cell: Vector2i = Pathfinder.NO_CELL
 var _preview_valid: bool = false
 var _blocked_cells: Dictionary = {}
 var _traversals: Array[Traversal] = []
+var _tile_interaction: TileInteractionController
+var _player: Player
 
 
 func _enter_tree() -> void:
@@ -63,6 +65,10 @@ func _ready() -> void:
 		bridge_scene = load("res://scenes/traversals/bridge.tscn")
 	if ladder_scene == null:
 		ladder_scene = load("res://scenes/traversals/ladder.tscn")
+	_tile_interaction = get_tree().get_first_node_in_group(
+		TileInteractionController.GROUP_NAME
+	) as TileInteractionController
+	_player = get_tree().get_first_node_in_group(&"player") as Player
 
 
 # ----------------------------------------------------------------------------
@@ -84,16 +90,17 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 	if ux_overlay:
 		var candidates: Array[Vector2i] = []
 		var is_valid_endpoint := Callable()
+		var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
 		match kind:
 			&"bridge":
 				candidates = Bridge.find_candidates(
-					origin, grid, Bridge.MAX_LENGTH, _blocked_cells
+					origin, grid, Bridge.MAX_LENGTH, _blocked_cells, pcell
 				)
 				var blocked := _blocked_cells
 				is_valid_endpoint = func(cell: Vector2i) -> bool:
 					var g := _require_grid()
 					return g != null and Bridge.validate(
-						origin, cell, g, blocked
+						origin, cell, g, blocked, Bridge.MAX_LENGTH, pcell
 					) == Bridge.Result.OK
 			&"ladder":
 				candidates = Ladder.find_candidates(
@@ -122,16 +129,19 @@ func _require_grid() -> TileGrid:
 	return g
 
 
-# Snapshot the cells occupied by the player and any planted objects. Snapshot
-# is fine because input is gated during placement: the player can't start a
-# new movement and can't plant during a build.
+# Snapshot the cells occupied by planted objects and existing traversals.
+# Snapshot is fine because input is gated during placement: the player can't
+# start a new movement and can't plant during a build.
+#
+# The player's own cell is NOT included here — build validators treat the
+# player's cell separately via `player_cell`, which blocks INTERIOR-only
+# crossings for bridges and is ignored for ladders (where it may be an
+# endpoint). This lets the player attach a traversal to the cell they stand
+# on without stranding themselves.
 func _gather_blocked_cells() -> Dictionary:
 	var blocked: Dictionary = {}
-	var tic := get_tree().get_first_node_in_group(
-		TileInteractionController.GROUP_NAME
-	) as TileInteractionController
-	if tic != null:
-		for cell in tic.planted_cells().keys():
+	if _tile_interaction != null:
+		for cell in _tile_interaction.planted_cells().keys():
 			blocked[cell] = true
 	# Every cell already covered by an existing traversal (bridge decks,
 	# ladder origin/top columns) must block new placements — a bridge rooted
@@ -142,9 +152,6 @@ func _gather_blocked_cells() -> Dictionary:
 			continue
 		for entry in t.painted_cells():
 			blocked[entry["cell"]] = true
-	var p := get_tree().get_first_node_in_group(&"player") as Player
-	if p != null:
-		blocked[p.current_cell] = true
 	return blocked
 
 
@@ -234,7 +241,10 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 	for entry in plan:
 		if placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_preview_cells.append(entry)
-	var result := Bridge.validate(_origin_cell, hover, grid, _blocked_cells)
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
+	var result := Bridge.validate(
+		_origin_cell, hover, grid, _blocked_cells, Bridge.MAX_LENGTH, pcell
+	)
 	_preview_valid = result == Bridge.Result.OK
 	if _preview_valid:
 		structure_layer_manager.set_preview_valid()
@@ -360,7 +370,10 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	# Re-gather just before placing so a player who slid into a deck cell
 	# during the brief preview window still blocks placement.
 	_blocked_cells = _gather_blocked_cells()
-	var result: int = Bridge.validate(_origin_cell, far_cell, grid, _blocked_cells)
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
+	var result: int = Bridge.validate(
+		_origin_cell, far_cell, grid, _blocked_cells, Bridge.MAX_LENGTH, pcell
+	)
 	if result != Bridge.Result.OK:
 		push_warning(
 			"Bridge placement rejected: %s (origin=%s, far=%s)."
@@ -484,13 +497,14 @@ func _log_click_diagnostic(far_cell: Vector2i) -> void:
 		target_alt_str = "%d..%d" % [target_tile.altitude_low, target_tile.altitude_high]
 
 	var reason := "n/a"
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
 	match _traversal_kind:
 		&"bridge":
 			if far_cell == Pathfinder.NO_CELL:
 				reason = "NO_CELL (click off grid)"
 			else:
 				reason = Bridge.result_name(Bridge.validate(
-					_origin_cell, far_cell, grid, _blocked_cells))
+					_origin_cell, far_cell, grid, _blocked_cells, Bridge.MAX_LENGTH, pcell))
 		&"ladder":
 			if far_cell == Pathfinder.NO_CELL:
 				reason = "NO_CELL (click off grid)"

@@ -46,3 +46,14 @@ func despawn(placer: StructurePlacer) -> void:
 
 func painted_cells() -> Array[Dictionary]:
 	return _painted.duplicate()
+
+
+# True iff `cell` is one this traversal considers itself to stand on for the
+# purposes of "can the player remove me without being stranded?". Default:
+# any painted cell. Subclasses override when a cell is a functional part of
+# the traversal but isn't painted (e.g. Ladder.top_cell).
+func occupies_cell(cell: Vector2i) -> bool:
+	for entry in _painted:
+		if entry["cell"] == cell:
+			return true
+	return false

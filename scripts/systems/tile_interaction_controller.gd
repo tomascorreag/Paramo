@@ -149,6 +149,22 @@ func is_interactable(cell: Vector2i) -> bool:
 	return maxi(abs(diff.x), abs(diff.y)) == 1
 
 
+## True iff right-clicking `cell` would offer at least one non-debug action
+## (plant, build, remove, …). Inspect is excluded — it's a dev-only readout
+## and shouldn't promote a tile from "movable" to "actionable" in the UX.
+## Used by UXOverlay to choose between the solid and dim circle rows.
+func has_meaningful_action(cell: Vector2i) -> bool:
+	if not is_interactable(cell):
+		return false
+	if _registry == null:
+		return false
+	var ctx := _build_context(cell)
+	for action in _registry.available_for(ctx):
+		if action.id != &"inspect":
+			return true
+	return false
+
+
 # ---------------------------------------------------------------------------
 # Registry-driven menu assembly
 # ---------------------------------------------------------------------------
@@ -254,7 +270,7 @@ func _on_menu_closed() -> void:
 # ---------------------------------------------------------------------------
 
 func plant_frailejon(cell: Vector2i) -> void:
-	var frailejon: Node2D = _frailejon_scene.instantiate()
+	var frailejon: Frailejon = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 
 	# Place the Node2D at the altitude-0 world point for the cell. The plant
@@ -268,7 +284,7 @@ func plant_frailejon(cell: Vector2i) -> void:
 
 
 func remove_frailejon(cell: Vector2i) -> void:
-	var node: Node2D = _planted.get(cell)
+	var node := _planted.get(cell) as Frailejon
 	if node == null:
 		return
 	_planted.erase(cell)
@@ -306,10 +322,7 @@ func remove_traversal_at(cell: Vector2i) -> void:
 func is_player_on_traversal(t: Traversal) -> bool:
 	if player == null or t == null:
 		return false
-	for entry in t.painted_cells():
-		if entry["cell"] == player.current_cell:
-			return true
-	return false
+	return t.occupies_cell(player.current_cell)
 
 
 # ---------------------------------------------------------------------------

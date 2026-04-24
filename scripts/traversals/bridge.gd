@@ -82,9 +82,17 @@ func build() -> bool:
 		push_error("Bridge.build(): invalid geometry between %s and %s." % [origin_cell, far_cell])
 		return false
 
+	var painted_ok: int = 0
 	for entry in plan:
 		if _placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_record(entry["cell"], entry["altitude"])
+			painted_ok += 1
+	if painted_ok != plan.size():
+		for rec in _painted:
+			_placer.erase(rec["cell"], rec["altitude"])
+		_painted.clear()
+		push_warning("Bridge.build(): partial paint failure — rolled back.")
+		return false
 
 	_pathfinder.rebuild()
 
@@ -160,13 +168,17 @@ static func _exit_stair_kind(dir: Vector2i) -> StringName:
 
 # Pure validator against a TileGrid. Controller calls via `pathfinder.grid()`.
 # `blocked_cells` is an optional `{Vector2i: any}` set — any cell along the
-# bridge plan present in the dict yields Result.OCCUPIED.
+# bridge plan present in the dict yields Result.OCCUPIED (endpoints included).
+# `player_cell` is checked against INTERIOR cells only — the player may stand
+# on an endpoint when building a bridge that attaches to their own cell, but
+# the structure cannot be built across them.
 static func validate(
 	origin: Vector2i,
 	far: Vector2i,
 	grid: TileGrid,
 	blocked_cells: Dictionary = {},
 	max_length: int = MAX_LENGTH,
+	player_cell: Vector2i = Pathfinder.NO_CELL,
 ) -> int:
 	if origin == far:
 		return Result.SAME_CELL
@@ -196,10 +208,14 @@ static func validate(
 	if oi.altitude_low != fi.altitude_low:
 		return Result.ALTITUDE_MISMATCH
 
+	var dir := _step_direction(origin, far)
 	if not blocked_cells.is_empty():
-		var dir := _step_direction(origin, far)
 		for i in range(0, steps + 1):
 			if blocked_cells.has(origin + dir * i):
+				return Result.OCCUPIED
+	if player_cell != Pathfinder.NO_CELL:
+		for i in range(1, steps):  # interior cells only — endpoints are fine
+			if origin + dir * i == player_cell:
 				return Result.OCCUPIED
 
 	return Result.OK
@@ -214,6 +230,7 @@ static func find_candidates(
 	grid: TileGrid,
 	max_scan: int = 20,
 	blocked_cells: Dictionary = {},
+	player_cell: Vector2i = Pathfinder.NO_CELL,
 ) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	if grid == null:
@@ -222,7 +239,7 @@ static func find_candidates(
 	for dir: Vector2i in dirs:
 		for step in range(2, max_scan + 1):
 			var candidate: Vector2i = origin + dir * step
-			if validate(origin, candidate, grid, blocked_cells) == Result.OK:
+			if validate(origin, candidate, grid, blocked_cells, MAX_LENGTH, player_cell) == Result.OK:
 				out.append(candidate)
 				break
 	return out

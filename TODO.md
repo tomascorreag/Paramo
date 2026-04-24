@@ -11,6 +11,10 @@
 - [ ] scope soundtrack for vertical slice: ~7–9 min unique (menu, 3–4 biome/season ambient loops, 1–2 threat cues, planning-phase calm, win/loss stingers)
 - [ ] shortlist candidate composers from Bandcamp / SoundCloud / "nueva música andina colombiana" scene; check U. Antioquia / Javeriana / Unipamplona alumni
 
+## Performance (flagged by super-review 2026-04-24)
+
+- [ ] `scripts/systems/pathfinder.gd:163-172` — A* open set is a linear scan (O(n) per pop). Fine at the vertical-slice scale (~200-300 tiles). Replace with a binary heap (or switch to `AStarGrid2D`) if the map grows past ~500 walkable cells or if pathfinding shows up in profiling.
+
 ## Web export hardening (from 2026-04-22 security review)
 
 - [ ] when creating `export_presets.cfg`, set Export Filter to exclude `addons/gut/*`, `tests/*`, `scripts/tools/*`, `*.md`, `design/*`

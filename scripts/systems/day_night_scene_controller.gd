@@ -14,6 +14,10 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 @export var profile: DayNightProfile
 @export var canvas_modulate: CanvasModulate
 @export var post_process_rect: ColorRect
+## Sky/background fill that reads the ambient gradient directly.
+## Place on a CanvasLayer outside the world canvas so CanvasModulate
+## does not multiply it a second time.
+@export var background_rect: ColorRect
 
 ## Future: assign a second profile and weight to blend/override for seasons or weather.
 @export_group("Wind")
@@ -50,8 +54,13 @@ func _process(_delta: float) -> void:
 	var t: float = _time_manager.time_of_day
 
 	# --- Ambient tint ---
-	if canvas_modulate and profile.ambient_gradient:
-		canvas_modulate.color = profile.ambient_gradient.sample(t)
+	if profile.ambient_gradient:
+		var ambient: Color = profile.ambient_gradient.sample(t)
+		if canvas_modulate:
+			canvas_modulate.color = ambient
+		if background_rect:
+			background_rect.color = Color.from_hsv(
+				ambient.h, ambient.s, ambient.v * 0.5, ambient.a)
 
 	# --- Post-process shader ---
 	if _post_process_material:

@@ -32,7 +32,7 @@ const _PERIODS: Array[Array] = [
 # --- State ---
 
 ## Normalized time of day [0.0, 1.0). 0 = midnight, 0.5 = noon.
-var time_of_day: float = 0.25
+var time_of_day: float = 0.5
 
 ## Total completed day cycles.
 var day_count: int = 0
