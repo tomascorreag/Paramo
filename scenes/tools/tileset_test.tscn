@@ -6,7 +6,10 @@
 [ext_resource type="Script" uid="uid://b1gdukcvrdojy" path="res://scripts/systems/click_to_move_controller.gd" id="5_s7fjt"]
 [ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="6_tdovl"]
 [ext_resource type="Script" uid="uid://dj81k227gd1kx" path="res://scripts/systems/ux_overlay.gd" id="7_uxovr"]
-[ext_resource type="Texture2D" uid="uid://beexbf4y5e1j7" path="res://assets/sprites/UX/ISO_UX.png" id="8_isoux"]
+[ext_resource type="SpriteFrames" uid="uid://csu74l02k4moj" path="res://assets/sprites/UX/cursor/cursor_x.tres" id="8_curanx"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/circle.tres" id="8_curcir"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/square.tres" id="8_cursq"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/cursor_x_frame_0.tres" id="8_curx0"]
 [ext_resource type="Script" uid="uid://b7tp23uig1lpt" path="res://scripts/systems/day_night_scene_controller.gd" id="9_dnctrl"]
 [ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
 [ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
@@ -33,8 +36,8 @@ metadata/_snap_count = 24
 
 [sub_resource type="Curve" id="Curve_2amr8"]
 _limits = [0.0, 2.0, 0.0, 1.0]
-_data = [Vector2(0.05, 0.8), 0.0, 0.0, 0, 0, Vector2(0.4, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6, 1.05), 0.0, 0.0, 0, 0, Vector2(0.95, 0.8), 0.0, 0.0, 0, 0]
-point_count = 4
+_data = [Vector2(0.05, 0.8), 0.0, 0.0, 0, 0, Vector2(0.32681566, 1.060241), 0.0, 0.0, 0, 0, Vector2(0.4, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6955307, 1.1171961), 0.0, 0.0, 0, 0, Vector2(0.95, 0.8), 0.0, 0.0, 0, 0]
+point_count = 6
 
 [sub_resource type="Curve" id="Curve_et33p"]
 _limits = [-42.0, 42.0, 0.0, 1.0]
@@ -227,28 +230,21 @@ pathfinder = NodePath("../Pathfinder")
 tile_interaction_controller = NodePath("../TileInteractionController")
 reticle_fade_duration = 0.2
 
-[node name="BaseX" type="Sprite2D" parent="UXOverlay" unique_id=1803161632]
-texture = ExtResource("8_isoux")
-region_enabled = true
-region_rect = Rect2(0, 32, 16, 16)
+[node name="BaseX" type="AnimatedSprite2D" parent="UXOverlay" unique_id=1803161632]
+sprite_frames = ExtResource("8_curanx")
+autoplay = "default"
 
 [node name="Circle" type="Sprite2D" parent="UXOverlay" unique_id=1803161633]
 visible = false
-texture = ExtResource("8_isoux")
-region_enabled = true
-region_rect = Rect2(0, 16, 32, 16)
+texture = ExtResource("8_curcir")
 
 [node name="LockedSquare" type="Sprite2D" parent="UXOverlay" unique_id=1803161634]
 visible = false
-texture = ExtResource("8_isoux")
-region_enabled = true
-region_rect = Rect2(0, 0, 32, 16)
+texture = ExtResource("8_cursq")
 
 [node name="LockedX" type="Sprite2D" parent="UXOverlay" unique_id=1803161635]
 visible = false
-texture = ExtResource("8_isoux")
-region_enabled = true
-region_rect = Rect2(0, 32, 16, 16)
+texture = ExtResource("8_curx0")
 
 [node name="Candidates" type="Node2D" parent="UXOverlay" unique_id=1803161636]
 

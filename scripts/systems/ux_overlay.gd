@@ -26,14 +26,15 @@ extends Node2D
 
 const GROUP_NAME: StringName = &"ux_overlay"
 
-const _ROW_SQUARE := Rect2(0, 0, 32, 16)
-const _ROW_CIRCLE := Rect2(0, 16, 32, 16)
-const _ROW_CIRCLE_DIM := Rect2(32, 16, 32, 16)
-const _X_FRAME_W := 16.0
-const _X_FRAME_H := 16.0
-const _X_ROW_Y := 32.0
-const _X_FRAME_COUNT := 6
-const _X_FPS := 8.0
+# Reticle textures. Static Sprite2D slots take AtlasTexture .tres directly —
+# regions live in the resource, not as Rect2 literals here. The rotating X
+# uses SpriteFrames + AnimatedSprite2D instead: Godot 4.6's AnimatedTexture
+# can't render AtlasTexture frames (documented limitation — proxy RID swap
+# bypasses region). Candidate clones are slaved to BaseX's `frame` for
+# lockstep, since AnimatedSprite2D nodes don't share playback state.
+const _CIRCLE_SOLID: Texture2D = preload("res://assets/sprites/UX/cursor/circle.tres")
+const _CIRCLE_DIM: Texture2D = preload("res://assets/sprites/UX/cursor/circle_dim.tres")
+const _CURSOR_X_FRAMES: SpriteFrames = preload("res://assets/sprites/UX/cursor/cursor_x.tres")
 
 enum State { HOVER, LOCKED, PLACEMENT }
 
@@ -50,7 +51,7 @@ signal hovered_cell_changed(new_cell: Vector2i, old_cell: Vector2i)
 
 var hovered_cell: Vector2i = Pathfinder.NO_CELL
 
-@onready var _base_x: Sprite2D = $BaseX
+@onready var _base_x: AnimatedSprite2D = $BaseX
 @onready var _circle: Sprite2D = $Circle
 @onready var _locked_x: Sprite2D = $LockedX
 @onready var _locked_square: Sprite2D = $LockedSquare
@@ -59,11 +60,8 @@ var hovered_cell: Vector2i = Pathfinder.NO_CELL
 var _state: State = State.HOVER
 var _locked_cell: Vector2i = Pathfinder.NO_CELL
 var _candidate_cells: Array[Vector2i] = []
-var _candidate_sprites: Array[Sprite2D] = []
+var _candidate_sprites: Array[AnimatedSprite2D] = []
 var _is_valid_endpoint: Callable = Callable()
-
-var _x_frame: int = 0
-var _x_frame_timer: float = 0.0
 
 var _base_x_tween: Tween
 var _denied_tween: Tween
@@ -85,21 +83,10 @@ func _ready() -> void:
 	if player == null:
 		player = get_tree().get_first_node_in_group(&"player") as Player
 
-	_locked_x.region_enabled = true
-	_locked_x.region_rect = _x_frame_rect(0)
-	_locked_square.region_enabled = true
-	_locked_square.region_rect = _ROW_SQUARE
-	_circle.region_enabled = true
-	_circle.region_rect = _ROW_CIRCLE
-	_base_x.region_enabled = true
-	_base_x.region_rect = _x_frame_rect(0)
-
 	_apply_state_visibility()
 
 
-func _process(delta: float) -> void:
-	_advance_x_animation(delta)
-
+func _process(_delta: float) -> void:
 	match _state:
 		State.LOCKED:
 			# Mouse moves freely (to pick menu items) but no in-world cursor.
@@ -111,6 +98,7 @@ func _process(delta: float) -> void:
 			_update_cursor_cell()
 			if _state == State.PLACEMENT:
 				_update_candidate_visibility()
+				_sync_candidate_frames()
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +148,6 @@ func flash_denied(cell: Vector2i) -> void:
 		return
 	if _denied_tween and _denied_tween.is_valid():
 		_denied_tween.kill()
-	_locked_x.region_rect = _x_frame_rect(0)
 	_locked_x.global_position = cell_visual_center(cell)
 	_locked_x.modulate = Color(1.0, 0.3, 0.3, 1.0)
 	_locked_x.visible = true
@@ -246,7 +233,7 @@ func _refresh_circle() -> void:
 		tile_interaction_controller != null
 		and tile_interaction_controller.has_meaningful_action(hovered_cell)
 	)
-	_circle.region_rect = _ROW_CIRCLE if actionable else _ROW_CIRCLE_DIM
+	_circle.texture = _CIRCLE_SOLID if actionable else _CIRCLE_DIM
 	_circle.global_position = cell_visual_center(hovered_cell)
 	_circle.visible = true
 
@@ -267,16 +254,26 @@ func _is_hovered_cell_reachable() -> bool:
 func _rebuild_candidate_sprites() -> void:
 	_clear_candidate_sprites()
 	for cell in _candidate_cells:
-		var s := Sprite2D.new()
-		s.texture = _base_x.texture
-		s.region_enabled = true
-		s.region_rect = _x_frame_rect(_x_frame)
+		var s := AnimatedSprite2D.new()
+		s.sprite_frames = _CURSOR_X_FRAMES
+		s.animation = &"default"
+		# Freeze the candidate's own playback — `_sync_candidate_frames()`
+		# copies BaseX's `frame` each tick so every visible X is on the same
+		# animation frame. Without this, multiple AnimatedSprite2D instances
+		# drift in phase over time.
+		s.speed_scale = 0.0
 		_candidates_root.add_child(s)
 		# global_position must be set AFTER add_child — otherwise Godot stores
 		# the value as local (no parent transform yet) and the sprite ends up
 		# offset by the parent chain once it's reparented.
 		s.global_position = cell_visual_center(cell)
 		_candidate_sprites.append(s)
+
+
+func _sync_candidate_frames() -> void:
+	var f := _base_x.frame
+	for s in _candidate_sprites:
+		s.frame = f
 
 
 func _clear_candidate_sprites() -> void:
@@ -294,30 +291,6 @@ func _update_candidate_visibility() -> void:
 	var hide_all := _is_hovered_endpoint_valid()
 	for s in _candidate_sprites:
 		s.visible = not hide_all
-
-
-# ---------------------------------------------------------------------------
-# Animation
-# ---------------------------------------------------------------------------
-
-func _advance_x_animation(delta: float) -> void:
-	_x_frame_timer += delta
-	var interval := 1.0 / _X_FPS
-	var advanced := false
-	while _x_frame_timer >= interval:
-		_x_frame_timer -= interval
-		_x_frame = (_x_frame + 1) % _X_FRAME_COUNT
-		advanced = true
-	if not advanced:
-		return
-	var rect := _x_frame_rect(_x_frame)
-	_base_x.region_rect = rect
-	for s in _candidate_sprites:
-		s.region_rect = rect
-
-
-func _x_frame_rect(frame: int) -> Rect2:
-	return Rect2(frame * _X_FRAME_W, _X_ROW_Y, _X_FRAME_W, _X_FRAME_H)
 
 
 # ---------------------------------------------------------------------------

@@ -105,6 +105,23 @@ var _path: Array[Vector2i] = []
 # Current altitude in half-steps (float so half ramps render smoothly).
 var _altitude: float = 0.0
 
+# True while the opening camera pan is running. Suppresses the per-frame
+# camera Y write in _apply_visual_lift so the pan is fully decoupled from
+# player movement (no tile-cross snaps mid-pan). Cleared by _finish_opening_pan.
+var _camera_panning: bool = false
+
+# Tracked every time _apply_visual_lift runs (including during pan). Holds
+# the local Y the camera would sit at if it were following normally —
+# used by the pan _process loop to chase the player's current rest target.
+var _camera_target_local_y: float = 0.0
+
+# Opening pan integration state. Drives a sine ease-in/out toward a moving
+# target (the player's current rest position) using a remaining-progress
+# lerp factor. Falls back to lerp(camera, target, k) per frame.
+var _pan_elapsed: float = 0.0
+var _pan_duration: float = 0.0
+var _pan_eased_prev: float = 0.0
+
 
 func _enter_tree() -> void:
 	add_to_group(&"player")
@@ -332,6 +349,11 @@ func _apply_position(cell: Vector2i, alt: float) -> void:
 # If per-tile y_sort_origin changes in the tileset, update this constant.
 const _SORT_OFFSET: float = -15.0 # tile_y_sort_origin(-16) + 1
 
+# Camera target offset (added on top of lift). Positive Y shifts the framing
+# downward, putting the player slightly above center and giving more headroom
+# below.
+const _CAMERA_TARGET_OFFSET_Y: float = -10.0
+
 
 # Fraction of a climb step spent on the vertical leg (over the lower cell's
 # (x, y)). The remainder is the screen-diagonal slide at the high altitude.
@@ -350,7 +372,12 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	# offset is pushed into the vertex shader so sort Y stays decoupled.
 	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
 	_shadow.material.set_shader_parameter(&"visual_y_offset", _base_visual_y_offset + lift + 1.0)
-	_camera.position.y = lift
+	# Always cache the local target Y so the opening-pan _process loop can
+	# read an up-to-date rest position even while we're not writing to the
+	# camera (pan owns the camera transform during top_level mode).
+	_camera_target_local_y = lift + _CAMERA_TARGET_OFFSET_Y
+	if not _camera_panning:
+		_camera.position.y = _camera_target_local_y
 	_light.position.y = _base_sprite_offset_y + lift
 
 
@@ -416,20 +443,61 @@ func _snap_to_starting_cell() -> void:
 	_apply_position(current_cell, _altitude)
 	_update_shadow_roughness()
 
-	# Opening camera pan: start above the target and glide down linearly.
-	# Built-in position_smoothing uses exponential decay (fast→slow), which
-	# reads as accelerated for an opening shot — so disable it for the pan
-	# and drive motion with a linear Tween. Re-enable smoothing once the
-	# pan completes so in-game follow keeps its inertia.
-	const OPENING_PAN_PX := 80.0
-	const OPENING_PAN_DURATION := 1.5
-	var pan_target_y := _camera.position.y
-	_camera.position.y = pan_target_y - OPENING_PAN_PX
+	# Opening camera pan: fully detached from player movement (top_level so
+	# the parent transform is ignored). The pan target is recomputed every
+	# frame in _process so the camera converges on wherever the player
+	# currently is — if they walk during the pan, the landing point follows.
+	const OPENING_PAN_PX := 120.0
+	const OPENING_PAN_DURATION := 10.0
+	var rest_world := _camera_pan_target_world()
+	_camera_panning = true
+	_pan_elapsed = 0.0
+	_pan_duration = OPENING_PAN_DURATION
+	_pan_eased_prev = 0.0
 	_camera.position_smoothing_enabled = false
-	var tween := create_tween()
-	tween.set_trans(Tween.TRANS_LINEAR)
-	tween.tween_property(_camera, "position:y", pan_target_y, OPENING_PAN_DURATION)
-	tween.tween_callback(func() -> void: _camera.position_smoothing_enabled = true)
+	_camera.top_level = true
+	_camera.position = Vector2(rest_world.x, rest_world.y - OPENING_PAN_PX)
 
 	if debug_logging:
 		print("Player: snapped to cell %s at altitude %s" % [current_cell, _altitude])
+
+
+# Player's current rest position in world space. Used as the pan's moving
+# target — if the player walks during the pan, the camera homes in on them
+# wherever they end up. Y uses the cached local target (which already
+# includes y_visual_diff compensation) so mid-step tile snaps don't bleed
+# through.
+func _camera_pan_target_world() -> Vector2:
+	return Vector2(global_position.x, global_position.y + _camera_target_local_y)
+
+
+func _process(delta: float) -> void:
+	if not _camera_panning:
+		return
+	_pan_elapsed += delta
+	var target: Vector2 = _camera_pan_target_world()
+	if _pan_elapsed >= _pan_duration:
+		_camera.position = target
+		_finish_opening_pan()
+		return
+	var t: float = _pan_elapsed / _pan_duration
+	# Sine ease-in/out: -0.5 * (cos(PI*t) - 1) ∈ [0, 1].
+	var eased: float = -0.5 * (cos(PI * t) - 1.0)
+	# Remaining-progress lerp factor. Equivalent to a fixed sine curve when
+	# the target is static, but tracks a moving target smoothly because k
+	# applies to the *current* gap, not a stale start point.
+	var k: float = (eased - _pan_eased_prev) / maxf(1.0 - _pan_eased_prev, 0.0001)
+	_camera.position = _camera.position.lerp(target, k)
+	_pan_eased_prev = eased
+
+
+# Hand the camera back to the player-follow path after the opening pan.
+# Order matters: re-enable smoothing and call reset_smoothing() while the
+# camera is still at its world-space pan endpoint so the smoothed view is
+# seeded there. Then drop top_level and write the correct local target.
+func _finish_opening_pan() -> void:
+	_camera.position_smoothing_enabled = true
+	_camera.reset_smoothing()
+	_camera.top_level = false
+	_camera.position = Vector2(0.0, _camera_target_local_y)
+	_camera_panning = false
