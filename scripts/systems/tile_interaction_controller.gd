@@ -257,10 +257,11 @@ func plant_frailejon(cell: Vector2i) -> void:
 	var frailejon: Node2D = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 
-	var base := pathfinder.cell_to_world(cell)
-	var alt := pathfinder.altitude_center(cell)
+	# Place the Node2D at the altitude-0 world point for the cell. The plant
+	# itself lifts its sprite visually in _ready() so the sort key stays
+	# altitude-independent (same pattern as Player).
 	world.add_child(frailejon)
-	frailejon.global_position = base + Vector2(0.0, -alt * Pathfinder.HALF_STEP_PX)
+	frailejon.global_position = pathfinder.cell_to_world(cell)
 	_planted[cell] = frailejon
 	if pathfinder and frailejon.pathfinding_penalty != 0.0:
 		pathfinder.set_cell_penalty(cell, frailejon.pathfinding_penalty)

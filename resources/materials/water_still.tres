@@ -5,12 +5,11 @@
 [resource]
 shader = ExtResource("1")
 shader_parameter/scroll_velocity = Vector2(0.05, 0.04)
-shader_parameter/flow_direction = Vector2(0, 0)
 shader_parameter/base_alpha = 0.70000003325
 shader_parameter/wave_scale = Vector2(0.05, 0.1)
 shader_parameter/wave_scale_2 = Vector2(0.2, 0.4)
-shader_parameter/ripple_strength = 0.250000011875
-shader_parameter/vertical_strength = 4.00000019
+shader_parameter/ripple_strength = 0.00400000019
+shader_parameter/vertical_strength = 3.50000016625
 shader_parameter/highlight_strength = 1.0
 shader_parameter/water_intensity = 1.0
 shader_parameter/lo_threshold = 0.13700005400750004

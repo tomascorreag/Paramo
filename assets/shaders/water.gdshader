@@ -3,23 +3,29 @@ shader_type canvas_item;
 // Water surface shader for isometric tiles.
 // Partially transparent with flow-direction-aware animation.
 //
-// Low-end-GPU optimizations:
+// Two noise fields:
+//  - Color noise scrolls with per-material `scroll_velocity` → tiles read as flowing
+//    in their own direction.
+//  - Displacement noise uses project-level globals `water_disp_scroll` /
+//    `water_disp_scale` (identical for every water material), so two tiles with
+//    different flow directions compute the same pixel displacement at shared world
+//    positions — seams line up.
+//
+// Low-end-GPU notes:
 //  - `scroll_velocity` is precomputed on the CPU (= normalize(flow_direction) * flow_speed
-//    for flowing water, or a small drift for still water). Removes per-fragment
-//    length/normalize/trig that used to run on every water tile.
-//  - `flow_direction` is kept separately because its magnitude still shapes the
-//    UV ripple offset.
+//    for flowing water, or a small drift for still water).
 //  - Debug branch is guarded by a const bool so release builds strip it at compile time.
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
 
-// Precomputed scroll per second. Units: noise-space per second.
-// Flowing: normalize(flow_direction) * flow_speed.
-// Still: a small drift (e.g. (0.05, 0.04)) replaces the old per-fragment cos/sin wobble.
+// Per-material color-noise scroll (noise-space per second).
 uniform vec2 scroll_velocity = vec2(0.05, 0.04);
 
-// Still used (non-normalized) by the UV ripple offset path.
-uniform vec2 flow_direction = vec2(0.0, 0.0);
+// Global displacement-noise params — single source of truth for every water material,
+// so adjacent tiles with different `scroll_velocity` still compute the same displacement
+// at shared world positions. Edit in Project Settings → Shader Globals.
+global uniform vec2 water_disp_scroll;
+global uniform vec2 water_disp_scale;
 
 uniform float base_alpha : hint_range(0.0, 1.0) = 0.55;
 uniform vec2 wave_scale = vec2(0.04, 0.04);
@@ -51,19 +57,26 @@ void fragment() {
 	// rounded corners and break per-pixel discretization.
 	vec2 sampled = round(world_pos + vec2(0.5, 0.5));
 
-	vec2 scroll = scroll_velocity * TIME;
+	// Direction-invariant displacement: two opposing global scrolls, summed.
+	// Identical at any shared world_pos for every water material → seams line up.
+	vec2 ds = water_disp_scroll * TIME;
+	vec2 dp = sampled * water_disp_scale;
+	float dx = _noise(dp + ds) + _noise(dp - ds);
+	float dy = _noise(dp + ds + vec2(31.0, 19.0)) + _noise(dp - ds + vec2(31.0, 19.0));
+	vec2 disp = vec2(dx, dy) * 0.5;
 
+	float v_offset = round(disp.y * vertical_strength) * TEXTURE_PIXEL_SIZE.y;
+	vec2 flow_off = round(disp * ripple_strength / TEXTURE_PIXEL_SIZE) * TEXTURE_PIXEL_SIZE;
+	vec4 tex = texture(TEXTURE, UV + flow_off + vec2(0.0, v_offset));
+
+	// Directional color noise — drives the quantized highlight bands that visually
+	// communicate flow direction per-material.
+	vec2 scroll = scroll_velocity * TIME;
 	float n1 = _noise(sampled * wave_scale + scroll);
 	float n2 = _noise(sampled * wave_scale_2 + scroll * 0.7 + vec2(43.0, 17.0));
 	float combined = n1 * 0.6 + n2 * 0.4;
+	float wave = combined * water_intensity * highlight_strength;
 
-	// Shared scalar — avoids three separate `combined * water_intensity` multiplies.
-	float ci = combined * water_intensity;
-	float v_offset = round(ci * vertical_strength) * TEXTURE_PIXEL_SIZE.y;
-	vec2 flow_off = round(flow_direction * (ci * ripple_strength)) * TEXTURE_PIXEL_SIZE;
-	vec4 tex = texture(TEXTURE, UV + flow_off + vec2(0.0, v_offset));
-
-	float wave = ci * highlight_strength;
 	vec3 col;
 	if (wave < lo_threshold) {
 		col = tex.rgb;
@@ -76,7 +89,7 @@ void fragment() {
 	float alpha = tex.a * base_alpha;
 
 	if (DEBUG_ENABLED && debug == 1) {
-		COLOR = vec4(vec3(combined * 0.5 + 0.5), tex.a);
+		COLOR = vec4(disp * 0.5 + 0.5, 0.0, tex.a);
 	} else {
 		COLOR = vec4(col, alpha);
 	}

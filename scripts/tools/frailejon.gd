@@ -37,6 +37,29 @@ func _ready() -> void:
 	_update_shadow_params()
 	_update_shadow_roughness()
 
+	# Lift the visible sprite by altitude so the plant looks like it sits on
+	# the cube top, while keeping the Node2D's position (the y-sort key) in
+	# the altitude-0 frame — same technique as Player._apply_visual_lift.
+	# For the shadow, the lift goes into the shader's `visual_y_offset`
+	# uniform (not Sprite2D.offset) because the teardrop shader rebuilds
+	# VERTEX from `sprite_offset` — touching the raw Sprite2D offset would
+	# push the quad outside the shader's normalized space and the shadow
+	# would be discarded (vanish).
+	# Planted by TileInteractionController with cell set before add_child, so
+	# the Pathfinder lookup here is safe.
+	var pf := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
+	if pf != null:
+		var alt: float = pf.altitude_center(cell)
+		var lift: float = -alt * Pathfinder.HALF_STEP_PX
+		_sprite.offset.y += lift
+		var shadow_mat: ShaderMaterial = _shadow.material as ShaderMaterial
+		if shadow_mat != null:
+			var base_voff: float = 0.0
+			var v: Variant = shadow_mat.get_shader_parameter(&"visual_y_offset")
+			if v != null:
+				base_voff = float(v)
+			shadow_mat.set_shader_parameter(&"visual_y_offset", base_voff + lift)
+
 	# Reparent shadow for independent y-sorting (same pattern as Player).
 	remove_child(_shadow)
 	get_parent().add_child.call_deferred(_shadow)
