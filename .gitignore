@@ -10,6 +10,10 @@ exports/
 *.pck
 *.zip
 
+# Godot editor swap/temp files
+*.tscn[0-9]*.tmp
+*.tres[0-9]*.tmp
+
 # Imported translations (auto-generated from CSVs)
 *.translation
 
@@ -47,3 +51,11 @@ godot.log
 .claude/
 CLAUDE.md
 TILE_SYSTEM_REWRITE.md
+
+# Secrets (defensive — none currently exist in repo)
+.env
+.env.*
+*.pem
+*.key
+secrets.*
+credentials.*

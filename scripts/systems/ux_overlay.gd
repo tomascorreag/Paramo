@@ -11,8 +11,8 @@ extends Node2D
 ##     committed cell while the radial menu is open or a multi-click build mode
 ##     is active.
 ##
-## During bridge build mode an extra pool of rotating Xs marks the closest
-## valid orthogonal endpoints; hovering one hides the others.
+## During traversal placement mode (bridge or ladder) an extra pool of rotating
+## Xs marks the closest valid endpoints; hovering one hides the others.
 ##
 ## Setup:
 ##   1. Add a UXOverlay node to the scene (alongside Pathfinder).
@@ -34,7 +34,7 @@ const _X_ROW_Y := 32.0
 const _X_FRAME_COUNT := 6
 const _X_FPS := 8.0
 
-enum State { HOVER, LOCKED, BRIDGE }
+enum State { HOVER, LOCKED, PLACEMENT }
 
 
 @export var pathfinder: Pathfinder
@@ -103,9 +103,9 @@ func _process(delta: float) -> void:
 				var old := hovered_cell
 				hovered_cell = Pathfinder.NO_CELL
 				hovered_cell_changed.emit(hovered_cell, old)
-		State.HOVER, State.BRIDGE:
+		State.HOVER, State.PLACEMENT:
 			_update_cursor_cell()
-			if _state == State.BRIDGE:
+			if _state == State.PLACEMENT:
 				_update_candidate_visibility()
 
 
@@ -133,7 +133,7 @@ func unlock() -> void:
 ## the hovered cell is a placeable endpoint. When hovering a valid endpoint,
 ## the cursor X shows there alone and all candidate hints hide; when hovering
 ## an invalid cell, the cursor X is hidden and all candidate hints stay visible.
-func enter_bridge_mode(
+func enter_placement_mode(
 	origin: Vector2i,
 	candidates: Array[Vector2i],
 	is_valid_endpoint: Callable = Callable(),
@@ -141,7 +141,7 @@ func enter_bridge_mode(
 	_locked_cell = origin
 	_candidate_cells = candidates.duplicate()
 	_is_valid_endpoint = is_valid_endpoint
-	_state = State.BRIDGE
+	_state = State.PLACEMENT
 	_rebuild_candidate_sprites()
 	_apply_state_visibility()
 
@@ -168,8 +168,8 @@ func flash_denied(cell: Vector2i) -> void:
 	)
 
 
-func exit_bridge_mode() -> void:
-	if _state != State.BRIDGE:
+func exit_placement_mode() -> void:
+	if _state != State.PLACEMENT:
 		return
 	_state = State.HOVER
 	_locked_cell = Pathfinder.NO_CELL
@@ -204,10 +204,11 @@ func _refresh_base_x(_old_cell: Vector2i) -> void:
 	if hovered_cell == Pathfinder.NO_CELL:
 		_base_x.modulate.a = 0.0
 		return
-	# In BRIDGE state, the cursor X only shows on cells that are valid bridge
-	# endpoints. Invalid hovers stay blank so the cursor itself signals "no
-	# placement here" without competing with the candidate hints.
-	if _state == State.BRIDGE and not _is_hovered_endpoint_valid():
+	# In PLACEMENT state, the cursor X only shows on cells that are valid
+	# endpoints for the current traversal kind. Invalid hovers stay blank so
+	# the cursor itself signals "no placement here" without competing with
+	# the candidate hints.
+	if _state == State.PLACEMENT and not _is_hovered_endpoint_valid():
 		_base_x.modulate.a = 0.0
 		return
 	_base_x.global_position = cell_visual_center(hovered_cell)
@@ -318,7 +319,7 @@ func _apply_state_visibility() -> void:
 			_circle.visible = false
 			_kill_base_x_tween()
 			_base_x.modulate.a = 0.0
-		State.BRIDGE:
+		State.PLACEMENT:
 			_anchor_locked(_locked_cell)
 			_locked_x.visible = true
 			_locked_square.visible = true

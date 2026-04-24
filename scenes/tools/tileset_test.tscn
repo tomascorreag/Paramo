@@ -163,7 +163,7 @@ offset_bottom = 23.0
 
 [node name="Pathfinder" type="Node" parent="." unique_id=190879584 node_paths=PackedStringArray("tile_map_layers")]
 script = ExtResource("4_osssn")
-tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath(""), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4")]
+tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), null, NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4")]
 
 [node name="ClickToMoveController" type="Node" parent="." unique_id=680876284 node_paths=PackedStringArray("pathfinder", "player")]
 script = ExtResource("5_s7fjt")
@@ -254,4 +254,4 @@ mouse_filter = 2
 [node name="LayerConfigurator" type="Node" parent="." unique_id=625661186 node_paths=PackedStringArray("layers")]
 script = ExtResource("23_glcfg")
 layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5")]
-altitudes = Array[int]([0, 2, 4, 6, 8])
+altitudes = Array[int]([0, 2, 4, 6, 8, 0])

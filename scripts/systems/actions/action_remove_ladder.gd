@@ -22,4 +22,4 @@ func is_available(ctx: ActionContext) -> bool:
 
 
 func execute(ctx: ActionContext) -> void:
-	ctx.tile_interaction.remove_bridge(ctx.cell)
+	ctx.tile_interaction.remove_traversal_at(ctx.cell)

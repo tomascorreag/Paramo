@@ -92,9 +92,11 @@ var _cell_penalties: Dictionary[Vector2i, float] = {}
 
 # Traversal edges registered by Ladder (and future traversals) that bypass the
 # shape-based altitude check in TileGrid.can_transition. Stored here (not on
-# the grid) because rebuild() creates a fresh TileGrid; we re-apply these
-# after the grid is built so the owner doesn't have to re-register.
-var _traversal_edges: Array[Array] = []  # [[Vector2i, Vector2i], ...]
+# the grid) only so rebuild() can re-apply them to the freshly-built TileGrid.
+# Runtime lookups delegate to TileGrid.has_traversal_edge (dict-of-dicts, O(1)).
+# Keyed by a normalized (low, high) pair StringName so add/remove/has are
+# order-independent.
+var _traversal_edges: Dictionary[StringName, Array] = {}
 
 
 func _enter_tree() -> void:
@@ -122,7 +124,7 @@ func rebuild() -> void:
 	_grid.build(tile_map_layers)
 
 	# Re-apply traversal edges that survived the rebuild (ladders, etc.).
-	for pair in _traversal_edges:
+	for pair in _traversal_edges.values():
 		_grid.add_traversal_edge(pair[0], pair[1])
 
 	if debug_logging:
@@ -148,10 +150,12 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 		var same: Array[Vector2i] = [from]
 		return same
 
-	# State key encoding: (cell, dir). dir is -1 for the start, else 0..3.
-	var start_key := _state_key(from, -1)
-	var g_score: Dictionary = { start_key: 0.0 }
-	var came_from: Dictionary = {}  # key -> [prev_key, cell]
+	# State key encoding: Vector3i(cell.x, cell.y, dir + 1). dir = -1 for the
+	# start (encoded as 0), neighbors encode 1..4. Vector3i is natively hashable
+	# and avoids the per-expansion String allocation the old encoding paid for.
+	var start_key := Vector3i(from.x, from.y, 0)
+	var g_score: Dictionary[Vector3i, float] = { start_key: 0.0 }
+	var came_from: Dictionary[Vector3i, Array] = {}  # key -> [prev_key, cell]
 
 	# Open set entries: [f, tiebreak_counter, cell, dir, key]. Lower f first;
 	# ties broken by insertion order so we behave deterministically. A linear
@@ -169,7 +173,7 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 
 		var cur_cell: Vector2i = cur[2]
 		var cur_dir: int = cur[3]
-		var cur_key: String = cur[4]
+		var cur_key: Vector3i = cur[4]
 
 		if cur_cell == to:
 			return _reconstruct_path(came_from, cur_key, from)
@@ -189,14 +193,14 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 			# altitude climbed, so one full cube (2 half-steps) costs the same
 			# as 2 horizontal tile steps. Normal steps stay at the flat 1.0.
 			var step_cost: float = 1.0
-			if has_traversal_edge(cur_cell, nb):
+			if _grid.has_traversal_edge(cur_cell, nb):
 				var alt_delta: float = absf(
 					_grid.altitude_center(nb) - _grid.altitude_center(cur_cell)
 				)
 				if alt_delta > step_cost:
 					step_cost = alt_delta
 			var tentative_g: float = cur_g + step_cost + turn_cost + _cell_enter_cost(nb)
-			var nb_key: String = _state_key(nb, dir_idx)
+			var nb_key := Vector3i(nb.x, nb.y, dir_idx + 1)
 			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
 				continue
 			g_score[nb_key] = tentative_g
@@ -287,39 +291,51 @@ func get_cell_penalty(cell: Vector2i) -> float:
 	return _cell_penalties.get(cell, 0.0)
 
 
+## Drop every registered cell penalty. Callers: scene teardown, world reload,
+## or test setup. Not called by rebuild() — penalties track live world objects
+## that outlive the grid, so rebuild intentionally preserves them.
+func clear_all_cell_penalties() -> void:
+	_cell_penalties.clear()
+
+
 # Register a bidirectional traversal edge between two 4-connected cells that
 # bypasses shape-based altitude checks. Ladders use this to let the player
 # step between a floor at altitude A and a floor at altitude A+2k on the
-# adjacent cell. Survives Pathfinder.rebuild(). The caller is responsible
-# for calling rebuild() (or the equivalent) if the edge should take effect
-# immediately — adding the edge here mutates the current grid so it's live
-# without rebuild, but any subsequent rebuild preserves it.
+# adjacent cell. Survives Pathfinder.rebuild(). The edge is live on the
+# current grid immediately — no manual rebuild needed.
 func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
-	for pair in _traversal_edges:
-		if pair[0] == a and pair[1] == b:
-			return
-	_traversal_edges.append([a, b])
+	var key := _traversal_key(a, b)
+	if _traversal_edges.has(key):
+		return
+	_traversal_edges[key] = [a, b]
 	if _grid != null:
 		_grid.add_traversal_edge(a, b)
 
 
 ## True iff a bidirectional traversal edge exists between `a` and `b`. Used by
-## movers (Player) to detect ladder steps and adjust per-step timing.
+## movers (Player) to detect ladder steps and adjust per-step timing. Delegates
+## to TileGrid when a grid is built (O(1) dict lookup); falls back to the
+## Pathfinder registry between rebuilds.
 func has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
-	for pair in _traversal_edges:
-		if (pair[0] == a and pair[1] == b) or (pair[0] == b and pair[1] == a):
-			return true
-	return false
+	if _grid != null:
+		return _grid.has_traversal_edge(a, b)
+	return _traversal_edges.has(_traversal_key(a, b))
 
 
 func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
-	for i in range(_traversal_edges.size()):
-		var pair: Array = _traversal_edges[i]
-		if pair[0] == a and pair[1] == b:
-			_traversal_edges.remove_at(i)
-			break
+	_traversal_edges.erase(_traversal_key(a, b))
 	if _grid != null:
 		_grid.remove_traversal_edge(a, b)
+
+
+# Canonicalize a 2-cell pair to an order-independent StringName key so
+# add/remove/has behave the same regardless of argument order.
+static func _traversal_key(a: Vector2i, b: Vector2i) -> StringName:
+	var lo: Vector2i = a
+	var hi: Vector2i = b
+	if b.y < a.y or (b.y == a.y and b.x < a.x):
+		lo = b; hi = a
+	return StringName("%d,%d|%d,%d" % [lo.x, lo.y, hi.x, hi.y])
 
 
 func grid() -> TileGrid:
@@ -427,20 +443,16 @@ func _cell_enter_cost(cell: Vector2i) -> float:
 	return elevation_cost + _cell_penalties.get(cell, 0.0)
 
 
-static func _state_key(cell: Vector2i, dir_idx: int) -> String:
-	return "%d,%d,%d" % [cell.x, cell.y, dir_idx]
-
-
 static func _heuristic(a: Vector2i, b: Vector2i) -> float:
 	return float(absi(a.x - b.x) + absi(a.y - b.y))
 
 
-func _reconstruct_path(came_from: Dictionary, end_key: String, start: Vector2i) -> Array[Vector2i]:
+func _reconstruct_path(came_from: Dictionary, end_key: Vector3i, start: Vector2i) -> Array[Vector2i]:
 	# came_from[key] = [prev_key, cell_of_key]. Walk back from the goal's key,
 	# collecting destination cells; the start has no came_from entry and is
 	# appended at the end.
 	var reversed: Array[Vector2i] = []
-	var k: String = end_key
+	var k: Vector3i = end_key
 	while came_from.has(k):
 		var entry: Array = came_from[k]
 		reversed.append(entry[1])

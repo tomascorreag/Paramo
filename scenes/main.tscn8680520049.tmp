@@ -1,7 +1,0 @@
-[gd_scene format=3 uid="uid://doynvxy141p3p"]
-
-[ext_resource type="PackedScene" uid="uid://bjr3p5tb7xyy0" path="res://scenes/tools/tileset_test.tscn" id="1_o5qli"]
-
-[node name="Main" type="Node2D" unique_id=196845560]
-
-[node name="TilesetTest" parent="." unique_id=209007275 instance=ExtResource("1_o5qli")]

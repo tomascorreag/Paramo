@@ -81,30 +81,6 @@ func test_heuristic_negative_deltas() -> void:
 
 
 # ===========================================================================
-# _state_key — format + discrimination
-# ===========================================================================
-
-func test_state_key_format() -> void:
-	assert_eq(Pathfinder._state_key(Vector2i(3, -2), 1), "3,-2,1")
-
-
-func test_state_key_start_sentinel() -> void:
-	assert_eq(Pathfinder._state_key(Vector2i(0, 0), -1), "0,0,-1")
-
-
-func test_state_key_distinguishes_direction() -> void:
-	var k0 := Pathfinder._state_key(Vector2i(0, 0), 0)
-	var k1 := Pathfinder._state_key(Vector2i(0, 0), 1)
-	assert_ne(k0, k1)
-
-
-func test_state_key_distinguishes_cell() -> void:
-	var k_a := Pathfinder._state_key(Vector2i(0, 0), 0)
-	var k_b := Pathfinder._state_key(Vector2i(1, 0), 0)
-	assert_ne(k_a, k_b)
-
-
-# ===========================================================================
 # find_path — degenerate inputs
 # ===========================================================================
 

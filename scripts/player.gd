@@ -33,17 +33,20 @@ const WALK_FPS: float = 8.0
 # Grid-axis step direction -> facing index. Keys cover the 4 legal path
 # transitions. Any other direction is a bug in the pathfinder.
 const DIR_TO_FACING: Dictionary = {
-	Vector2i( 0,  1): FACING_SW,  # step toward SW (down-left on screen)
-	Vector2i( 1,  0): FACING_SE,  # step toward SE (down-right on screen)
-	Vector2i( 0, -1): FACING_NE,  # step toward NE (up-right on screen)
-	Vector2i(-1,  0): FACING_NW,  # step toward NW (up-left on screen)
+	Vector2i(0, 1): FACING_SW, # step toward SW (down-left on screen)
+	Vector2i(1, 0): FACING_SE, # step toward SE (down-right on screen)
+	Vector2i(0, -1): FACING_NE, # step toward NE (up-right on screen)
+	Vector2i(-1, 0): FACING_NW, # step toward NW (up-left on screen)
 }
 
 
 @export var step_duration: float = 0.45
-## Multiplier applied to step_duration when the step crosses a Pathfinder
-## traversal edge (ladders). >1.0 slows the climb; 1.0 matches a normal step.
-@export var climb_duration_multiplier: float = 3.0
+## Per-cube multiplier applied to step_duration when the step crosses a
+## Pathfinder traversal edge (ladders). Total climb time scales with the
+## ladder's height: step_duration * climb_duration_multiplier * height_cubes.
+## A 1-cube climb at multiplier 1.5 takes 1.5× a normal step; a 4-cube climb
+## takes 6×.
+@export var climb_duration_multiplier: float = 2
 @export var debug_logging: bool = false
 
 @export_group("Lantern")
@@ -68,7 +71,7 @@ var _base_sprite_offset_y: float
 var _base_visual_y_offset: float = 0.0
 
 var _pathfinder: Pathfinder
-var _time_manager: Node  # TimeManager autoload
+var _time_manager: Node # TimeManager autoload
 
 var current_cell: Vector2i = Vector2i.ZERO
 
@@ -222,7 +225,14 @@ func _begin_next_step() -> void:
 	_step_is_climb = _pathfinder.has_traversal_edge(current_cell, next_cell)
 	_step_climb_turned = false
 	if _step_is_climb:
-		_step_duration_effective = step_duration * climb_duration_multiplier
+		# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
+		# validated to integer-cube heights, so this divides evenly; floats
+		# are used only to tolerate any future sub-cube edges without
+		# collapsing to zero. Clamp to >=1 so a degenerate 0-delta edge
+		# still takes one climb step's worth of time.
+		var alt_delta: float = absf(_step_to_alt - _step_from_alt)
+		var cubes: float = maxf(alt_delta / 2.0, 1.0)
+		_step_duration_effective = step_duration * climb_duration_multiplier * cubes
 	else:
 		_step_duration_effective = step_duration
 
@@ -320,7 +330,7 @@ func _apply_position(cell: Vector2i, alt: float) -> void:
 # the tile at their own cell but BEHIND the next tile to the SE.
 #
 # If per-tile y_sort_origin changes in the tileset, update this constant.
-const _SORT_OFFSET: float = -15.0  # tile_y_sort_origin(-16) + 1
+const _SORT_OFFSET: float = -15.0 # tile_y_sort_origin(-16) + 1
 
 
 # Fraction of a climb step spent on the vertical leg (over the lower cell's
@@ -397,7 +407,7 @@ func _snap_to_starting_cell() -> void:
 		push_warning(
 			"Player: starting position %s resolves to non-walkable cell %s. "
 			% [global_position, start]
-			+ "Move the player node in the editor to a walkable cell."
+			+"Move the player node in the editor to a walkable cell."
 		)
 		return
 

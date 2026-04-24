@@ -26,9 +26,13 @@ func _record(cell: Vector2i, altitude: int) -> void:
 	_painted.append({"cell": cell, "altitude": altitude})
 
 
-# Subclasses must override and paint their tiles via `placer`.
-func build() -> void:
+# Subclasses must override and paint their tiles via `placer`. Returns true on
+# success; false when the traversal couldn't be built (invalid geometry,
+# missing layers, etc.), in which case the subclass is responsible for rolling
+# back any partial paint state and the caller frees the node.
+func build() -> bool:
 	push_error("Traversal.build() must be overridden by subclass.")
+	return false
 
 
 # Erase every painted tile this traversal owns, then free.

@@ -82,15 +82,18 @@ static func configure(
 	inst._pathfinder = pf
 
 
-func build() -> void:
+## Returns true on success, false if the ladder couldn't be built. When false,
+## no traversal edge is registered and the caller is responsible for freeing
+## this node — the partial paint state has been rolled back.
+func build() -> bool:
 	if _placer == null or _pathfinder == null:
 		push_error("Ladder.build(): not configured — call Ladder.configure() first.")
-		return
+		return false
 
 	var top_tile := _pathfinder.get_tile(top_cell)
 	if top_tile == null:
 		push_error("Ladder.build(): no tile at top_cell %s." % top_cell)
-		return
+		return false
 	var top_alt: int = top_tile.altitude_low
 	height_cubes = (top_alt - base_altitude) / 2
 
@@ -100,18 +103,21 @@ func build() -> void:
 			"Ladder.build(): invalid geometry origin=%s top=%s base_alt=%s top_alt=%s."
 			% [origin_cell, top_cell, base_altitude, top_alt]
 		)
-		return
+		return false
 
 	for entry in plan:
 		if _placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_record(entry["cell"], entry["altitude"])
 
+	# add_traversal_edge already mutates the live grid (Pathfinder delegates to
+	# TileGrid.add_traversal_edge on the current grid). The painted LADDER_*
+	# tiles are decorative (skipped by TileGrid ingest), so no rebuild needed.
 	_pathfinder.add_traversal_edge(origin_cell, top_cell)
-	_pathfinder.rebuild()
 
 	# Anchor at origin's altitude-lifted world pos (parity with Bridge).
 	var base_world := _pathfinder.cell_to_world(origin_cell)
 	global_position = base_world + Vector2(0.0, -base_altitude * Pathfinder.HALF_STEP_PX)
+	return true
 
 
 # Erase painted tiles AND unregister the traversal edge. Overrides the base
@@ -205,7 +211,11 @@ static func _ladder_kind(dir: Vector2i) -> StringName:
 # Error codes use "ORIGIN" for the first argument and "TOP" for the second
 # to match caller-side UX language, not the internal lower/upper roles.
 static func validate(
-	a: Vector2i, b: Vector2i, grid: TileGrid, blocked_cells: Dictionary = {}
+	a: Vector2i,
+	b: Vector2i,
+	grid: TileGrid,
+	blocked_cells: Dictionary = {},
+	max_height_cubes: int = MAX_HEIGHT_CUBES,
 ) -> int:
 	if a == b:
 		return Result.SAME_CELL
@@ -244,6 +254,8 @@ static func validate(
 
 	var delta: int = top_alt - base_alt
 	if delta % 2 != 0:
+		return Result.BAD_HEIGHT
+	if delta / 2 > max_height_cubes:
 		return Result.BAD_HEIGHT
 
 	# Wall column check: the column at `lower + dir` (which equals `upper`'s
@@ -291,13 +303,7 @@ static func find_candidates(
 	]
 	for dir: Vector2i in _ALL_DIRS:
 		var nb: Vector2i = origin + dir
-		if validate(origin, nb, grid, blocked_cells) != Result.OK:
-			continue
-		var ni := grid.get_tile(nb)
-		if ni == null:
-			continue
-		var k: int = absi(ni.altitude_low - oi.altitude_low) / 2
-		if k < 1 or k > max_height_cubes:
+		if validate(origin, nb, grid, blocked_cells, max_height_cubes) != Result.OK:
 			continue
 		out.append(nb)
 	return out

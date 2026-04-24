@@ -29,6 +29,10 @@ var _items: Array[Control] = []
 var _center_icon: TextureRect
 var _overlay: ColorRect
 var _is_closing: bool = false
+# True while a back-navigation or submenu-open tween chain is running. Guards
+# against re-entrant `_go_back` / `_open_submenu` calls that would double-pop
+# the stack or queue_free already-freed items.
+var _is_transitioning: bool = false
 var _open_tween: Tween
 
 # Stack of previous levels for back-navigation.
@@ -128,9 +132,13 @@ func close() -> void:
 
 
 func _go_back() -> void:
+	if _is_transitioning:
+		return
 	if _level_stack.is_empty():
 		close()
 		return
+
+	_is_transitioning = true
 
 	if _open_tween and _open_tween.is_valid():
 		_open_tween.kill()
@@ -166,6 +174,9 @@ func _go_back() -> void:
 			restore_tween.tween_property(item, "modulate:a", 1.0, 0.12)
 		if _center_icon:
 			restore_tween.tween_property(_center_icon, "modulate:a", 1.0, 0.12)
+		restore_tween.chain().tween_callback(func() -> void:
+			_is_transitioning = false
+		)
 	)
 
 
@@ -184,6 +195,10 @@ func _on_item_clicked(item: Control) -> void:
 
 
 func _open_submenu(sub_center: Vector2, submenu_data: Array) -> void:
+	if _is_transitioning:
+		return
+	_is_transitioning = true
+
 	if _open_tween and _open_tween.is_valid():
 		_open_tween.kill()
 
@@ -214,6 +229,7 @@ func _open_submenu(sub_center: Vector2, submenu_data: Array) -> void:
 		for d in submenu_data:
 			typed.append(d)
 		open(sub_center, typed, outward_angle)
+		_is_transitioning = false
 	)
 
 
@@ -246,16 +262,39 @@ func _clear_active_items() -> void:
 	if _center_icon:
 		_center_icon.queue_free()
 		_center_icon = null
+	# Submenu-parent levels sit on the stack as still-parented Controls. If
+	# `open()` is ever called fresh (non-recursive) on an instance that still
+	# has stacked levels, those Controls would leak as orphaned children until
+	# the whole menu freed. Walk the stack on every clear.
+	for level in _level_stack:
+		var level_items: Array = level["items"]
+		for item in level_items:
+			if is_instance_valid(item):
+				item.queue_free()
+		var level_ci: TextureRect = level.get("center_icon")
+		if level_ci and is_instance_valid(level_ci):
+			level_ci.queue_free()
+	_level_stack.clear()
 
 
 func _gui_input(event: InputEvent) -> void:
 	if _is_closing:
 		return
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.pressed:
+	if not (event is InputEventMouseButton):
+		return
+	var mb := event as InputEventMouseButton
+	if not mb.pressed:
+		return
+	# Right-click: navigate back one submenu level, or close at the root.
+	# Left-click on the overlay (outside any item): always close. Other buttons
+	# are ignored so middle-click / back-forward don't dismiss the menu.
+	match mb.button_index:
+		MOUSE_BUTTON_RIGHT:
 			if not _level_stack.is_empty():
 				_go_back()
 			else:
 				close()
+			accept_event()
+		MOUSE_BUTTON_LEFT:
+			close()
 			accept_event()

@@ -33,7 +33,7 @@ enum Mode { IDLE, AWAITING_ENDPOINT }
 ## placement: the resolved cell, hover cell, preview-valid state, and the
 ## specific Ladder/Bridge validate Result for the click target. Cheap but
 ## spammy — leave off in normal play.
-@export var debug_logging: bool = true
+@export var debug_logging: bool = false
 
 
 var _mode: Mode = Mode.IDLE
@@ -73,6 +73,9 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 	if pathfinder == null or structure_layer_manager == null:
 		push_error("TraversalPlacementController.begin(): dependencies not wired.")
 		return
+	var grid := _require_grid()
+	if grid == null:
+		return
 	_origin_cell = origin
 	_traversal_kind = kind
 	_mode = Mode.AWAITING_ENDPOINT
@@ -84,23 +87,39 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 		match kind:
 			&"bridge":
 				candidates = Bridge.find_candidates(
-					origin, pathfinder.grid(), 20, _blocked_cells
+					origin, grid, Bridge.MAX_LENGTH, _blocked_cells
 				)
 				var blocked := _blocked_cells
 				is_valid_endpoint = func(cell: Vector2i) -> bool:
-					return Bridge.validate(
-						origin, cell, pathfinder.grid(), blocked
+					var g := _require_grid()
+					return g != null and Bridge.validate(
+						origin, cell, g, blocked
 					) == Bridge.Result.OK
 			&"ladder":
 				candidates = Ladder.find_candidates(
-					origin, pathfinder.grid(), Ladder.MAX_HEIGHT_CUBES, _blocked_cells
+					origin, grid, Ladder.MAX_HEIGHT_CUBES, _blocked_cells
 				)
 				var blocked_l := _blocked_cells
 				is_valid_endpoint = func(cell: Vector2i) -> bool:
-					return Ladder.validate(
-						origin, cell, pathfinder.grid(), blocked_l
+					var g := _require_grid()
+					return g != null and Ladder.validate(
+						origin, cell, g, blocked_l
 					) == Ladder.Result.OK
-		ux_overlay.enter_bridge_mode(origin, candidates, is_valid_endpoint)
+		ux_overlay.enter_placement_mode(origin, candidates, is_valid_endpoint)
+
+
+# Returns the current Pathfinder grid, or null (with a single warning per
+# session) when it isn't built. Every callsite that dereferences the grid
+# (get_tile, resolve_click) routes through here instead of calling
+# pathfinder.grid() directly, so a late / failed rebuild doesn't crash the
+# placement UI.
+func _require_grid() -> TileGrid:
+	if pathfinder == null:
+		return null
+	var g := pathfinder.grid()
+	if g == null:
+		push_warning("TraversalPlacementController: pathfinder grid is null — cannot proceed.")
+	return g
 
 
 # Snapshot the cells occupied by the player and any planted objects. Snapshot
@@ -114,6 +133,15 @@ func _gather_blocked_cells() -> Dictionary:
 	if tic != null:
 		for cell in tic.planted_cells().keys():
 			blocked[cell] = true
+	# Every cell already covered by an existing traversal (bridge decks,
+	# ladder origin/top columns) must block new placements — a bridge rooted
+	# on another bridge's deck or a ladder rooted inside a deck would
+	# otherwise validate OK on the underlying TileGrid.
+	for t in _traversals:
+		if not is_instance_valid(t):
+			continue
+		for entry in t.painted_cells():
+			blocked[entry["cell"]] = true
 	var p := get_tree().get_first_node_in_group(&"player") as Player
 	if p != null:
 		blocked[p.current_cell] = true
@@ -130,7 +158,7 @@ func cancel() -> void:
 	_preview_valid = false
 	_blocked_cells = {}
 	if ux_overlay:
-		ux_overlay.exit_bridge_mode()
+		ux_overlay.exit_placement_mode()
 
 
 func is_placing() -> bool:
@@ -170,7 +198,10 @@ func _resolve_preview_hover_cell() -> Vector2i:
 
 
 func _resolve_hover_at_origin_altitude() -> Vector2i:
-	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var grid := _require_grid()
+	var origin_tile: CellData = null
+	if grid != null:
+		origin_tile = grid.get_tile(_origin_cell)
 	var alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var adjusted := _mouse_global_position() + Vector2(0.0, alt * Pathfinder.HALF_STEP_PX)
 	return pathfinder.world_to_cell(adjusted)
@@ -192,7 +223,10 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 	var placer := _ensure_preview_placer()
 	if placer == null:
 		return
-	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var grid := _require_grid()
+	if grid == null:
+		return
+	var origin_tile := grid.get_tile(_origin_cell)
 	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var plan := Bridge.plan_tiles(_origin_cell, hover, base_alt)
 	if plan.is_empty():
@@ -200,7 +234,7 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 	for entry in plan:
 		if placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_preview_cells.append(entry)
-	var result := Bridge.validate(_origin_cell, hover, pathfinder.grid(), _blocked_cells)
+	var result := Bridge.validate(_origin_cell, hover, grid, _blocked_cells)
 	_preview_valid = result == Bridge.Result.OK
 	if _preview_valid:
 		structure_layer_manager.set_preview_valid()
@@ -212,7 +246,9 @@ func _paint_ladder_preview(hover: Vector2i) -> void:
 	var placer := _ensure_preview_placer()
 	if placer == null:
 		return
-	var grid := pathfinder.grid()
+	var grid := _require_grid()
+	if grid == null:
+		return
 	var origin_tile := grid.get_tile(_origin_cell)
 	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var top_tile := grid.get_tile(hover)
@@ -317,10 +353,14 @@ func _unhandled_input(event: InputEvent) -> void:
 # ----------------------------------------------------------------------------
 
 func _place_bridge(far_cell: Vector2i) -> void:
+	var grid := _require_grid()
+	if grid == null:
+		cancel()
+		return
 	# Re-gather just before placing so a player who slid into a deck cell
 	# during the brief preview window still blocks placement.
 	_blocked_cells = _gather_blocked_cells()
-	var result: int = Bridge.validate(_origin_cell, far_cell, pathfinder.grid(), _blocked_cells)
+	var result: int = Bridge.validate(_origin_cell, far_cell, grid, _blocked_cells)
 	if result != Bridge.Result.OK:
 		push_warning(
 			"Bridge placement rejected: %s (origin=%s, far=%s)."
@@ -332,22 +372,29 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	if _placer == null:
 		_placer = StructurePlacer.new(structure_layer_manager)
 
-	var origin_tile := pathfinder.grid().get_tile(_origin_cell)
+	var origin_tile := grid.get_tile(_origin_cell)
 	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 
 	var inst: Bridge = bridge_scene.instantiate()
 	world.add_child(inst)
 	Bridge.configure(inst, _origin_cell, far_cell, base_alt, _placer, pathfinder)
-	inst.build()
-	_traversals.append(inst)
+	if inst.build():
+		_traversals.append(inst)
+	else:
+		# build() rolls back its own paint state and leaves no traversal edge;
+		# just drop the node so we don't accumulate orphans.
+		inst.queue_free()
 
 	cancel()
 
 
 func _place_ladder(target_cell: Vector2i) -> void:
+	var grid := _require_grid()
+	if grid == null:
+		cancel()
+		return
 	# Re-gather occupancy just before commit (parity with bridge).
 	_blocked_cells = _gather_blocked_cells()
-	var grid := pathfinder.grid()
 	var result: int = Ladder.validate(_origin_cell, target_cell, grid, _blocked_cells)
 	if result != Ladder.Result.OK:
 		push_warning(
@@ -376,8 +423,10 @@ func _place_ladder(target_cell: Vector2i) -> void:
 	var inst: Ladder = ladder_scene.instantiate()
 	world.add_child(inst)
 	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
-	inst.build()
-	_traversals.append(inst)
+	if inst.build():
+		_traversals.append(inst)
+	else:
+		inst.queue_free()
 
 	cancel()
 
@@ -424,7 +473,9 @@ func _event_global_position(mb: InputEventMouseButton) -> Vector2:
 # just a red flash.
 func _log_click_diagnostic(far_cell: Vector2i) -> void:
 	var hover_alt_cell := _resolve_hover_at_origin_altitude()
-	var grid := pathfinder.grid()
+	var grid := _require_grid()
+	if grid == null:
+		return
 	var origin_tile := grid.get_tile(_origin_cell)
 	var base_alt: int = origin_tile.altitude_low if origin_tile != null else 0
 	var target_tile := grid.get_tile(far_cell) if far_cell != Pathfinder.NO_CELL else null

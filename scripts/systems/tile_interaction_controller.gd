@@ -9,6 +9,12 @@ extends Node
 
 const GROUP_NAME: StringName = &"tile_interaction_controller"
 
+# Prefix for submenu-group pseudo-ids. Keeps the group id namespace disjoint
+# from TileAction.id so `_on_item_selected` can't mistake a stale submenu-
+# parent click for a missing action (even if an action is ever registered
+# with id == &"build").
+const _GROUP_ID_PREFIX: String = "group:"
+
 # Action scripts — preloaded so Godot's class_name global cache is populated
 # before _ready(). Listing them explicitly here also makes the set of
 # registered actions easy to audit in one place.
@@ -181,7 +187,7 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 	for group_id in group_order:
 		var submenu: Array = groups[group_id]
 		top.append({
-			"id": String(group_id),
+			"id": _GROUP_ID_PREFIX + String(group_id),
 			"icon": _GROUP_ICONS.get(group_id),
 			"submenu": submenu,
 		})
@@ -212,11 +218,23 @@ func _close_menu() -> void:
 
 
 func _on_item_selected(id: String) -> void:
+	# Submenu-parent pseudo-ids should never reach here (RadialMenu only emits
+	# item_selected for leaves), but guard in case the contract changes.
+	if id.begins_with(_GROUP_ID_PREFIX):
+		return
 	var action := _registry.find(StringName(id))
 	if action == null:
-		# Unknown id — could be a stale submenu parent click; ignore.
 		return
 	var ctx := _build_context(_pending_cell)
+	# State may have shifted between menu open and item click (player moved,
+	# a structure got removed externally, etc.). Re-check availability against
+	# fresh context before executing.
+	if not action.is_available(ctx):
+		if _ux_overlay and _ux_overlay.has_method(&"flash_denied"):
+			_ux_overlay.flash_denied(_pending_cell)
+		if _ux_overlay:
+			_ux_overlay.unlock()
+		return
 	action.execute(ctx)
 	# Per UX spec: the lock square should clear the instant a placement
 	# commits, not wait for the menu's close animation. Placement/removal
@@ -266,17 +284,20 @@ func begin_traversal(origin: Vector2i, kind: StringName) -> void:
 	traversal_placement_controller.begin(origin, kind)
 
 
-func remove_bridge(cell: Vector2i) -> void:
+## Remove whatever Traversal (bridge, ladder, future kinds) covers `cell`.
+## Refuses to remove while the player stands on the traversal — matches the
+## ActionRemove* is_available() guards but also protects scripted callers.
+func remove_traversal_at(cell: Vector2i) -> void:
 	if traversal_placement_controller == null:
 		return
 	var t: Traversal = traversal_placement_controller.find_traversal_at(cell)
 	if t == null:
 		return
-	# Defense in depth — the registry should already hide this option when
-	# the player is on the traversal (ActionRemoveBridge.is_available), but
-	# check again so scripted callers can't strand the player.
 	if is_player_on_traversal(t):
-		push_warning("TileInteractionController: refusing to remove bridge — player stands on it.")
+		push_warning(
+			"TileInteractionController: refusing to remove traversal at %s — player stands on it."
+			% cell
+		)
 		return
 	traversal_placement_controller.remove_traversal(t)
 

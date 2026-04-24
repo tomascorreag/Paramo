@@ -27,9 +27,17 @@ enum Result {
 	ALTITUDE_MISMATCH,
 	NOT_DIAGONAL,
 	TOO_SHORT,
+	TOO_LONG,
 	SAME_CELL,
 	OCCUPIED,
 }
+
+
+# Upper bound on bridge length in grid steps. Matches Bridge.find_candidates'
+# default scan window so UX (candidate hints) and validator (commit check)
+# agree on what "too long" means. Passing a different cap to either function
+# stays supported via the `max_length` parameter.
+const MAX_LENGTH: int = 20
 
 
 @export var origin_cell: Vector2i
@@ -61,15 +69,18 @@ static func configure(
 	inst._pathfinder = pf
 
 
-func build() -> void:
+## Returns true on success, false if the bridge couldn't be built. On false,
+## any partially-painted tiles are rolled back and the caller should free the
+## node.
+func build() -> bool:
 	if _placer == null or _pathfinder == null:
 		push_error("Bridge.build(): not configured — call Bridge.configure() first.")
-		return
+		return false
 
 	var plan := plan_tiles(origin_cell, far_cell, base_altitude)
 	if plan.is_empty():
 		push_error("Bridge.build(): invalid geometry between %s and %s." % [origin_cell, far_cell])
-		return
+		return false
 
 	for entry in plan:
 		if _placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
@@ -81,6 +92,7 @@ func build() -> void:
 	# later for attaching animations, SFX, or per-bridge decoration.
 	var base_world := _pathfinder.cell_to_world(origin_cell)
 	global_position = base_world + Vector2(0.0, -base_altitude * Pathfinder.HALF_STEP_PX)
+	return true
 
 
 # Returns the (cell, kind, altitude) entries a bridge would paint between
@@ -150,7 +162,11 @@ static func _exit_stair_kind(dir: Vector2i) -> StringName:
 # `blocked_cells` is an optional `{Vector2i: any}` set — any cell along the
 # bridge plan present in the dict yields Result.OCCUPIED.
 static func validate(
-	origin: Vector2i, far: Vector2i, grid: TileGrid, blocked_cells: Dictionary = {}
+	origin: Vector2i,
+	far: Vector2i,
+	grid: TileGrid,
+	blocked_cells: Dictionary = {},
+	max_length: int = MAX_LENGTH,
 ) -> int:
 	if origin == far:
 		return Result.SAME_CELL
@@ -167,6 +183,8 @@ static func validate(
 	var steps: int = absi(d.x) + absi(d.y)
 	if steps < 2:
 		return Result.TOO_SHORT
+	if steps > max_length:
+		return Result.TOO_LONG
 
 	var oi := grid.get_tile(origin)
 	var fi := grid.get_tile(far)
@@ -218,6 +236,7 @@ static func result_name(r: int) -> String:
 		Result.ALTITUDE_MISMATCH: return "ALTITUDE_MISMATCH"
 		Result.NOT_DIAGONAL: return "NOT_DIAGONAL"
 		Result.TOO_SHORT: return "TOO_SHORT"
+		Result.TOO_LONG: return "TOO_LONG"
 		Result.SAME_CELL: return "SAME_CELL"
 		Result.OCCUPIED: return "OCCUPIED"
 	return "UNKNOWN"

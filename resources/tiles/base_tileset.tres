@@ -19,7 +19,6 @@
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_tbfl4"]
 texture = ExtResource("1_ns3h2")
 texture_region_size = Vector2i(32, 16)
-use_texture_padding = false
 0:0/size_in_atlas = Vector2i(1, 2)
 0:0/0 = 0
 0:0/0/texture_origin = Vector2i(0, -8)

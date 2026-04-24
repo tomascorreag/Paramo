@@ -155,6 +155,11 @@ var _layer_altitudes: Dictionary[TileMapLayer, int] = {}
 # Unique layer altitudes sorted descending — used by resolve_click.
 var _altitudes_desc: Array[int] = []
 
+# Per-TileSet custom-data layer-id cache populated during build(). Avoids
+# scanning tile_set.get_custom_data_layer_name(i) on every roughness/walkable
+# query downstream.
+var _custom_layer_ids: Dictionary[TileSet, Dictionary] = {}
+
 
 # ----------------------------------------------------------------------------
 # Build
@@ -165,6 +170,7 @@ func build(layers: Array[TileMapLayer]) -> void:
 	_layer_altitudes.clear()
 	_altitudes_desc.clear()
 	_tiles.clear()
+	_custom_layer_ids.clear()
 	_bounds = Rect2i(0, 0, 0, 0)
 
 	var alt_set: Dictionary[int, bool] = {}
@@ -185,7 +191,21 @@ func build(layers: Array[TileMapLayer]) -> void:
 				+ "Set it in the inspector's Metadata section."
 			)
 
-		var alt: int = layer.get_meta(_ALTITUDE_META, 0)
+		var alt_variant: Variant = layer.get_meta(_ALTITUDE_META, 0)
+		var alt: int = 0
+		if alt_variant is int:
+			alt = alt_variant
+		elif alt_variant is float:
+			alt = int(alt_variant)
+			push_warning(
+				"TileGrid: layer '%s' altitude meta is float (%s); coerced to int %d."
+				% [layer.name, alt_variant, alt]
+			)
+		else:
+			push_warning(
+				"TileGrid: layer '%s' altitude meta has non-numeric type (%s); defaulting to 0."
+				% [layer.name, typeof(alt_variant)]
+			)
 		_layers.append(layer)
 		_layer_altitudes[layer] = alt
 		alt_set[alt] = true
@@ -232,7 +252,7 @@ func _allocate_tiles(size: Vector2i) -> void:
 
 func _ingest_layer(layer: TileMapLayer) -> void:
 	var tile_set := layer.tile_set
-	var kind_layer_id := _find_custom_data_layer(tile_set, _TILE_KIND_FIELD)
+	var kind_layer_id := _custom_layer_id(tile_set, _TILE_KIND_FIELD)
 	if kind_layer_id < 0:
 		push_error(
 			"TileGrid: layer '%s' TileSet has no '%s' custom data layer."
@@ -244,7 +264,7 @@ func _ingest_layer(layer: TileMapLayer) -> void:
 	# `false` for a tile, AND-combines with the shape's baseline walkability:
 	# shape-walkable + walkable=false → blocked. When the layer is absent on
 	# the tileset, walkability is shape-only (back-compat).
-	var walkable_layer_id := _find_custom_data_layer(tile_set, _WALKABLE_FIELD)
+	var walkable_layer_id := _custom_layer_id(tile_set, _WALKABLE_FIELD)
 
 	var altitude_low: int = _layer_altitudes.get(layer, 0)
 
@@ -404,6 +424,18 @@ func get_tile(cell: Vector2i) -> CellData:
 	return _get_raw(cell)
 
 
+func _custom_layer_id(tile_set: TileSet, layer_name: String) -> int:
+	if tile_set == null:
+		return -1
+	var per_set: Dictionary = _custom_layer_ids.get(tile_set, {})
+	if per_set.has(layer_name):
+		return per_set[layer_name]
+	var id := _find_custom_data_layer(tile_set, layer_name)
+	per_set[layer_name] = id
+	_custom_layer_ids[tile_set] = per_set
+	return id
+
+
 ## Build a CellData for whatever is painted on `layer` at `cell`, bypassing the
 ## tallest-wins merge. Useful for hover resolution, which must consider every
 ## tile in the altitude stack (e.g. the sides of a cube under another cube are
@@ -419,7 +451,7 @@ func inspect_tile_at(layer: TileMapLayer, cell: Vector2i) -> CellData:
 	var data := layer.get_cell_tile_data(cell)
 	if data == null:
 		return null
-	var kind_layer_id := _find_custom_data_layer(tile_set, _TILE_KIND_FIELD)
+	var kind_layer_id := _custom_layer_id(tile_set, _TILE_KIND_FIELD)
 	if kind_layer_id < 0:
 		return null
 	var kind_raw: Variant = data.get_custom_data_by_layer_id(kind_layer_id)
@@ -434,7 +466,7 @@ func inspect_tile_at(layer: TileMapLayer, cell: Vector2i) -> CellData:
 			layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y)
 		)
 
-	var walkable_layer_id := _find_custom_data_layer(tile_set, _WALKABLE_FIELD)
+	var walkable_layer_id := _custom_layer_id(tile_set, _WALKABLE_FIELD)
 	if walkable_layer_id >= 0 and not _read_walkable_bool(data, walkable_layer_id):
 		return CellData.make_blocked(
 			layer, altitude_low, _visual_top_for_blocked(altitude_low, tex_origin_y)
@@ -492,7 +524,7 @@ func roughness_at(cell: Vector2i) -> float:
 	if data == null:
 		return 0.0
 	var tile_set := t.layer.tile_set
-	var rough_id := _find_custom_data_layer(tile_set, "roughness")
+	var rough_id := _custom_layer_id(tile_set, "roughness")
 	if rough_id < 0:
 		return 0.0
 	var v: Variant = data.get_custom_data_by_layer_id(rough_id)
@@ -571,7 +603,7 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	# walkable edge between these two 4-connected cells, skip the shape-based
 	# altitude check entirely. Shape-based transitions still apply on every
 	# other edge of the same cell.
-	if _has_traversal_edge(from, to):
+	if has_traversal_edge(from, to):
 		return true
 
 	var exit_alts := _edge_altitudes(from, dir)
@@ -622,7 +654,7 @@ func _remove_edge_one_way(a: Vector2i, b: Vector2i) -> void:
 		_traversal_edges.erase(a)
 
 
-func _has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
+func has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
 	if not _traversal_edges.has(a):
 		return false
 	return (_traversal_edges[a] as Dictionary).has(b)

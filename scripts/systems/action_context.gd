@@ -27,3 +27,11 @@ var player_cell: Vector2i
 var tile_interaction: TileInteractionController
 var traversal: TraversalPlacementController
 var pathfinder: Pathfinder
+
+
+## True iff every service this game currently expects is wired. Actions can
+## short-circuit `is_available` against this when they don't want to list every
+## service ref by hand. Returns false rather than pushing warnings — the caller
+## decides how loud to be.
+func has_all_services() -> bool:
+	return tile_interaction != null and traversal != null and pathfinder != null

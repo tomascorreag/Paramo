@@ -35,10 +35,14 @@ func paint(cell: Vector2i, kind: StringName, target_altitude: int) -> bool:
 		return false
 	var layer := _resolve_layer(target_altitude)
 	if layer == null:
-		push_warning(
-			"StructurePlacer.paint: no %s layer for altitude %d."
-			% ["preview" if _preview else "Structures", target_altitude]
-		)
+		# Preview hovers can query altitudes outside the SLM's configured range
+		# on every mouse move — silent failure there keeps the console readable.
+		# Commit paints must still warn because a missing layer is a real bug.
+		if not _preview:
+			push_warning(
+				"StructurePlacer.paint: no Structures layer for altitude %d."
+				% target_altitude
+			)
 		return false
 	var idx := _index_for(layer.tile_set)
 	if idx == null:
@@ -73,6 +77,13 @@ func _resolve_layer(altitude: int) -> TileMapLayer:
 	if _preview:
 		return _slm.preview_layer_for_altitude(altitude)
 	return _slm.layer_for_altitude(altitude)
+
+
+## Drop the per-TileSet TileKindIndex cache. Editor-only hazard: if a TileSet
+## is reloaded or modified at runtime (hot-reload, reimport), callers can
+## invalidate the cache without constructing a fresh placer.
+func invalidate_tileset_cache() -> void:
+	_index_by_tileset.clear()
 
 
 func _index_for(tile_set: TileSet) -> TileKindIndex:
