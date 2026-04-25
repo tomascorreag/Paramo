@@ -70,6 +70,20 @@ var _base_sprite_offset_y: float
 # the shadow position the artist set up in the player scene.
 var _base_visual_y_offset: float = 0.0
 
+# Lerped shadow taper cutoff (screen px from entity cell center, positive in
+# the taper direction). _push_shadow_cell_state computes a target from the
+# pathfinder's altitude deltas; _physics_process slides current toward target
+# at iso step speed (cell_width / step_duration) so the shadow extends/retracts
+# at roughly the same pace as the player walks. The "no clip" sentinel is
+# pinned to the shadow's own max extent (+ 1 px) so the lerp range stays
+# within visible territory — no point lerping through values past where the
+# shape would draw anyway.
+const _SHADOW_CUTOFF_CELL_W: float = 32.0
+const _SHADOW_CUTOFF_HALF_W: float = 16.0
+var _shadow_no_clip: float = 1000.0
+var _shadow_cutoff_current: float = 1000.0
+var _shadow_cutoff_target: float = 1000.0
+
 var _pathfinder: Pathfinder
 var _time_manager: Node # TimeManager autoload
 
@@ -139,6 +153,17 @@ func _ready() -> void:
 		var v: Variant = shadow_mat.get_shader_parameter(&"visual_y_offset")
 		if v != null:
 			_base_visual_y_offset = float(v)
+		# Cache the shadow's max extent so the cutoff lerp range stays within
+		# visible territory. extent = |shadow_length| + cap_width matches the
+		# shader's vertex-side calculation.
+		var slen_v: Variant = shadow_mat.get_shader_parameter(&"shadow_length")
+		var capw_v: Variant = shadow_mat.get_shader_parameter(&"cap_width")
+		var slen: float = absf(float(slen_v)) if slen_v != null else 0.0
+		var capw: float = float(capw_v) if capw_v != null else 0.0
+		_shadow_no_clip = slen + capw + 1.0
+		_shadow_cutoff_current = _shadow_no_clip
+		_shadow_cutoff_target = _shadow_no_clip
+		shadow_mat.set_shader_parameter(&"cutoff_x", _shadow_no_clip)
 	_time_manager = get_node_or_null("/root/TimeManager")
 
 	# Reparent shadow to world level so it y-sorts independently against tiles.
@@ -191,6 +216,7 @@ func is_moving() -> bool:
 
 func _physics_process(delta: float) -> void:
 	_update_lantern()
+	_tick_shadow_cutoff(delta)
 
 	if _pathfinder == null:
 		return
@@ -258,7 +284,7 @@ func _begin_next_step() -> void:
 	# mid-step produce paths from the cell the player is committed to
 	# reaching, which is the only sensible anchor point.
 	current_cell = next_cell
-	_update_shadow_roughness()
+	_push_shadow_cell_state()
 
 	_set_facing(dir)
 	_apply_step_interp(0.0)
@@ -381,19 +407,63 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	_light.position.y = _base_sprite_offset_y + lift
 
 
-func _update_shadow_roughness() -> void:
-	# Push the current cell's ground roughness to the shadow shader. Called on
-	# step start and initial snap — commits as soon as `current_cell` advances
-	# so the jaggedness visibly flips the moment the player crosses materials.
+func _push_shadow_cell_state() -> void:
+	# Push per-cell roughness immediately (binary surface change). Recompute
+	# the cutoff target from altitude deltas; the actual `cutoff_x` uniform
+	# is lerped toward it in _physics_process so the shadow extends/retracts
+	# smoothly across cell boundaries.
 	if _pathfinder == null or _shadow == null:
 		return
 	var mat := _shadow.material as ShaderMaterial
 	if mat == null:
 		return
 	mat.set_shader_parameter(&"roughness", _pathfinder.roughness_at(current_cell))
-	mat.set_shader_parameter(
-		&"neighbor_match", _pathfinder.neighbor_altitude_match(current_cell)
-	)
+	var slen: Variant = mat.get_shader_parameter(&"shadow_length")
+	var dir_sign: int = 1
+	if (typeof(slen) == TYPE_FLOAT or typeof(slen) == TYPE_INT) and float(slen) < 0.0:
+		dir_sign = -1
+	var deltas: Vector3 = _pathfinder.shadow_altitude_deltas(current_cell, dir_sign)
+	_shadow_cutoff_target = _cutoff_from_deltas(deltas)
+
+
+# First mismatching neighbor in (deltas.x, deltas.y, deltas.z) sets the cutoff
+# at its near edge. 0.25 threshold tolerates float noise on half-integer
+# altitudes; sentinel deltas (empty / non-walkable, e.g. 99.0) also trip it.
+func _cutoff_from_deltas(deltas: Vector3) -> float:
+	if absf(deltas.x) > 0.25:
+		return _SHADOW_CUTOFF_HALF_W
+	if absf(deltas.y) > 0.25:
+		return _SHADOW_CUTOFF_HALF_W + _SHADOW_CUTOFF_CELL_W
+	if absf(deltas.z) > 0.25:
+		return _SHADOW_CUTOFF_HALF_W + 2.0 * _SHADOW_CUTOFF_CELL_W
+	return _shadow_no_clip
+
+
+# Slide _shadow_cutoff_current toward _shadow_cutoff_target at iso step speed
+# and push the result. Called every physics frame from _physics_process so the
+# shadow extends/retracts at the same pace as the player walks.
+func _tick_shadow_cutoff(delta: float) -> void:
+	if _shadow == null:
+		return
+	var mat := _shadow.material as ShaderMaterial
+	if mat == null:
+		return
+	# Match player iso step speed: one cell-width per step_duration.
+	var speed_px_per_sec: float = _SHADOW_CUTOFF_CELL_W / maxf(_step_duration_effective, 0.001)
+	if _shadow_cutoff_target > _shadow_cutoff_current:
+		# Extending: move outward at step speed.
+		_shadow_cutoff_current = minf(
+			_shadow_cutoff_target, _shadow_cutoff_current + speed_px_per_sec * delta
+		)
+	else:
+		# Retracting: move inward at step speed.
+		_shadow_cutoff_current = maxf(
+			_shadow_cutoff_target, _shadow_cutoff_current - speed_px_per_sec * delta
+		)
+	# Avoid noise: when within 0.5 px of target, snap to target.
+	if absf(_shadow_cutoff_current - _shadow_cutoff_target) < 0.5:
+		_shadow_cutoff_current = _shadow_cutoff_target
+	mat.set_shader_parameter(&"cutoff_x", _shadow_cutoff_current)
 
 
 func _update_lantern() -> void:
@@ -441,7 +511,10 @@ func _snap_to_starting_cell() -> void:
 	current_cell = start
 	_altitude = _pathfinder.altitude_center(start)
 	_apply_position(current_cell, _altitude)
-	_update_shadow_roughness()
+	_push_shadow_cell_state()
+	# Initial snap: skip the lerp on first frame so the shadow starts in its
+	# correct extent rather than retracting in from "no clip".
+	_shadow_cutoff_current = _shadow_cutoff_target
 
 	# Opening camera pan: fully detached from player movement (top_level so
 	# the parent transform is ignored). The pan target is recomputed every

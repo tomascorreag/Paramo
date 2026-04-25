@@ -236,41 +236,61 @@ func roughness_at(cell: Vector2i) -> float:
 	return _grid.roughness_at(cell)
 
 
-# Vector4 mask of which of the 4 iso-diamond neighbors of `cell` share the
-# same walkable altitude as `cell` itself: (SE, NW, SW, NE) → (x, y, z, w),
-# 1.0 for match, 0.0 otherwise. Empty / non-walkable neighbors return 0.0.
-# Used by the shadow shader to discard shadow pixels that would land on
-# ground at a different altitude than the one the entity stands on.
-func neighbor_altitude_match(cell: Vector2i) -> Vector4:
+# Altitude deltas for the three iso cells the shadow body sweeps at each
+# step along its taper direction. At step N the shadow crosses three cells
+# between cell N-1 and cell N on the main axis: the diagonal main cell
+# plus the two cardinal neighbors of the main cell that lie BETWEEN it and
+# the player (so the shadow's body, which has vertical thickness, passes
+# through them too). Per-step delta = whichever of the three has the
+# largest absolute altitude difference from the entity's cell. Walking
+# stops at the first step that contains a mismatch (further steps don't
+# matter — the cutoff already lives at this step's near edge).
+#
+# Stride directions (entity at (0, 0)):
+# - Positive shadow_dir_sign (taper screen-east): main = (1, -1) per step,
+#   flanks at (-1, 0) and (0, 1) from main → cells (1, -1), (0, -1), (1, 0).
+# - Negative (taper screen-west): main = (-1, 1), flanks (1, 0) and (0, -1)
+#   → cells (-1, 1), (0, 1), (-1, 0).
+#
+# Returns Vector3(d1, d2, d3) where each d = self_alt - cell_alt of the
+# representative cell at that step. Empty / non-walkable cells contribute
+# a sentinel large value so the shader cuts off at that step.
+const _SHADOW_DELTA_BLOCKED: float = 99.0
+const _SHADOW_DELTA_THRESHOLD: float = 0.25
+
+
+func shadow_altitude_deltas(cell: Vector2i, shadow_dir_sign: int) -> Vector3:
 	if _grid == null:
-		return Vector4.ZERO
+		return Vector3.ZERO
 	var self_tile := _grid.get_tile(cell)
 	if self_tile == null:
-		return Vector4.ZERO
+		return Vector3.ZERO
 	var self_alt: float = self_tile.altitude_center
-	return Vector4(
-		_alt_match(cell + Vector2i(1, 0), self_alt),   # SE
-		_alt_match(cell + Vector2i(-1, 0), self_alt),  # NW
-		_alt_match(cell + Vector2i(0, 1), self_alt),   # SW
-		_alt_match(cell + Vector2i(0, -1), self_alt),  # NE
+	var stride: Vector2i = (
+		Vector2i(1, -1) if shadow_dir_sign >= 0 else Vector2i(-1, 1)
 	)
+	# Cardinal neighbors of the main cell, on the side facing the player.
+	var flank_a: Vector2i = Vector2i(-stride.x, 0)
+	var flank_b: Vector2i = Vector2i(0, -stride.y)
+	var deltas := Vector3.ZERO
+	for n in range(1, 4):
+		var main_cell: Vector2i = cell + stride * n
+		var step_delta: float = 0.0
+		for c in [main_cell, main_cell + flank_a, main_cell + flank_b]:
+			var d := _shadow_cell_delta(c, self_alt)
+			if absf(d) > absf(step_delta):
+				step_delta = d
+		deltas[n - 1] = step_delta
+		if absf(step_delta) > _SHADOW_DELTA_THRESHOLD:
+			break
+	return deltas
 
 
-func _alt_match(c: Vector2i, self_alt: float) -> float:
+func _shadow_cell_delta(c: Vector2i, self_alt: float) -> float:
 	var tile := _grid.get_tile(c)
-	if tile == null:
-		return 0.0
-	# Walls / EDGE_* / non-walkable cells have no ground surface to cast a
-	# shadow on, even if their blocking altitude happens to match.
-	if not tile.walkable:
-		return 0.0
-	# Match when the entity's altitude intersects the neighbor's altitude
-	# RANGE. For flats low == high so this reduces to equality; for ramps
-	# adjacency to either end (low OR high) is enough to keep the shadow
-	# visible on the ramp. A tiny epsilon absorbs float round-off.
-	if self_alt >= float(tile.altitude_low) - 0.01 and self_alt <= float(tile.altitude_high) + 0.01:
-		return 1.0
-	return 0.0
+	if tile == null or not tile.walkable:
+		return _SHADOW_DELTA_BLOCKED
+	return self_alt - tile.altitude_center
 
 
 # Registers an additional enter-cost on a cell. Passing 0.0 clears the entry.

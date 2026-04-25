@@ -101,9 +101,9 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -474.0
-offset_top = -317.0
+offset_top = -316.0
 offset_right = 402.0
-offset_bottom = 266.0
+offset_bottom = 267.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -178,7 +178,7 @@ y_sort_origin = 96
 metadata/altitude = 12
 
 [node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
-position = Vector2(0.06, 16.015)
+position = Vector2(-14, 26)
 up_direction = Vector2(1, 0)
 
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=2008137477]

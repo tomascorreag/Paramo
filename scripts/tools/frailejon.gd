@@ -35,7 +35,7 @@ func _ready() -> void:
 
 	_shadow.frame = _sprite.frame
 	_update_shadow_params()
-	_update_shadow_roughness()
+	_push_shadow_cell_state()
 
 	# Lift the visible sprite by altitude so the plant looks like it sits on
 	# the cube top, while keeping the Node2D's position (the y-sort key) in
@@ -111,9 +111,10 @@ func _update_shadow_params() -> void:
 	_shadow.set_meta(&"shadow_scale", _shadow_scale)
 
 
-func _update_shadow_roughness() -> void:
+func _push_shadow_cell_state() -> void:
 	# Stationary entity: sample once at spawn. Frailejones don't move, and
 	# growth-stage changes don't relocate them, so a single set is enough.
+	# No lerp needed — snap the cutoff_x to its computed value.
 	if not is_instance_valid(_shadow):
 		return
 	var mat: ShaderMaterial = _shadow.material as ShaderMaterial
@@ -122,11 +123,22 @@ func _update_shadow_roughness() -> void:
 	var pathfinder := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	var r: float = pathfinder.roughness_at(cell) if pathfinder != null else 0.0
 	mat.set_shader_parameter(&"roughness", r)
-	var nm: Vector4 = (
-		pathfinder.neighbor_altitude_match(cell) if pathfinder != null
-		else Vector4.ONE
+	var slen: Variant = mat.get_shader_parameter(&"shadow_length")
+	var dir_sign: int = 1
+	if (typeof(slen) == TYPE_FLOAT or typeof(slen) == TYPE_INT) and float(slen) < 0.0:
+		dir_sign = -1
+	var deltas: Vector3 = (
+		pathfinder.shadow_altitude_deltas(cell, dir_sign) if pathfinder != null
+		else Vector3.ZERO
 	)
-	mat.set_shader_parameter(&"neighbor_match", nm)
+	var cutoff: float = 1000000.0
+	if absf(deltas.x) > 0.25:
+		cutoff = 16.0
+	elif absf(deltas.y) > 0.25:
+		cutoff = 48.0
+	elif absf(deltas.z) > 0.25:
+		cutoff = 80.0
+	mat.set_shader_parameter(&"cutoff_x", cutoff)
 
 
 func _measure_frame_dimensions() -> Vector2:

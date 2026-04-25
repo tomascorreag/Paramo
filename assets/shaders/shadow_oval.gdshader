@@ -32,13 +32,16 @@ uniform float noise_cell_px : hint_range(0.5, 32.0) = 2.0;
 // perceived doubling while still varying the pattern across tiles.
 uniform float noise_world_follow : hint_range(0.0, 1.0) = 0.5;
 
-// Altitude clip. Shadow pixels falling outside the entity's own diamond
-// cell are discarded when the neighbor in that direction is at a different
-// altitude (or has no tile at all). GDScript fills `neighbor_match` with
-// 1.0 for matching neighbors, 0.0 otherwise, laid out as (SE, NW, SW, NE)
-// → (x, y, z, w). tile_size_px is the iso diamond's full extent
-// (Godot's TileSet `tile_size`), used to build the diamond-distance test.
-uniform vec4 neighbor_match = vec4(1.0);
+// Altitude cutoff along the shadow's east/west taper direction. GDScript
+// samples 3 cells in that direction and lerps `cutoff_x` (screen pixels
+// from the entity's cell center along the taper axis) toward the far
+// corner of the LAST MATCHING cell — 16 (own cell, immediate diagonal
+// differs), 48 (next cell matches, second differs), 80 (next two match,
+// third differs). The fragment uses this to build a diamond-shaped clip
+// at that cell. Default = a value past the shadow's max extent (set by
+// GDScript at runtime) → no visible clip. tile_size_px is the iso
+// diamond's full extent (Godot's TileSet `tile_size`).
+uniform float cutoff_x = 1000.0;
 uniform vec2 tile_size_px = vec2(32.0, 16.0);
 
 varying vec2 shadow_norm;
@@ -104,30 +107,21 @@ void fragment() {
 	float cx = qx + 0.5 - extent;
 	float cy = qy + 0.5 - max_height;
 
-	// Altitude clip: the shadow's (0, 0) origin sits at the entity's feet,
-	// which coincides with its cell center (modulo a 1-px sort offset).
-	// `(cx, cy)` is therefore this pixel's offset from the cell center in
-	// world pixels — diamond membership is the classic Manhattan test on
-	// the half-extents. If the pixel is OUTSIDE the cell, pick the neighbor
-	// quadrant by the sign of (cx, cy): in Godot's iso tile convention,
-	// +x = SE, -x = NW, +y = SW, -y = NE. Discard when that neighbor's
-	// altitude doesn't match the entity's (or the cell is empty).
-	float diamond_dist =
-		abs(cx) / tile_size_px.x + abs(cy) / tile_size_px.y;
-	if (diamond_dist > 0.5) {
-		float match_val;
-		if (cx >= 0.0 && cy >= 0.0) {
-			match_val = neighbor_match.x;  // SE
-		} else if (cx < 0.0 && cy < 0.0) {
-			match_val = neighbor_match.y;  // NW
-		} else if (cx < 0.0 && cy >= 0.0) {
-			match_val = neighbor_match.z;  // SW
-		} else {
-			match_val = neighbor_match.w;  // NE
-		}
-		if (match_val < 0.5) {
-			discard;
-		}
+	// Altitude cutoff: clip the shadow at the iso-diamond edge of the LAST
+	// matching cell along the taper direction. `cutoff_x` is the screen-px
+	// distance from the entity cell center to that cell's far (east/west)
+	// corner. The clip diamond is co-centered with the rendered shadow
+	// (i.e. with the quad, which is itself offset from the entity's local
+	// origin by `visual_y_offset`) so its east tip lands at the cell border
+	// along the shadow's centerline — that's the line the eye reads as
+	// "where the shadow ends at the tile edge". Only pixels on the taper
+	// side of the cell center get tested; cap-side pixels never clip.
+	float half_w = tile_size_px.x * 0.5;
+	float half_h = tile_size_px.y * 0.5;
+	float cell_center_cx = (cutoff_x - half_w) * dir;
+	float dx = cx - cell_center_cx;
+	if (dx * dir > 0.0 && abs(dx) / half_w + abs(cy) / half_h > 1.0) {
+		discard;
 	}
 
 	// Material-driven vertical displacement. Sample position mixes the
