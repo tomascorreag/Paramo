@@ -12,6 +12,8 @@ const _SLIDER_MAX: float = 0.999
 @onready var _passage_toggle: CheckButton = %PassageToggle
 @onready var _time_slider: HSlider = %TimeSlider
 @onready var _time_label: Label = %TimeLabel
+@onready var _indices_toggle: CheckButton = %IndicesToggle
+@onready var _altitudes_toggle: CheckButton = %AltitudesToggle
 
 var _dragging: bool = false
 var _prev_paused: bool = false
@@ -31,6 +33,8 @@ func _ready() -> void:
 	_time_slider.drag_started.connect(_on_slider_drag_started)
 	_time_slider.drag_ended.connect(_on_slider_drag_ended)
 	_time_slider.value_changed.connect(_on_slider_value_changed)
+	_indices_toggle.toggled.connect(_on_indices_toggled)
+	_altitudes_toggle.toggled.connect(_on_altitudes_toggled)
 	TimeManager.time_changed.connect(_on_time_changed)
 
 
@@ -44,6 +48,16 @@ func _sync_from_time_manager() -> void:
 	_passage_toggle.set_pressed_no_signal(not TimeManager.paused)
 	_time_slider.set_value_no_signal(min(TimeManager.time_of_day, _SLIDER_MAX))
 	_update_time_label(TimeManager.time_of_day)
+	_indices_toggle.set_pressed_no_signal(Debug.show_tile_indices)
+	_altitudes_toggle.set_pressed_no_signal(Debug.show_tile_altitudes)
+
+
+func _on_indices_toggled(button_pressed: bool) -> void:
+	Debug.show_tile_indices = button_pressed
+
+
+func _on_altitudes_toggled(button_pressed: bool) -> void:
+	Debug.show_tile_altitudes = button_pressed
 
 
 func _on_passage_toggled(button_pressed: bool) -> void:

@@ -80,7 +80,12 @@ var _base_visual_y_offset: float = 0.0
 # shape would draw anyway.
 const _SHADOW_CUTOFF_CELL_W: float = 32.0
 const _SHADOW_CUTOFF_HALF_W: float = 16.0
-var _shadow_no_clip: float = 1000.0
+# "No clip" sentinel pinned just past the shadow's current visual extent
+# (recomputed each tick from the live shadow_length, which DayNightController
+# drives over the day cycle). Caching it once at _ready was wrong: when the
+# day-night system grew the shadow past the cached extent, cutoff_x stayed
+# below the actual shadow body and the shader cut off the tail even with
+# no real altitude difference.
 var _shadow_cutoff_current: float = 1000.0
 var _shadow_cutoff_target: float = 1000.0
 
@@ -153,17 +158,10 @@ func _ready() -> void:
 		var v: Variant = shadow_mat.get_shader_parameter(&"visual_y_offset")
 		if v != null:
 			_base_visual_y_offset = float(v)
-		# Cache the shadow's max extent so the cutoff lerp range stays within
-		# visible territory. extent = |shadow_length| + cap_width matches the
-		# shader's vertex-side calculation.
-		var slen_v: Variant = shadow_mat.get_shader_parameter(&"shadow_length")
-		var capw_v: Variant = shadow_mat.get_shader_parameter(&"cap_width")
-		var slen: float = absf(float(slen_v)) if slen_v != null else 0.0
-		var capw: float = float(capw_v) if capw_v != null else 0.0
-		_shadow_no_clip = slen + capw + 1.0
-		_shadow_cutoff_current = _shadow_no_clip
-		_shadow_cutoff_target = _shadow_no_clip
-		shadow_mat.set_shader_parameter(&"cutoff_x", _shadow_no_clip)
+		var seed_no_clip := _shadow_no_clip()
+		_shadow_cutoff_current = seed_no_clip
+		_shadow_cutoff_target = seed_no_clip
+		shadow_mat.set_shader_parameter(&"cutoff_x", seed_no_clip)
 	_time_manager = get_node_or_null("/root/TimeManager")
 
 	# Reparent shadow to world level so it y-sorts independently against tiles.
@@ -408,22 +406,15 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 
 
 func _push_shadow_cell_state() -> void:
-	# Push per-cell roughness immediately (binary surface change). Recompute
-	# the cutoff target from altitude deltas; the actual `cutoff_x` uniform
-	# is lerped toward it in _physics_process so the shadow extends/retracts
-	# smoothly across cell boundaries.
+	# Push per-cell roughness on cell-change. The cutoff target is recomputed
+	# every tick in _tick_shadow_cutoff, so it doesn't belong here — leaving
+	# it out keeps it from going stale when shadow_length drifts mid-cell.
 	if _pathfinder == null or _shadow == null:
 		return
 	var mat := _shadow.material as ShaderMaterial
 	if mat == null:
 		return
 	mat.set_shader_parameter(&"roughness", _pathfinder.roughness_at(current_cell))
-	var slen: Variant = mat.get_shader_parameter(&"shadow_length")
-	var dir_sign: int = 1
-	if (typeof(slen) == TYPE_FLOAT or typeof(slen) == TYPE_INT) and float(slen) < 0.0:
-		dir_sign = -1
-	var deltas: Vector3 = _pathfinder.shadow_altitude_deltas(current_cell, dir_sign)
-	_shadow_cutoff_target = _cutoff_from_deltas(deltas)
 
 
 # First mismatching neighbor in (deltas.x, deltas.y, deltas.z) sets the cutoff
@@ -436,7 +427,22 @@ func _cutoff_from_deltas(deltas: Vector3) -> float:
 		return _SHADOW_CUTOFF_HALF_W + _SHADOW_CUTOFF_CELL_W
 	if absf(deltas.z) > 0.25:
 		return _SHADOW_CUTOFF_HALF_W + 2.0 * _SHADOW_CUTOFF_CELL_W
-	return _shadow_no_clip
+	return _shadow_no_clip()
+
+
+# Pixel extent the shadow currently reaches along its taper. Read live from
+# the shader uniform every call because DayNightController drives
+# shadow_length over the day cycle — caching at _ready would let cutoff_x
+# fall behind as the shadow grows past the cached value.
+func _shadow_no_clip() -> float:
+	var mat := _shadow.material as ShaderMaterial if _shadow else null
+	if mat == null:
+		return 1000.0
+	var slen_v: Variant = mat.get_shader_parameter(&"shadow_length")
+	var capw_v: Variant = mat.get_shader_parameter(&"cap_width")
+	var slen: float = absf(float(slen_v)) if slen_v != null else 0.0
+	var capw: float = float(capw_v) if capw_v != null else 0.0
+	return slen + capw + 1.0
 
 
 # Slide _shadow_cutoff_current toward _shadow_cutoff_target at iso step speed
@@ -448,6 +454,17 @@ func _tick_shadow_cutoff(delta: float) -> void:
 	var mat := _shadow.material as ShaderMaterial
 	if mat == null:
 		return
+	# Recompute the target every tick: shadow_length is animated by
+	# DayNightController, so both the direction (sign) and the no-clip
+	# extent change continuously. A one-shot push at step boundaries would
+	# leave the target stale.
+	var slen_v: Variant = mat.get_shader_parameter(&"shadow_length")
+	var dir_sign: int = 1
+	if (typeof(slen_v) == TYPE_FLOAT or typeof(slen_v) == TYPE_INT) and float(slen_v) < 0.0:
+		dir_sign = -1
+	if _pathfinder != null:
+		var deltas: Vector3 = _pathfinder.shadow_altitude_deltas(current_cell, dir_sign)
+		_shadow_cutoff_target = _cutoff_from_deltas(deltas)
 	# Match player iso step speed: one cell-width per step_duration.
 	var speed_px_per_sec: float = _SHADOW_CUTOFF_CELL_W / maxf(_step_duration_effective, 0.001)
 	if _shadow_cutoff_target > _shadow_cutoff_current:

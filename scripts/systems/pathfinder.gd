@@ -236,25 +236,24 @@ func roughness_at(cell: Vector2i) -> float:
 	return _grid.roughness_at(cell)
 
 
-# Altitude deltas for the three iso cells the shadow body sweeps at each
-# step along its taper direction. At step N the shadow crosses three cells
-# between cell N-1 and cell N on the main axis: the diagonal main cell
-# plus the two cardinal neighbors of the main cell that lie BETWEEN it and
-# the player (so the shadow's body, which has vertical thickness, passes
-# through them too). Per-step delta = whichever of the three has the
-# largest absolute altitude difference from the entity's cell. Walking
-# stops at the first step that contains a mismatch (further steps don't
-# matter — the cutoff already lives at this step's near edge).
+# Altitude deltas for the three iso cells along the shadow's taper. The
+# shader's shadow stretches along screen-x (positive shadow_length = screen
+# east, negative = screen west). The cells visually under that body are the
+# iso diagonal screen-east (1, -1) or screen-west (-1, 1) — those cells sit
+# on the same screen row as the player and overlap the shadow's narrow
+# (~4 px) screen-y extent.
 #
-# Stride directions (entity at (0, 0)):
-# - Positive shadow_dir_sign (taper screen-east): main = (1, -1) per step,
-#   flanks at (-1, 0) and (0, 1) from main → cells (1, -1), (0, -1), (1, 0).
-# - Negative (taper screen-west): main = (-1, 1), flanks (1, 0) and (0, -1)
-#   → cells (-1, 1), (0, 1), (-1, 0).
+# We sample one cell per step (no flanks). Step N's cell = entity_cell +
+# stride * N. Per-cell altitude = the highest visible tile in that column,
+# scanned across ALL TileMapLayers (not just the merged "tallest walkable"
+# the grid stores) — that's what the eye reads as the floor level. If it
+# differs from the entity's own visible top, the shader cuts off at the
+# near edge of that cell. Empty cells (no tile painted on any layer)
+# contribute a sentinel large delta so the shadow ends at the void.
 #
-# Returns Vector3(d1, d2, d3) where each d = self_alt - cell_alt of the
-# representative cell at that step. Empty / non-walkable cells contribute
-# a sentinel large value so the shader cuts off at that step.
+# Returns Vector3(d1, d2, d3); walking stops at the first non-zero step
+# (further steps don't matter — the cutoff already lives at this step's
+# near edge).
 const _SHADOW_DELTA_BLOCKED: float = 99.0
 const _SHADOW_DELTA_THRESHOLD: float = 0.25
 
@@ -262,24 +261,16 @@ const _SHADOW_DELTA_THRESHOLD: float = 0.25
 func shadow_altitude_deltas(cell: Vector2i, shadow_dir_sign: int) -> Vector3:
 	if _grid == null:
 		return Vector3.ZERO
-	var self_tile := _grid.get_tile(cell)
-	if self_tile == null:
+	var self_alt: float = highest_visible_top(cell)
+	if is_nan(self_alt):
 		return Vector3.ZERO
-	var self_alt: float = self_tile.altitude_center
 	var stride: Vector2i = (
 		Vector2i(1, -1) if shadow_dir_sign >= 0 else Vector2i(-1, 1)
 	)
-	# Cardinal neighbors of the main cell, on the side facing the player.
-	var flank_a: Vector2i = Vector2i(-stride.x, 0)
-	var flank_b: Vector2i = Vector2i(0, -stride.y)
 	var deltas := Vector3.ZERO
 	for n in range(1, 4):
-		var main_cell: Vector2i = cell + stride * n
-		var step_delta: float = 0.0
-		for c in [main_cell, main_cell + flank_a, main_cell + flank_b]:
-			var d := _shadow_cell_delta(c, self_alt)
-			if absf(d) > absf(step_delta):
-				step_delta = d
+		var c: Vector2i = cell + stride * n
+		var step_delta: float = _shadow_cell_delta(c, self_alt)
 		deltas[n - 1] = step_delta
 		if absf(step_delta) > _SHADOW_DELTA_THRESHOLD:
 			break
@@ -287,10 +278,34 @@ func shadow_altitude_deltas(cell: Vector2i, shadow_dir_sign: int) -> Vector3:
 
 
 func _shadow_cell_delta(c: Vector2i, self_alt: float) -> float:
-	var tile := _grid.get_tile(c)
-	if tile == null or not tile.walkable:
+	var top: float = highest_visible_top(c)
+	if is_nan(top):
 		return _SHADOW_DELTA_BLOCKED
-	return self_alt - tile.altitude_center
+	return self_alt - top
+
+
+# Topmost visible tile altitude at `cell`, scanned across every
+# TileMapLayer the grid was built from. Returns NaN if no layer has a
+# painted tile at this cell (caller treats that as "void"). Independent of
+# the merge's tallest-walkable bias, so high-variant cubes, decorative
+# overlays, etc. all participate. Public so the debug overlay can render
+# the value the shadow cutoff actually compares against.
+func highest_visible_top(cell: Vector2i) -> float:
+	if _grid == null:
+		return NAN
+	var found := false
+	var best: float = -INF
+	for layer in _grid.layers():
+		if layer == null:
+			continue
+		var data := _grid.inspect_tile_at(layer, cell)
+		if data == null:
+			continue
+		var t: float = float(data.visual_top)
+		if not found or t > best:
+			best = t
+			found = true
+	return best if found else NAN
 
 
 # Registers an additional enter-cost on a cell. Passing 0.0 clears the entry.
