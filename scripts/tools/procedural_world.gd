@@ -21,10 +21,16 @@ extends Node
 @export_range(8, 200, 1) var width: int = 32
 @export_range(8, 200, 1) var height: int = 48
 @export_range(2, 32, 2) var top_altitude: int = 16
-## Subtractive penalty applied to altitude near east/west edges (half-steps).
-## 0 = uniform-width ridge; ~3 = mild taper; large values can clip cells to
-## altitude 0 and create empty tiles at the east/west margins.
-@export_range(0.0, 16.0, 0.5) var x_falloff_strength: float = 3.0
+## Per-seed apex jitter as a fraction of max(width, height). The apex base is
+## the visual N corner of the iso diamond; jitter slides along the NE / NW
+## edges (visually horizontal at the top of the screen). 0 = locked to the
+## corner; ~0.15 = visible per-seed variety. Always clamped to keep the lake
+## disc fully on-grid.
+@export_range(0.0, 0.5, 0.01) var apex_x_jitter_frac: float = 0.15
+## Multiplier on the auto-fit cone slope. Auto-fit makes the cone reach
+## altitude 0 at the far diagonal corner; >1 bottoms out earlier (wider flat
+## skirt around the mountain); <1 keeps the entire map elevated.
+@export_range(0.3, 2.0, 0.05) var cone_steepness: float = 1.0
 ## Additive weight given to a south-going river step (positive Y) when the
 ## walker has multiple downhill candidates. 0 = uniform random, higher = the
 ## river hugs the south direction more aggressively.
@@ -103,7 +109,8 @@ func regenerate() -> void:
 	params.width = width
 	params.height = height
 	params.top_altitude = _ensure_even(top_altitude)
-	params.x_falloff_strength = x_falloff_strength
+	params.apex_x_jitter_frac = apex_x_jitter_frac
+	params.cone_steepness = cone_steepness
 	params.south_bias = south_bias
 	params.height_noise_frequency = height_noise_frequency
 	params.height_noise_amplitude = height_noise_amplitude

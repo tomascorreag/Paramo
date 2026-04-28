@@ -13,7 +13,8 @@ func _init() -> void:
 	params.width = 32
 	params.height = 48
 	params.top_altitude = 16
-	params.x_falloff_strength = 3.0
+	params.apex_x_jitter_frac = 0.15
+	params.cone_steepness = 1.0
 	params.south_bias = 0.5
 	params.branch_chance = 0.25
 	params.slope_chance = 0.35

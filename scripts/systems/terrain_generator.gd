@@ -10,9 +10,11 @@ extends RefCounted
 # A separate `TerrainPainter` translates the grid into TileMapLayer paints.
 #
 # Pipeline:
-#   1. Heightfield  (Y-dominant ramp: north high, south low; mild east/west
-#                   taper; Perlin noise; snapped to even half-steps)
-#   2. Carve summit lake  (~5x5 disc flush against north edge)
+#   1. Heightfield  (Euclidean cone descending from an apex near the visual N
+#                   corner of the iso diamond; apex jittered per seed along
+#                   the NE/NW edges; Perlin noise; snapped to even half-steps;
+#                   cells past the cone base flatten to alt 0)
+#   2. Carve summit lake  (~5x5 disc centered on the apex)
 #   3. River trace  (south-biased walk from lake outlet to south edge,
 #                   branches at waterfalls; force-finishes if it stalls)
 #   4. Slope placement  (one slope per altitude-step boundary, plus ~30% extras)
@@ -35,10 +37,16 @@ class Params extends RefCounted:
 	var width: int = 32
 	var height: int = 48
 	var top_altitude: int = 16            # half-steps; must be even
-	# Subtractive penalty applied to altitude near the east/west edges.
-	# 0 = uniform-width ridge; ~3 = mild taper visible at the edges; large
-	# values can clip cells to altitude 0 and create empty tiles at the edges.
-	var x_falloff_strength: float = 3.0
+	# Per-seed apex jitter as a fraction of max(width, height). The apex base
+	# is the visual N corner (grid (inset, inset)); jitter slides along the
+	# NE / NW edges of the diamond — visually horizontal at the top of the
+	# screen. 0 = locked to the corner; ~0.15 = visible per-seed variety.
+	var apex_x_jitter_frac: float = 0.15
+	# Multiplier on the auto-fit cone slope rate. Auto-fit makes the cone reach
+	# altitude 0 at the far diagonal corner; >1 = steeper (cone bottoms out
+	# before the corner, leaving a flat skirt); <1 = shallower (cone never
+	# reaches 0 inside the grid).
+	var cone_steepness: float = 1.0
 	# Additive weight given to a south-going step (dy > 0) when the river has
 	# multiple downhill candidates. Higher = more "always goes south".
 	var south_bias: float = 0.5
@@ -113,8 +121,13 @@ static func generate(params: Params) -> TerrainGrid:
 	var height_noise := _make_noise(params.seed, params.height_noise_frequency)
 	var biome_noise := _make_noise(params.seed ^ 0x9E37, params.biome_noise_frequency)
 
-	_fill_heightfield(grid, params, height_noise)
-	var peak_center: Vector2i = _carve_lake(grid, params, rng)
+	# Apex (cone peak / lake center). Drawn first so its rng consumption is
+	# stable across the rest of the pipeline; downstream rng calls (lake
+	# aspect, slope placement, river bias) follow in a fixed order.
+	var apex: Vector2i = _pick_apex(grid, params, rng)
+
+	_fill_heightfield(grid, params, height_noise, apex)
+	var peak_center: Vector2i = _carve_lake(grid, params, rng, apex)
 	# Smooth jumps before tracing so the river walker sees a heightfield with
 	# at-most-one-tier altitude transitions. Carving the lake at top_altitude
 	# can leave a 4-step cliff straight off the lake (no alt 14 band where it
@@ -141,32 +154,64 @@ static func generate(params: Params) -> TerrainGrid:
 # Step 1: heightfield
 # ----------------------------------------------------------------------------
 
-static func _fill_heightfield(grid: TerrainGrid, params: Params, noise: FastNoiseLite) -> void:
-	# Y-dominant ramp: altitude falls linearly from `top_altitude` at the north
-	# edge (y=0) to 0 at the south edge (y=height-1). A small subtractive
-	# x-falloff bends the east/west edges down so the ridge reads as a ridge,
-	# not a slab. Perlin noise modulates +/- a few half-steps for organic shape.
+static func _fill_heightfield(
+	grid: TerrainGrid,
+	params: Params,
+	noise: FastNoiseLite,
+	apex: Vector2i,
+) -> void:
+	# Euclidean cone: altitude falls with distance from `apex`. Apex sits at
+	# the visual N corner of the iso-projected grid (small x AND small y), so
+	# the visible mountain face descends toward visual S/SE/SW — i.e., toward
+	# the (width-1, height-1) tile corner. Cells past the cone's base clamp
+	# to 0 via _snap_even and remain flat GROUND (no EMPTY clipping — the
+	# river/painter rely on a contiguous walkable map). Perlin noise
+	# modulates +/- a few half-steps so the cone is organic.
 	#
-	# Every cell becomes GROUND — no EMPTY clipping. The user's "solid ridge"
-	# shape requires the entire footprint to be walkable so the river can run
-	# from north lake to south edge without hitting empty barriers; the lowest
-	# altitude tier is 0 (still GROUND, just flat at sea level).
-	var cx: float = grid.width * 0.5
-	var x_half_span: float = max(1.0, cx)
-	var y_span: float = max(1.0, float(grid.height - 1))
+	# Auto-fit slope: the cone reaches altitude 0 at the far diagonal corner
+	# from `apex`; `cone_steepness` multiplies that rate. >1 bottoms out
+	# before the corner (wider flat skirt); <1 keeps the whole map elevated.
+	var far_dx: float = maxf(float(apex.x), float(grid.width - 1 - apex.x))
+	var far_dy: float = float(grid.height - 1 - apex.y)
+	var max_d: float = maxf(1.0, sqrt(far_dx * far_dx + far_dy * far_dy))
+	var rate: float = float(params.top_altitude) / max_d * params.cone_steepness
 	for y in grid.height:
-		var y_norm: float = float(y) / y_span
-		var ridge_alt: float = float(params.top_altitude) * (1.0 - y_norm)
 		for x in grid.width:
-			var x_norm: float = absf(float(x) - cx) / x_half_span
-			var x_pen: float = params.x_falloff_strength * x_norm
+			var dx: float = float(x - apex.x)
+			var dy: float = float(y - apex.y)
+			var d: float = sqrt(dx * dx + dy * dy)
+			var cone_alt: float = float(params.top_altitude) - d * rate
 			var n: float = noise.get_noise_2d(x, y) * params.height_noise_amplitude
-			var raw: float = ridge_alt - x_pen + n
+			var raw: float = cone_alt + n
 			var snapped: int = _snap_even(int(round(raw)), 0, params.top_altitude)
 			var cell: TerrainCell = grid.at(x, y)
 			cell.kind = TerrainCell.Kind.GROUND
 			cell.altitude = snapped
 			cell.ground_shape = TerrainCell.GroundShape.FULL_CUBE
+
+
+# Picks the cone apex / lake center near the visual N corner of the iso-
+# projected diamond. The grid is rendered as a diamond, so the visual top of
+# the screen is the (0, 0) tile corner — NOT the y=0 row (which is the NE
+# edge of the diamond running from N corner to E corner).
+#
+# Default apex sits at (inset, inset), placing the lake at the visual top of
+# the screen with enough margin for the lake disc. Jitter slides the apex
+# along the upper edges of the diamond:
+#   t > 0  → grid (inset+t, inset)        — slides along NE edge (visual right)
+#   t < 0  → grid (inset, inset-t)        — slides along NW edge (visual left)
+# This keeps the apex on the visual top of the screen at every seed, just
+# offset horizontally by jitter.
+static func _pick_apex(grid: TerrainGrid, params: Params, rng: RandomNumberGenerator) -> Vector2i:
+	var inset: int = int(ceil(params.lake_radius)) + 1
+	var max_extent: int = maxi(grid.width, grid.height) - 1 - 2 * inset
+	var jitter_range: float = float(maxi(0, max_extent)) * params.apex_x_jitter_frac
+	var t: float = rng.randf_range(-jitter_range, jitter_range)
+	var dx: int = int(round(maxf(0.0, t)))
+	var dy: int = int(round(maxf(0.0, -t)))
+	var apex_x: int = clampi(inset + dx, inset, maxi(inset, grid.width - 1 - inset))
+	var apex_y: int = clampi(inset + dy, inset, maxi(inset, grid.height - 1 - inset))
+	return Vector2i(apex_x, apex_y)
 
 
 static func _snap_even(v: int, lo: int, hi: int) -> int:
@@ -188,17 +233,23 @@ static func _make_noise(seed: int, frequency: float) -> FastNoiseLite:
 # Step 2: carve summit lake
 # ----------------------------------------------------------------------------
 
-# Carves a randomly-shaped lake at the north edge of the map. Centered on
-# the middle column with a small inset so the lake fits inside the grid.
+# Carves a randomly-shaped lake at the cone apex. The apex sits at the visual
+# N corner of the iso diamond with per-seed jitter along the upper edges (see
+# _pick_apex), so the lake reads as the peak of the mountain both visually
+# (top of screen) and in altitude.
 # Per-seed aspect ratio (lake_aspect_min..max along each axis) and large noise
 # jitter produce visibly different silhouettes from one generation to the
 # next — round, oblong, tilted, etc. Lake cells are forced to `top_altitude`
 # regardless of the heightfield underneath.
 #
-# Returns the lake center cell (always inside the grid for any sensible width).
-static func _carve_lake(grid: TerrainGrid, params: Params, rng: RandomNumberGenerator) -> Vector2i:
-	var inset: int = int(ceil(params.lake_radius)) + 1
-	var center := Vector2i(grid.width / 2, mini(inset, grid.height - 1))
+# Returns the lake center cell (the apex), used downstream for river outlet.
+static func _carve_lake(
+	grid: TerrainGrid,
+	params: Params,
+	rng: RandomNumberGenerator,
+	apex: Vector2i,
+) -> Vector2i:
+	var center: Vector2i = apex
 
 	var r2: float = params.lake_radius * params.lake_radius
 	var jitter_amp: float = params.lake_jitter_strength * r2
@@ -566,13 +617,13 @@ static func _find_lake_outlet(
 	params: Params,
 	lake_center: Vector2i,
 ) -> Vector2i:
-	# The lake sits at the north edge and the heightfield falls away to the
-	# south, so the natural outflow is the southmost lake cell that has a
-	# non-lake GROUND neighbor. Tiebreak by closeness to the lake's center
-	# column for visual stability.
-	# Falls back to the legacy "lowest-neighbor" scoring if no GROUND neighbor
-	# exists south of the lake (only happens on degenerate / very small maps).
-	var best_y: int = -1
+	# Outlet = the lake cell furthest into the descending side of the cone.
+	# Cone apex is at small (x, y); altitude falls with distance from apex,
+	# so "downhill" maximizes x + y. Pick the lake cell with max (x + y) that
+	# has any GROUND face neighbor (regardless of altitude — neighbor cells
+	# close to the apex can saturate at top_altitude after snap+noise; the
+	# walker handles meandering and eventual drops itself).
+	var best_score: int = -1
 	var best: Vector2i = Vector2i(-1, -1)
 	var best_dx: int = 0x7FFFFFFF
 	for y in grid.height:
@@ -584,15 +635,15 @@ static func _find_lake_outlet(
 			for d in _DIRS:
 				var n: Vector2i = Vector2i(x, y) + d
 				var nc: TerrainCell = grid.at_or_null(n.x, n.y)
-				if nc != null and nc.kind == TerrainCell.Kind.GROUND \
-						and nc.altitude < params.top_altitude:
+				if nc != null and nc.kind == TerrainCell.Kind.GROUND:
 					has_land_neighbor = true
 					break
 			if not has_land_neighbor:
 				continue
-			var dx: int = absi(x - lake_center.x)
-			if y > best_y or (y == best_y and dx < best_dx):
-				best_y = y
+			var score: int = x + y
+			var dx: int = absi(x - lake_center.x) + absi(y - lake_center.y)
+			if score > best_score or (score == best_score and dx < best_dx):
+				best_score = score
 				best_dx = dx
 				best = Vector2i(x, y)
 	return best
