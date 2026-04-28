@@ -4,13 +4,17 @@
 
 [resource]
 script = ExtResource("1")
-seed = 12345
+seed = 12346
 apex_x_jitter_frac = 0.25
 cone_steepness = 1.5
-branch_chance = 0.35
-height_noise_frequency = 0.11
-height_noise_amplitude = 5.0
-cliff_bias = 2.0
+enforce_south_cliff = null
+south_bias = 4.0
+branch_chance = 0.5
+drop_height_bias = 2.0
+max_drop_cubes = 6
+height_noise_frequency = 0.07
+height_noise_amplitude = 4.0
+cliff_bias = 1.3
 biome_noise_frequency = 0.15
 biome_noise_amplitude = 4.0
 slope_chance = 0.2

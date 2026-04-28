@@ -42,6 +42,12 @@ extends Resource
 ## flat skirt); <1 keeps the entire map elevated.
 @export_range(0.3, 2.0, 0.05) var cone_steepness: float = 1.0
 
+## Forces every GROUND cell's screen-south neighbor (x+1, y+1) to sit at or
+## below this cell's altitude, guaranteeing a camera-facing cliff on every
+## elevated stack. Improves elevation readability in iso view at the cost of
+## a small amount of organic shape variation on the south face.
+@export var enforce_south_cliff: bool = true
+
 
 # --- River walker -----------------------------------------------------------
 

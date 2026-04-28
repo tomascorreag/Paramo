@@ -61,6 +61,18 @@ const _APEX_BITS: Array[int] = DiamondCompass.APEX_BITS
 # adjacent seeds. Lake offset is an arbitrary distinct value.
 const _SEED_OFFSET_BIOME: int = 0x9E3779B9
 const _SEED_OFFSET_LAKE_JITTER: int = 0xBEEF1010
+# Decorrelated stream for the south-cliff sweep order so randomizing visit order
+# doesn't shift the apex/lake/river RNG sequence the rest of the pipeline reads.
+const _SEED_OFFSET_SOUTH_CLIFF: int = 0xC11FF
+
+# Top-left offsets of the four 2x2 squares a cell can be a member of. Used by
+# _has_2x2_same_alt_block.
+const _2X2_TL_OFFSETS: Array[Vector2i] = [
+	Vector2i(0, 0),    # cell is NW (top-left) of the 2x2
+	Vector2i(-1, 0),   # cell is NE (top-right)
+	Vector2i(0, -1),   # cell is SW (bottom-left)
+	Vector2i(-1, -1),  # cell is SE (bottom-right)
+]
 
 
 # ----------------------------------------------------------------------------
@@ -101,6 +113,10 @@ static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 	# can re-introduce jumps a tier further out. Smooth again so slope
 	# placement works on a clean heightfield (within the same cap).
 	_smooth_altitude_jumps(grid, max_drop_hs)
+	_fill_single_holes(grid, params)
+	_smooth_thin_chains(grid, params)
+	if params.enforce_south_cliff:
+		_enforce_south_cliff_rule(grid, params, max_drop_hs)
 	_place_slopes(grid, params, rng)
 	_assign_biomes(grid, params, biome_noise)
 	_assign_water_flow(grid)
@@ -190,7 +206,20 @@ static func _make_noise(seed: int, frequency: float) -> FastNoiseLite:
 	var n := FastNoiseLite.new()
 	n.seed = seed
 	n.frequency = frequency
-	n.noise_type = FastNoiseLite.TYPE_PERLIN
+	# Simplex's hexagonal lattice is far more isotropic than Perlin's square one.
+	# Perlin features align with grid x/y axes, which iso-project to screen
+	# diagonals and produce stair-stepped diagonal cliff lines. Simplex breaks
+	# that alignment.
+	n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	# Domain warp distorts sample coordinates with a second noise field, scrambling
+	# any residual axis preferences. Amplitude is in noise-space units (cells in
+	# our case); 30 is "noticeable but not chaotic" at our typical 32x48 maps.
+	n.domain_warp_enabled = true
+	n.domain_warp_type = FastNoiseLite.DOMAIN_WARP_SIMPLEX
+	n.domain_warp_amplitude = 30.0
+	n.domain_warp_frequency = 0.5 * frequency
+	n.domain_warp_fractal_type = FastNoiseLite.DOMAIN_WARP_FRACTAL_PROGRESSIVE
+	n.domain_warp_fractal_octaves = 2
 	return n
 
 
@@ -1120,6 +1149,289 @@ static func _smooth_altitude_jumps(grid: TerrainGrid, max_drop_hs: int) -> void:
 				if max_alt > c.altitude + max_drop_hs:
 					c.altitude = max_alt - max_drop_hs
 					changed = true
+
+
+# ----------------------------------------------------------------------------
+# Step 4.5: south-cliff readability rule
+# ----------------------------------------------------------------------------
+
+# Forces every GROUND cell's screen-south neighbor (x+1, y+1) to sit at or
+# below the cell's altitude. Without this, noise-perturbed local peaks can
+# render with no camera-facing cliff exposed, making elevation hard to read
+# against same-screen-Y flat ground.
+#
+# Repair direction is downward only (lower the southern neighbor). Raising
+# would cascade NW toward the apex and risk lifting cells past `top_altitude`;
+# lowering cascades SE toward the map edge and terminates.
+#
+# Composes with previously enforced invariants so this pass doesn't re-break
+# them:
+#   - River surroundings: never lower below adjacent water altitude.
+#   - Smoothing: never lower more than max_drop_hs below the tallest neighbor.
+# When those constraints prevent the rule from being satisfied (e.g. the
+# southern cell is a riverbank pinned by the river above), the local violation
+# is left in place — usually near the apex where the visual ambiguity is least
+# significant anyway.
+#
+# Iterates to a fixed point so cascading drops resolve in one call. Mutates
+# GROUND cells only; WATER / WATERFALL exempt.
+static func _enforce_south_cliff_rule(
+		grid: TerrainGrid,
+		params: TerrainGenerationParams,
+		max_drop_hs: int,
+) -> void:
+	# Build a per-seed-randomized visit order. The deterministic y-outer/x-inner
+	# sweep correlates altitudes along grid-(1,1) within a pass — visible as
+	# screen-vertical streaks. Randomizing the order spreads any per-pass
+	# correlation in all directions, while monotone-lowering keeps convergence
+	# guaranteed (each cell can only ever be lowered, never raised).
+	var rng_local := RandomNumberGenerator.new()
+	rng_local.seed = params.seed ^ _SEED_OFFSET_SOUTH_CLIFF
+	var positions: Array = []
+	for y in grid.height - 1:
+		for x in grid.width - 1:
+			positions.append([rng_local.randi(), Vector2i(x, y)])
+	positions.sort_custom(func(a, b): return a[0] < b[0])
+
+	var max_iter: int = 8
+	var changed: bool = true
+	while changed and max_iter > 0:
+		changed = false
+		max_iter -= 1
+		for entry in positions:
+			var pos: Vector2i = entry[1]
+			var here: TerrainCell = grid.at(pos.x, pos.y)
+			if here.kind != TerrainCell.Kind.GROUND:
+				continue
+			var south_pos: Vector2i = Vector2i(pos.x + 1, pos.y + 1)
+			var south: TerrainCell = grid.at(south_pos.x, south_pos.y)
+			if south.kind != TerrainCell.Kind.GROUND:
+				continue
+			if south.altitude <= here.altitude:
+				continue
+			var min_alt: int = _south_min_altitude(grid, south_pos, max_drop_hs)
+			var target: int = maxi(here.altitude, min_alt)
+			# All sources of `target` are even (heightfield is even-snapped,
+			# water altitudes are even, and max_drop_hs is even). Defensive
+			# round-up in case a future change introduces an odd source.
+			if target % 2 != 0:
+				target += 1
+			target = clampi(target, 0, params.top_altitude)
+			if target < south.altitude:
+				south.altitude = target
+				changed = true
+
+
+# Lowest altitude a cell at `pos` can be reduced to without breaking other
+# invariants:
+#   - Water adjacency: must stay >= any face-adjacent WATER/WATERFALL altitude
+#     so the river-surroundings rule remains satisfied.
+#   - Smoothing: must stay >= max neighbor altitude minus max_drop_hs so the
+#     altitude-jump cap remains satisfied.
+static func _south_min_altitude(grid: TerrainGrid, pos: Vector2i, max_drop_hs: int) -> int:
+	var min_alt: int = 0
+	for d in _DIRS:
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null:
+			continue
+		if nc.kind == TerrainCell.Kind.WATER or nc.kind == TerrainCell.Kind.WATERFALL:
+			if nc.altitude > min_alt:
+				min_alt = nc.altitude
+		var smoothing_floor: int = nc.altitude - max_drop_hs
+		if smoothing_floor > min_alt:
+			min_alt = smoothing_floor
+	return min_alt
+
+
+# ----------------------------------------------------------------------------
+# Step 4.4: fill 1-cell holes
+# ----------------------------------------------------------------------------
+
+# Raises any GROUND cell whose four face neighbors are all GROUND at strictly
+# higher altitude. The cell is set to the lowest face-neighbor altitude so the
+# pit fills exactly to the surrounding rim. Without this, noise or smoothing
+# can leave 1-cell pockets that read as confusing dimples in the heightfield.
+#
+# Cells with a non-GROUND face neighbor (water, lake, off-grid) are skipped —
+# those are by definition not enclosed pits. Single pass: filling a hole only
+# equalizes altitude with its rim, so cascades are not produced.
+static func _fill_single_holes(grid: TerrainGrid, params: TerrainGenerationParams) -> void:
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.GROUND:
+				continue
+			var min_higher: int = 0x7FFFFFFF
+			var all_higher: bool = true
+			for d in _DIRS:
+				var n: Vector2i = Vector2i(x, y) + d
+				var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+				if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+					all_higher = false
+					break
+				if nc.altitude <= c.altitude:
+					all_higher = false
+					break
+				if nc.altitude < min_higher:
+					min_higher = nc.altitude
+			if all_higher and min_higher != 0x7FFFFFFF:
+				c.altitude = _snap_even(min_higher, 0, params.top_altitude)
+
+
+# ----------------------------------------------------------------------------
+# Step 4.45: smooth thin same-altitude chains (any direction)
+# ----------------------------------------------------------------------------
+
+# Detects and smooths chains of GROUND cells that lie on a 1-cell-wide strip of
+# same altitude — i.e. their local same-altitude region never forms a 2x2 block.
+# In iso projection:
+#   - apex-only chains  (same-alt only via grid diagonal) project to screen
+#     CARDINAL thin lines (vertical / horizontal),
+#   - face-only chains  (same-alt only via a single grid axis) project to
+#     screen DIAGONAL thin lines (NW-SE / NE-SW).
+# Both read as floating 1-cell strips against the surrounding terrain. The
+# 2x2-block test catches both symmetrically: any cell that is part of a "robust
+# shelf" (any 2x2 of same altitude in its neighborhood) is left alone, while
+# 1-wide strips of any orientation are flagged. Components of size 1 or 2 are
+# left alone (single anomalies are fine; only sustained 3+ strips fire).
+#
+# Smoothing strategy: each chain cell adopts the most common altitude among
+# its face neighbors (tiebreak toward higher altitude to preserve elevation).
+# Targets are computed from the pre-mutation state so cells in the same chain
+# don't bias each other's targets via partial mid-pass altitudes.
+#
+# Mutates GROUND only. Mode-targeting can only land on an existing neighbor's
+# altitude, which by construction is at-or-above any face-adjacent water due
+# to the river-surroundings rule — so this composes safely with surroundings.
+static func _smooth_thin_chains(grid: TerrainGrid, params: TerrainGenerationParams) -> void:
+	# Flag cells whose local same-altitude region is "thin" (no 2x2 block) AND
+	# which still have at least one same-altitude neighbor (face or apex) — that
+	# last condition excludes isolated bumps with no chain at all.
+	var thin_set: Dictionary = {}
+	for y in grid.height:
+		for x in grid.width:
+			var pos: Vector2i = Vector2i(x, y)
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.GROUND:
+				continue
+			if _has_2x2_same_alt_block(grid, pos, c.altitude):
+				continue
+			if _has_same_alt_neighbor(grid, pos, c.altitude):
+				thin_set[pos] = true
+
+	if thin_set.is_empty():
+		return
+
+	# Group via combined face + apex adjacency at matching altitude. Face
+	# adjacency picks up grid-axis-aligned face-only chains; apex adjacency
+	# picks up grid-diagonal apex-only chains. A chain is one connected run
+	# of thin same-altitude cells. Components > 2 cells get smoothed.
+	var visited: Dictionary = {}
+	var pending_targets: Array = []  # entries: [Vector2i pos, int target_alt]
+	for start in thin_set.keys():
+		if visited.has(start):
+			continue
+		visited[start] = true
+		var chain_alt: int = grid.at(start.x, start.y).altitude
+		var component: Array[Vector2i] = []
+		var queue: Array[Vector2i] = [start]
+		while not queue.is_empty():
+			var cur: Vector2i = queue.pop_back()
+			component.append(cur)
+			for d in _DIRS:
+				var n: Vector2i = cur + d
+				if visited.has(n) or not thin_set.has(n):
+					continue
+				var nc: TerrainCell = grid.at(n.x, n.y)
+				if nc.altitude != chain_alt:
+					continue
+				visited[n] = true
+				queue.append(n)
+			for d in _APEX_DIRS:
+				var n: Vector2i = cur + d
+				if visited.has(n) or not thin_set.has(n):
+					continue
+				var nc: TerrainCell = grid.at(n.x, n.y)
+				if nc.altitude != chain_alt:
+					continue
+				visited[n] = true
+				queue.append(n)
+		if component.size() <= 2:
+			continue
+		for p in component:
+			var target: int = _diagonal_chain_target(grid, p, params.top_altitude)
+			if target >= 0:
+				pending_targets.append([p, target])
+
+	for entry in pending_targets:
+		var p: Vector2i = entry[0]
+		var alt: int = entry[1]
+		grid.at(p.x, p.y).altitude = alt
+
+
+# True if any of the four 2x2 squares containing `pos` is entirely GROUND at
+# `alt`. A 2x2 block is strong evidence of a natural shelf — cells inside one
+# are spared from thin-chain smoothing. Squares checked (with `pos` at each
+# corner): SE-corner (pos top-left), SW-corner, NE-corner, NW-corner.
+static func _has_2x2_same_alt_block(grid: TerrainGrid, pos: Vector2i, alt: int) -> bool:
+	for tl in _2X2_TL_OFFSETS:
+		var origin: Vector2i = pos + tl
+		var ok: bool = true
+		for dy in 2:
+			for dx in 2:
+				var c: TerrainCell = grid.at_or_null(origin.x + dx, origin.y + dy)
+				if c == null or c.kind != TerrainCell.Kind.GROUND or c.altitude != alt:
+					ok = false
+					break
+			if not ok:
+				break
+		if ok:
+			return true
+	return false
+
+
+# True if `pos` has at least one GROUND neighbor (face or apex) at the same
+# altitude. Excludes WATER / WATERFALL / EMPTY / off-grid neighbors.
+static func _has_same_alt_neighbor(grid: TerrainGrid, pos: Vector2i, alt: int) -> bool:
+	for d in _DIRS:
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc != null and nc.kind == TerrainCell.Kind.GROUND and nc.altitude == alt:
+			return true
+	for d in _APEX_DIRS:
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc != null and nc.kind == TerrainCell.Kind.GROUND and nc.altitude == alt:
+			return true
+	return false
+
+
+# Picks the altitude a diagonal-chain cell at `pos` should adopt: the most
+# common altitude among its GROUND face neighbors. Tie broken toward HIGHER
+# altitude so chains in mixed terrain rise rather than carve grooves into the
+# slope (also avoids dropping below water altitude when a chain runs near a
+# riverbank). Returns -1 if `pos` has no GROUND face neighbor (rare: would
+# only happen on a fully water-locked land cell).
+static func _diagonal_chain_target(grid: TerrainGrid, pos: Vector2i, top_alt: int) -> int:
+	var counts: Dictionary = {}
+	for d in _DIRS:
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+			continue
+		var a: int = nc.altitude
+		counts[a] = counts.get(a, 0) + 1
+	if counts.is_empty():
+		return -1
+	var best_alt: int = -1
+	var best_count: int = -1
+	for a in counts.keys():
+		var ct: int = counts[a]
+		if ct > best_count or (ct == best_count and a > best_alt):
+			best_count = ct
+			best_alt = a
+	return _snap_even(best_alt, 0, top_alt)
 
 
 # ----------------------------------------------------------------------------
