@@ -10,6 +10,7 @@ extends Node
 signal enabled_changed(is_enabled: bool)
 signal tile_indices_changed(is_enabled: bool)
 signal tile_altitudes_changed(is_enabled: bool)
+signal free_movement_changed(is_enabled: bool)
 
 var enabled: bool = false:
 	set(value):
@@ -35,6 +36,16 @@ var show_tile_altitudes: bool = false:
 			return
 		show_tile_altitudes = value
 		tile_altitudes_changed.emit(show_tile_altitudes)
+
+## When true, a debug-only Camera2D takes over from the player camera and
+## pans on WASD. Click-to-move stays active but the camera no longer follows
+## the player. Toggled via the Free Move row in the debug overlay.
+var free_movement: bool = false:
+	set(value):
+		if value == free_movement:
+			return
+		free_movement = value
+		free_movement_changed.emit(free_movement)
 
 
 func _unhandled_input(event: InputEvent) -> void:

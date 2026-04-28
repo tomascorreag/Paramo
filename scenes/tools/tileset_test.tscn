@@ -1,277 +1,32 @@
-[gd_scene format=4 uid="uid://bjr3p5tb7xyy0"]
+[gd_scene load_steps=2 format=4 uid="uid://bjr3p5tb7xyy0"]
 
-[ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="2_l16oj"]
-[ext_resource type="PackedScene" uid="uid://b6yjeuvgxs4" path="res://scenes/entities/player.tscn" id="2_xvi33"]
-[ext_resource type="Script" uid="uid://dsgoe3t826dnu" path="res://scripts/systems/pathfinder.gd" id="4_osssn"]
-[ext_resource type="Script" uid="uid://b1gdukcvrdojy" path="res://scripts/systems/click_to_move_controller.gd" id="5_s7fjt"]
-[ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="6_tdovl"]
-[ext_resource type="Script" uid="uid://dj81k227gd1kx" path="res://scripts/systems/ux_overlay.gd" id="7_uxovr"]
-[ext_resource type="SpriteFrames" uid="uid://csu74l02k4moj" path="res://assets/sprites/UX/cursor/cursor_x.tres" id="8_curanx"]
-[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/circle.tres" id="8_curcir"]
-[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/square.tres" id="8_cursq"]
-[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/cursor_x_frame_0.tres" id="8_curx0"]
-[ext_resource type="Script" uid="uid://b7tp23uig1lpt" path="res://scripts/systems/day_night_scene_controller.gd" id="9_dnctrl"]
-[ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="10_j22yb"]
-[ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="10_ppshd"]
-[ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="11_tilei"]
-[ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="12_dymf4"]
-[ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="13_4ycv7"]
-[ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="14_2amr8"]
-[ext_resource type="Material" uid="uid://cngyo1chub5q8" path="res://resources/materials/water_still.tres" id="15_ws"]
-[ext_resource type="Material" uid="uid://c6mn6pv77d64n" path="res://resources/materials/water_flow_ne.tres" id="16_wne"]
-[ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="17_wse"]
-[ext_resource type="Material" uid="uid://c435ruakfvt7g" path="res://resources/materials/water_flow_sw.tres" id="18_wsw"]
-[ext_resource type="Material" uid="uid://dbn2r0ot4j1gk" path="res://resources/materials/water_flow_nw.tres" id="19_wnw"]
-[ext_resource type="Script" uid="uid://c7dopy3rarct7" path="res://scripts/systems/structure_layer_manager.gd" id="20_slm"]
-[ext_resource type="Script" uid="uid://bxivfefcu5f78" path="res://scripts/systems/traversal_placement_controller.gd" id="21_tpc"]
-[ext_resource type="PackedScene" uid="uid://dq8bridge000" path="res://scenes/traversals/bridge.tscn" id="22_brscn"]
-[ext_resource type="PackedScene" uid="uid://dq8ladder000" path="res://scenes/traversals/ladder.tscn" id="22_ldscn"]
-[ext_resource type="Script" uid="uid://d116hvslo5lvy" path="res://scripts/tools/ground_layer_configurator.gd" id="23_glcfg"]
+[ext_resource type="PackedScene" path="res://scenes/templates/gameplay_base.tscn" id="1_base"]
 
-[sub_resource type="Gradient" id="Gradient_j22yb"]
-offsets = PackedFloat32Array(0.16666667, 0.25, 0.33333334, 0.6666667, 0.75, 0.8333333)
-colors = PackedColorArray(0.276, 0.2921999, 0.6, 1, 0.9366782, 0.623245, 0.971504, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.0789914, 0.6759139, 0.54155475, 1, 0.276, 0.2921999, 0.6, 1)
-metadata/_snap_enabled = true
-metadata/_snap_count = 24
+[node name="TilesetTest" instance=ExtResource("1_base")]
 
-[sub_resource type="Curve" id="Curve_2amr8"]
-_limits = [0.0, 2.0, 0.0, 1.0]
-_data = [Vector2(0.05, 0.8), 0.0, 0.0, 0, 0, Vector2(0.32681566, 1.060241), 0.0, 0.0, 0, 0, Vector2(0.4, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6955307, 1.1171961), 0.0, 0.0, 0, 0, Vector2(0.95, 0.8), 0.0, 0.0, 0, 0]
-point_count = 6
-
-[sub_resource type="Curve" id="Curve_et33p"]
-_limits = [-42.0, 42.0, 0.0, 1.0]
-_data = [Vector2(0.15, 0), 0.0, 0.0, 0, 0, Vector2(0.32960892, 39.607887), -500.0, -500.0, 0, 0, Vector2(0.49162006, 0.47191238), 0.0, 0.0, 0, 0, Vector2(0.65, -42), -500.0, -500.0, 0, 0, Vector2(0.85, 0), 0.0, 0.0, 0, 0]
-point_count = 5
-
-[sub_resource type="Curve" id="Curve_e4mmd"]
-_data = [Vector2(0.2, 0), 0.0, 0.0, 0, 0, Vector2(0.5, 1), 0.0, 0.0, 0, 0, Vector2(0.8, 0), 0.0, 0.0, 0, 0]
-point_count = 3
-
-[sub_resource type="Curve" id="Curve_j22yb"]
-_limits = [-1.0, 1.0, 0.0, 1.0]
-_data = [Vector2(0.18, -0.75), 0.0, 0.0, 0, 0, Vector2(0.2681564, 0.21686745), 0.0, 0.0, 0, 0, Vector2(0.36033517, -0.0109529495), 0.0, 0.0, 0, 0, Vector2(0.5, 0.0032858849), 0.0, 0.0, 0, 0, Vector2(0.6843575, 0.0032858849), 0.0, 0.0, 0, 0, Vector2(0.7430167, 0.3023001), 0.0, 0.0, 0, 0, Vector2(0.82, -0.75), 0.0, 0.0, 0, 0]
-point_count = 7
-
-[sub_resource type="Curve" id="Curve_h8h76"]
-_data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.50279325, 0), 0.0, 0.0, 0, 0, Vector2(1, 1), 0.0, 0.0, 0, 0]
-point_count = 3
-
-[sub_resource type="Curve" id="Curve_gxunv"]
-_limits = [0.0, 2.0, 0.0, 1.0]
-_data = [Vector2(0.1, 0.75), 0.0, 0.0, 0, 0, Vector2(0.5, 1.5), 0.0, 0.0, 0, 0, Vector2(0.9, 0.75), 0.0, 0.0, 0, 0]
-point_count = 3
-
-[sub_resource type="Curve" id="Curve_dymf4"]
-_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.43296087, 0.8291347), 0.0, 0.0, 0, 0, Vector2(0.622905, 0.5301205), -2.9002914, -2.9002914, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
-point_count = 4
-
-[sub_resource type="Resource" id="Resource_h8h76"]
-script = ExtResource("10_j22yb")
-ambient_gradient = SubResource("Gradient_j22yb")
-temperature_curve = SubResource("Curve_j22yb")
-contrast_curve = SubResource("Curve_2amr8")
-vignette_strength_curve = SubResource("Curve_h8h76")
-wind_intensity_curve = SubResource("Curve_dymf4")
-water_intensity_curve = SubResource("Curve_gxunv")
-shadow_opacity_curve = SubResource("Curve_e4mmd")
-shadow_length_curve = SubResource("Curve_et33p")
-metadata/_custom_type_script = "uid://dveykjelqtor6"
-
-[sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
-shader = ExtResource("10_ppshd")
-shader_parameter/color_temperature = 0.0
-shader_parameter/contrast = 1.0
-shader_parameter/saturation = 1.0
-shader_parameter/brightness = 0.0
-shader_parameter/vignette_strength = 0.0
-shader_parameter/vignette_radius = 0.5
-shader_parameter/tint_color = Color(1, 1, 1, 1)
-shader_parameter/tint_strength = 0.0
-
-[node name="TilesetTest" type="Node2D" unique_id=35083561]
-y_sort_enabled = true
-position = Vector2(-47, 19)
-
-[node name="BackgroundLayer" type="CanvasLayer" parent="." unique_id=1948980993]
-layer = -1
-
-[node name="BG" type="ColorRect" parent="BackgroundLayer" unique_id=1948980994]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -474.0
-offset_top = -316.0
-offset_right = 402.0
-offset_bottom = 267.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-color = Color(0, 0, 0, 1)
-
-[node name="AmbientModulate" type="CanvasModulate" parent="." unique_id=1454820378]
-
-[node name="World" type="Node2D" parent="." unique_id=1193948366]
-y_sort_enabled = true
-position = Vector2(192, 80)
-
-[node name="Ground_1" type="TileMapLayer" parent="World" unique_id=278339556]
-y_sort_enabled = true
-position = Vector2(0, -16)
+[node name="Ground_n1" parent="World" index="0"]
 tile_map_data = PackedByteArray("AAAAAAsAAgAAAAAAAAAAAA0AAgAAAAAAAAAEAAwAAgAAAAAAAAAHAA0AAgAAAAIAAAAAAA4AAgABAAIAAAAAAA8AAgABAAIAAAAAAAwAAgABAAIAAAAAAAkAAgABAAIAAAABAAkAAgABAAIAAAAAAAoAAgABAAIAAAABAAoAAgABAAIAAAABAAsAAgABAAIAAAACAAsAAgABAAIAAAADAAsAAgABAAIAAAAEAAsAAgABAAIAAAADAA0AAgABAAQAAAADAAwAAgAAAAIAAAAEAA0AAgAAAAIAAAAGAA0AAgAAAAIAAAAIAA0AAgAAAAIAAAAFAA0AAgAAAAAAAAAFAAwAAgAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = -16
-metadata/Altitude = -2
 
-[node name="Ground0" type="TileMapLayer" parent="World" unique_id=283160021]
-y_sort_enabled = true
+[node name="Ground0" parent="World" index="1"]
 tile_map_data = PackedByteArray("AAD+/wcAAgABAAQAAAD+/wYAAgABAAQAAAD+/wUAAgABAAQAAAD+/wQAAgABAAQAAAD+/wMAAgABAAQAAAD+/wIAAgABAAQAAAD+/wEAAgABAAQAAAD+/wAAAgABAAQAAAD/////AgABAAQAAAD//wAAAgABAAQAAAD//wEAAgABAAQAAAD//wIAAgABAAQAAAD//wMAAgABAAQAAAD//wQAAgABAAQAAAD//wUAAgABAAQAAAD//wYAAgABAAQAAAD//wcAAgABAAQAAAAFAAQAAgACAAAAAAAFAAMAAgACAAAAAAAGAAUAAgAAAAIAAAAHAAUAAgAAAAIAAAAGAAQAAgAAAAIAAAAGAAIAAgAAAAIAAAAHAAIAAgAAAAIAAAAHAAMAAgAAAAIAAAAFAAIAAgAAAAYAAAAFAAEAAgAAAAYAAAAFAAAAAgAAAAYAAAAFAP//AgAAAAYAAAAFAP7/AgAAAAYAAAAGAAEAAgAAAAYAAAAHAAAAAgAAAAYAAAAHAP//AgAAAAYAAAAHAP7/AgAAAAYAAAAGAAAAAgAAAAYAAAAGAP//AgAAAAYAAAAGAP7/AgAAAAYAAAD+/wgAAwAAAAIAAAD+/wkAAwAAAAIAAAD//wgAAwABAAIAAAAAAAkAAwACAAIAAAABAAkAAwACAAIAAAACAAkAAwACAAIAAAAAAAoAAwADAAIAAAABAAoAAwADAAIAAAD//wsAAwABAAIAAAD+/woAAwAAAAIAAAD+/wsAAwAAAAIAAAD+/wwAAwAAAAIAAAADAAkAAwAFAAIAAAACAAoAAwAGAAIAAAACAAsAAwAAAAIAAAACAAwAAwAEAAIAAAADAAsAAwAHAAIAAAADAAoAAwABAAIAAAADAAwAAwADAAIAAAAEAAwAAwADAAIAAAAFAAwAAwADAAIAAAAGAAwAAwADAAIAAAAEAAsAAwACAAIAAAAFAAsAAwACAAIAAAAGAAsAAwACAAIAAAD//wwAAwABAAIAAAD//woAAwAAAAAAAAD//wkAAwAAAAAAAAD9/woAAAAAAAoAAAD8/woAAAAAAAoAAAD8/wsAAAAAAAoAAAD7/wsAAAAAAAoAAAD9/wsAAAAAAAoAAAD6/wwAAAAAAAoAAAD7/wwAAAAAAAoAAAD8/wwAAAAAAAoAAAD9/wwAAAAAAAoAAAD8/w0AAAAAAAoAAAD7/w4AAAAAAAoAAAD7/w0AAAAAAAoAAAD6/w0AAAAAAAoAAAD6/w4AAAAAAAoAAAD6/w8AAAAAAAoAAAD7/w8AAAAAAAoAAAD7/xAAAAAAAAoAAAD6/xAAAAAAAAoAAAABAA4AAAAAAAoAAAACAA4AAAAAAAoAAAACAA8AAAAAAAoAAAADAA8AAAAAAAoAAAADABAAAAAAAAoAAAAEABAAAAAAAAoAAAAEABEAAAAAAAoAAAAFABEAAAAAAAoAAAABAA8AAAAAAAoAAAABABAAAAAAAAoAAAABABEAAAAAAAoAAAABABIAAAAAAAoAAAACABAAAAAAAAoAAAACABEAAAAAAAoAAAACABIAAAAAAAoAAAADABEAAAAAAAoAAAADABIAAAAAAAoAAAAEABIAAAAAAAoAAAD9/wkAAAAAAAQAAAD8/wkAAAAAAAQAAAD7/wkAAAAAAAQAAAD7/woAAAAAAAQAAAD6/woAAAAAAAQAAAD6/wkAAAAAAAQAAAD6/wsAAAAAAAQAAAD6/wgAAAAAAAQAAAD7/wgAAAAAAAQAAAD8/wgAAAAAAAQAAAD9/wgAAAAAAAQAAAAAAAgAAAAAAAQAAAABAAgAAAAAAAQAAAACAAgAAAAAAAQAAAADAAgAAAAAAAIAAAAEAAgAAAAAAAIAAAAEAAkAAAAAAAIAAAAFAAkAAAAAAAIAAAAFAAgAAAAAAAYAAAAGAAgAAAAAAAYAAAAHAAgAAAAAAAYAAAAGAAkAAAAAAAAAAAAHAAkAAAAAAAAAAAAHAAoAAAAAAAAAAAAFAAoAAAAAAAAAAAAGAAoAAAAAAAAAAAAEAAoAAAAAAAIAAAAAAAsAAAAAAAIAAAABAAsAAAAAAAIAAAD+/w0AAwAAAAAAAAD9/w0AAwAAAAAAAAD8/w4AAwAAAAIAAAD8/w8AAwAAAAIAAAD8/xAAAwAAAAIAAAD9/w4AAwAAAAAAAAD8/xEAAwAAAAIAAAD8/xIAAwAAAAIAAAD//w0AAwABAAIAAAD//w4AAwABAAIAAAD//w8AAwABAAIAAAD//xAAAwABAAIAAAD//xEAAwABAAIAAAD//xIAAwABAAIAAAD+/w4AAAAAAAQAAAD+/w8AAAAAAAQAAAD9/w8AAAAAAAQAAAD9/xAAAAAAAAQAAAD9/xEAAAAAAAQAAAD9/xIAAAAAAAQAAAD+/xIAAAAAAAQAAAD+/xEAAAAAAAQAAAD+/xAAAAAAAAQAAAAAABIAAAAAAAQAAAAAABEAAAAAAAQAAAAAABAAAAAAAAQAAAAAAA8AAAAAAAIAAAAAAA4AAAAAAAIAAAAAAA0AAAAAAAIAAAAAAAwAAAAAAAAAAAABAA0AAAAAAAIAAAABAAwAAAAAAAAAAAACAA0AAAAAAAIAAAADAA0AAAAAAAIAAAADAA4AAAAAAAIAAAAEAA4AAAAAAAIAAAAEAA8AAAAAAAQAAAAFAA8AAAAAAAQAAAAFABAAAAAAAAQAAAAFAA4AAAAAAAIAAAAFAA0AAAAAAAAAAAAEAA0AAAAAAAAAAAAGABAAAAAAAAoAAAAGABEAAAAAAAoAAAAGAA8AAAAAAAQAAAAGAA4AAAAAAAQAAAAGAA0AAAAAAAIAAAAHABAAAAAAAAQAAAAHAA8AAAAAAAIAAAAHAA4AAAAAAAIAAAAHAA0AAAAAAAAAAAAHAAsAAwACAAIAAAAHAAwAAwADAAIAAAD7/xEAAAAAAAQAAAD7/xIAAAAAAAQAAAD8/xMAAwADAAYAAAD//xMAAwADAAYAAAAIAAwAAwAEAAYAAAAIAAsAAwAEAAYAAAAHAAcAAgAAAAIAAAAHAAYAAgAAAAAAAAAHAAQAAgAAAAAAAAAGAAMAAgAAAAAAAAD9/wcAAgAAAAIAAAD+////AgABAAQAAAD6/wcAAAAAAAQAAAD6/wYAAAAAAAQAAAD7/wcAAAAAAAIAAAD7/wYAAAAAAAIAAAD8/wcAAAAAAAIAAAABAAcAAAAAAAIAAAACAAUAAAAAAAAAAAACAAYAAAAAAAAAAAACAAcAAAAAAAIAAAADAAYAAAAAAAIAAAADAAcAAAAAAAQAAAAEAAcAAAAAAAQAAAAFAAcAAAAAAAIAAAAFAAYAAAAAAAYAAAAGAAcAAAAAAAYAAAAGAAYAAgABAAIAAAAFAAUAAgAAAAAAAAAHAAEAAgAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-metadata/altitude = 0
 
-[node name="Ground1" type="TileMapLayer" parent="World" unique_id=1409094919]
-y_sort_enabled = true
-position = Vector2(0, -16)
+[node name="Ground1" parent="World" index="2"]
 tile_map_data = PackedByteArray("AAABAAMAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAQAAAAAAAIAAAABAAQAAAAAAAIAAAABAP//AAAAAAAAAAAAAP//AAAAAAAAAAADAAIAAgAAAAAAAAACAAMAAgAAAAAAAAADAAMAAgAAAAAAAAADAAQAAAAAAAAAAAACAAQAAAAAAAAAAAABAAIAAgABAAIAAAABAAEAAgABAAIAAAACAAEAAgABAAIAAAACAP//AgADAAAAAAADAP//AgADAAAAAAAEAP//AgADAAAAAAABAAAAAgAAAAAAAAACAAAAAgAAAAAAAAAEAAAAAgAAAAAAAAAEAAEAAgAAAAAAAAAEAAIAAgAAAAAAAAABAAUAAAAAAAQAAAAAAAUAAAAAAAQAAAD9/wYAAAAAAAQAAAAAAAYAAAAAAAQAAAABAAYAAAAAAAQAAAAAAAcAAAAAAAQAAAD9/wcAAAAAAAQAAAADAAUAAAAAAAAAAAACAAIAAgAAAAIAAAADAAEAAgAAAAIAAAAEAAMAAgAAAAIAAAAEAAQAAgABAAIAAAAAAAEAAgAAAAIAAAADAAAAAgABAAIAAAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAAGAP7/AgAAAAQAAAD+/wAAAwAAAAIAAAD+/wEAAwAAAAIAAAD+/wIAAwAAAAIAAAD+/wMAAwAAAAIAAAD+/wQAAwAAAAIAAAD+/wUAAwAAAAIAAAD+/wYAAwAAAAIAAAD+/wcAAwAAAAIAAAD//wcAAwABAAIAAAD//wYAAwABAAIAAAD//wUAAwABAAIAAAD//wQAAwABAAIAAAD//wMAAwABAAIAAAD//wIAAwABAAIAAAD//wEAAwABAAIAAAD//wAAAwABAAIAAAD/////AwABAAIAAAD9//7/AgAAAAQAAAD9/wQAAAAAAAIAAAD9/wUAAAAAAAIAAAD9/wEAAAAAAAYAAAD9/wAAAAAAAAYAAAD9/wMAAAAAAAYAAAD8/wMAAAAAAAAAAAD8/wQAAAAAAAAAAAD8/wUAAAAAAAIAAAD8/wYAAAAAAAIAAAD7/wUAAAAAAAAAAAD7/wMAAAAAAAYAAAD8/wAAAAAAAAYAAAD9////AAAAAAYAAAD7/wAAAAAAAAYAAAD8////AAAAAAAAAAD7////AAAAAAIAAAD6////AAAAAAAAAAD6/wAAAAAAAAAAAAD8/wIAAgAAAAAAAAD8/wEAAgAAAAIAAAD7/wEAAgAAAAIAAAD7/wIAAgAAAAIAAAD6/wIAAgAAAAAAAAD6/wEAAgAAAAAAAAAAAAIAAgAAAAIAAAD9/wIAAgABAAIAAAAAAAAAAAAAAAYAAAD+/wgAAwAAAAYAAAD//wgAAwAAAAYAAAAHAP3/AgAAAAQAAAAHAPz/AgAAAAYAAAAGAP3/AgAAAAYAAAD+////AwAAAAIAAAD+//7/AgAAAAAAAAD///7/AgAAAAAAAAD6//7/AgAAAAYAAAD7//7/AgAAAAYAAAD8//7/AgAAAAYAAAD7/wQAAAAAAAAAAAD6/wUAAAAAAAAAAAD6/wQAAAAAAAAAAAD6/wMAAAAAAAAAAAAEAAUAAAAAAAYAAAAEAAYAAAAAAAYAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 16
-metadata/altitude = 2
 
-[node name="Ground2" type="TileMapLayer" parent="World" unique_id=1597291577]
-y_sort_enabled = true
-position = Vector2(0, -32)
+[node name="Ground2" parent="World" index="3"]
 tile_map_data = PackedByteArray("AAAEAP7/AAAAAAAAAAAFAAAAAAAAAAAAAAAFAP7/AAAAAAYAAAAFAP//AAAAAAYAAAAFAAEAAAAAAAIAAAAFAAIAAAAAAAQAAAAEAPz/AAAAAAQAAAADAPz/AAAAAAIAAAADAP3/AAAAAAYAAAAEAP3/AAAAAAIAAAAFAP3/AAAAAAAAAAADAP7/AAAAAAYAAAACAPz/AgACAAAAAAACAP3/AgACAAAAAAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAACAP7/AAAAAAYAAAD9//7/AgAAAAQAAAD+////AwABAAYAAAD/////AwABAAYAAAACAPv/AgAAAAYAAAADAPv/AgAAAAYAAAAEAPv/AgAAAAYAAAAHAPv/BQAAAAAAAAAGAPz/BQAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 32
-metadata/altitude = 4
 
-[node name="Ground3" type="TileMapLayer" parent="World" unique_id=942670600]
-y_sort_enabled = true
-position = Vector2(0, -48)
+[node name="Ground3" parent="World" index="4"]
 tile_map_data = PackedByteArray("AAABAPz/AgACAAAAAAABAP3/AgACAAAAAAAAAP7/AgAAAAQAAAABAP7/AgAAAAQAAAD+////AwACAAYAAAD/////AwACAAYAAAD///7/AgAAAAAAAAD+//7/AgAAAAAAAAD+//3/AgAAAAAAAAD///3/AgAAAAAAAAD+//z/AgAAAAAAAAD///z/AgAAAAAAAAD9//7/AgAAAAQAAAAFAPv/BQAAAAAAAAAGAPv/BQAAAAAAAAAFAPz/BQAAAAAAAAD+//v/AgAAAAIAAAD///v/AgAAAAIAAAD///r/AgAAAAIAAAD+//r/AgAAAAIAAAD+//n/AgAAAAAAAAD+//j/AgAAAAAAAAD+//f/AgAAAAAAAAD+//b/AgAAAAAAAAD6//3/AgAAAAAAAAAHAPr/BQAAAAAAAAAGAPr/BQAAAAAAAAAFAPr/BQAAAAAAAAAGAPn/BQAAAAAAAAAHAPn/BQAAAAAAAAAHAPj/BQAAAAAAAAAHAPf/BQAAAAAAAAD8//7/AAAAAAYAAAD7//7/AAAAAAYAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 48
-metadata/altitude = 6
 
-[node name="Ground4" type="TileMapLayer" parent="World" unique_id=1177372846]
-y_sort_enabled = true
-position = Vector2(0, -64)
+[node name="Ground4" parent="World" index="5"]
 tile_map_data = PackedByteArray("AAAAAPz/AgAAAAAAAAAAAP3/AgAAAAAAAAD+//z/AwAAAAIAAAD+//3/AwAAAAIAAAD+//7/AwAAAAIAAAD///7/AwABAAIAAAD///3/AwABAAIAAAD///z/AwABAAIAAAD+////AwADAAYAAAD/////AwADAAYAAAD9//3/AAAAAAYAAAD9//z/AAAAAAYAAAADAPv/BQAAAAAAAAADAPr/BQAAAAAAAAACAPr/BQAAAAAAAAABAPr/BQAAAAAAAAAAAPn/BQAAAAAAAAAAAPj/BQAAAAAAAAABAPn/BQAAAAAAAAAEAPv/BQAAAAAAAAAFAPv/BQAAAAAAAAABAPj/BAAAAAAAAAACAPn/BAAAAAAAAAADAPn/BAAAAAAAAAAEAPr/BAAAAAAAAAD8//j/BAAAAAAAAAD9//n/BQAAAAAAAAD9//r/BQAAAAAAAAD8//r/BQAAAAAAAAD7//j/BAAAAAAAAAD7//n/BAAAAAAAAAD+//v/AwAAAAIAAAD+//r/AwAAAAIAAAD+//n/AwAAAAIAAAD///v/AwABAAIAAAD///r/AwABAAIAAAD///n/AwABAAIAAAD9//j/BQAAAAAAAAD8//n/BQAAAAAAAAD7//r/BQAAAAAAAAD7//v/BQAAAAAAAAD8//v/AgAAAAAAAAD9//v/AgAAAAIAAAD8//z/AgAAAAIAAAD7//z/AgAAAAIAAAD7//3/AgAAAAIAAAD8//3/AAAAAAYAAAAAAPf/BQAAAAAAAAD+//j/AwAAAAIAAAD+//f/AwAAAAIAAAD+//b/AwAAAAIAAAD///j/AwABAAIAAAD///f/AwABAAIAAAD///b/AwABAAIAAAD9//f/BAAAAAAAAAD9//b/BAAAAAAAAAAAAPv/AgAAAAIAAAABAPv/AgAAAAIAAAACAPv/AgAAAAAAAAAAAPr/AgABAAIAAAD9//X/BQAAAAAAAAD6//z/AgABAAIAAAD6//3/AgAAAAAAAAD6//v/AgAAAAAAAAAEAPX/BQAAAAAAAAADAPX/BQAAAAAAAAAEAPT/BQAAAAAAAAAEAPP/BQAAAAAAAAAEAPL/BQAAAAAAAAAFAPP/BQAAAAAAAAAFAPT/BQAAAAAAAAACAPj/BQAAAAAAAAACAPf/BQAAAAAAAAACAPb/BQAAAAAAAAAFAPn/BQAAAAAAAAAGAPj/BQAAAAAAAAAGAPf/BQAAAAAAAAAGAPb/BQAAAAAAAAAFAPX/BQAAAAAAAAADAPb/BQAAAAAAAAAEAPn/BQAAAAAAAAAEAPj/BQAAAAAAAAAFAPb/BQAAAAAAAAAFAPf/BQAAAAAAAAAFAPj/BQAAAAAAAAADAPj/BAAAAAAAAAADAPf/BAAAAAAAAAAEAPf/BAAAAAAAAAAEAPb/BAAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 64
-metadata/altitude = 8
 
-[node name="Ground5" type="TileMapLayer" parent="World" unique_id=1338576575]
-y_sort_enabled = true
-position = Vector2(0, -80)
+[node name="Ground5" parent="World" index="6"]
 tile_map_data = PackedByteArray("AAACAPj/BAAAAAAAAAABAPf/BAAAAAAAAAACAPf/BAAAAAAAAAACAPb/BAAAAAAAAAABAPb/BAAAAAAAAAAAAPb/BAAAAAAAAAAAAPf/BAAAAAAAAAD7//b/BAAAAAAAAAD8//b/BAAAAAAAAAD9//f/BAAAAAAAAAD9//b/BAAAAAAAAAD8//f/BAAAAAAAAAD7//j/BAAAAAAAAAD7//f/BAAAAAAAAAD+//b/AwAAAAYAAAD///b/AwAAAAYAAAD+//X/AwAGAAIAAAD///X/AwAAAAAAAAAAAPX/AwADAAIAAAABAPT/AwADAAIAAAACAPT/AwADAAIAAAADAPT/AwABAAIAAAADAPP/AwAFAAIAAAACAPL/AwAFAAIAAAAAAPH/AwAFAAIAAAABAPL/AwACAAIAAAD///H/AwACAAIAAAD9//D/AwACAAIAAAD8//D/AwACAAIAAAD+//D/AwAFAAIAAAD7//H/AwAAAAIAAAD6//L/AwAAAAIAAAD6//P/AwAAAAIAAAD6//T/AwAEAAIAAAD7//X/AwAEAAIAAAD8//X/AwADAAIAAAD9//X/AwADAAIAAAD7//T/AwAGAAIAAAAAAPL/AwAHAAIAAAD+//H/AwAHAAIAAAACAPP/AwAHAAIAAAABAPP/AwAAAAAAAAAAAPP/AwAAAAAAAAAAAPT/AwAAAAAAAAD7//P/AwAAAAAAAAD7//L/AwAAAAAAAAD8//T/AwAEAAQAAAD///L/AwAFAAQAAAD+//L/AwACAAQAAAD9//H/AwAFAAQAAAD8//P/AwAAAAQAAAD8//L/AwAAAAQAAAD8//H/AwAAAAQAAAD9//T/AwADAAQAAAD+//T/AwADAAQAAAD///T/AwADAAQAAAD///P/AwABAAQAAAD9//L/AwABAAAAAAD9//P/AwABAAAAAAD+//P/AwABAAAAAAD6//X/BQAAAAAAAAD5//T/BQAAAAAAAAD5//P/BQAAAAAAAAD5//L/BQAAAAAAAAD6//H/BQAAAAAAAAD8/+//BQAAAAAAAAD9/+//BQAAAAAAAAD+/+//BQAAAAAAAAD///D/BQAAAAAAAAABAPH/BQAAAAAAAAAAAPD/BQAAAAAAAAACAPH/BQAAAAAAAAADAPL/BQAAAAAAAAAEAPL/BQAAAAAAAAAEAPP/BQAAAAAAAAAEAPT/BQAAAAAAAAAEAPX/BQAAAAAAAAADAPX/BQAAAAAAAAACAPX/BQAAAAAAAAABAPX/BQAAAAAAAAD+/+3/BAAAAAAAAAD//+3/BAAAAAAAAAD9/+7/BAAAAAAAAAD7//D/BAAAAAAAAAD7/+//BAAAAAAAAAD+/+7/BAAAAAAAAAD//+7/BAAAAAAAAAD//+//BAAAAAAAAAAAAO//BAAAAAAAAAABAPD/BAAAAAAAAAD6//n/BAAAAAAAAAD6//r/BQAAAAAAAAAFAPT/BQAAAAAAAAAFAPP/BQAAAAAAAAAFAPL/BQAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 80
-metadata/altitude = 10
 
-[node name="Ground6" type="TileMapLayer" parent="World" unique_id=1112398139]
-y_sort_enabled = true
-position = Vector2(0, -96)
+[node name="Ground6" parent="World" index="7"]
 tile_map_data = PackedByteArray("AAAEAPX/BAAAAAAAAAD5//H/BAAAAAAAAAD5//L/BAAAAAAAAAD6//D/BAAAAAAAAAD6/+//BAAAAAAAAAD6/+7/BAAAAAAAAAD7/+7/BAAAAAAAAAD7/+3/BAAAAAAAAAD8/+3/BAAAAAAAAAD9/+3/BAAAAAAAAAD8/+7/BAAAAAAAAAD+/+z/BAAAAAAAAAAAAO3/BAAAAAAAAAD//+z/BAAAAAAAAAABAO7/BAAAAAAAAAABAO//BAAAAAAAAAACAO//BAAAAAAAAAACAPD/BAAAAAAAAAADAPD/BAAAAAAAAAAEAPH/BAAAAAAAAAADAPH/BAAAAAAAAAAEAPL/BAAAAAAAAAAFAPL/BAAAAAAAAAAFAPP/BAAAAAAAAAAFAPT/BAAAAAAAAAD5//b/BAAAAAAAAAD5//X/BAAAAAAAAAD6//b/BAAAAAAAAAD6//f/BAAAAAAAAAD6//j/BAAAAAAAAAAEAPf/BQAAAAAAAAA=")
-tile_set = ExtResource("2_l16oj")
-y_sort_origin = 96
-metadata/altitude = 12
 
-[node name="Player" parent="World" unique_id=360390699 instance=ExtResource("2_xvi33")]
+[node name="Player" parent="World" index="8"]
 position = Vector2(-14, 26)
-up_direction = Vector2(1, 0)
-
-[node name="UILayer" type="CanvasLayer" parent="." unique_id=2008137477]
-
-[node name="DebugLabel" type="Label" parent="UILayer" unique_id=723082006]
-offset_right = 200.0
-offset_bottom = 23.0
-
-[node name="Pathfinder" type="Node" parent="." unique_id=190879584 node_paths=PackedStringArray("tile_map_layers")]
-script = ExtResource("4_osssn")
-tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
-
-[node name="ClickToMoveController" type="Node" parent="." unique_id=680876284 node_paths=PackedStringArray("pathfinder", "player")]
-script = ExtResource("5_s7fjt")
-pathfinder = NodePath("../Pathfinder")
-player = NodePath("../World/Player")
-
-[node name="StructureLayerManager" type="Node" parent="." unique_id=405864661 node_paths=PackedStringArray("pathfinder", "world")]
-script = ExtResource("20_slm")
-pathfinder = NodePath("../Pathfinder")
-world = NodePath("../World")
-structures_tileset = ExtResource("2_l16oj")
-
-[node name="TileInteractionController" type="Node" parent="." unique_id=1651484227 node_paths=PackedStringArray("pathfinder", "player", "world", "traversal_placement_controller")]
-script = ExtResource("11_tilei")
-pathfinder = NodePath("../Pathfinder")
-player = NodePath("../World/Player")
-world = NodePath("../World")
-traversal_placement_controller = NodePath("../TraversalPlacementController")
-
-[node name="TraversalPlacementController" type="Node" parent="." unique_id=505618610 node_paths=PackedStringArray("pathfinder", "structure_layer_manager", "world", "ux_overlay")]
-script = ExtResource("21_tpc")
-pathfinder = NodePath("../Pathfinder")
-structure_layer_manager = NodePath("../StructureLayerManager")
-world = NodePath("../World")
-ux_overlay = NodePath("../UXOverlay")
-bridge_scene = ExtResource("22_brscn")
-ladder_scene = ExtResource("22_ldscn")
-
-[node name="TileDebugOverlay" type="Node2D" parent="." unique_id=306206731 node_paths=PackedStringArray("pathfinder", "debug_label")]
-script = ExtResource("6_tdovl")
-pathfinder = NodePath("../Pathfinder")
-debug_label = NodePath("../UILayer/DebugLabel")
-
-[node name="UXOverlay" type="Node2D" parent="." unique_id=816449398 node_paths=PackedStringArray("pathfinder", "tile_interaction_controller")]
-z_index = 1
-script = ExtResource("7_uxovr")
-pathfinder = NodePath("../Pathfinder")
-tile_interaction_controller = NodePath("../TileInteractionController")
-reticle_fade_duration = 0.2
-
-[node name="BaseX" type="AnimatedSprite2D" parent="UXOverlay" unique_id=1803161632]
-sprite_frames = ExtResource("8_curanx")
-autoplay = "default"
-
-[node name="Circle" type="Sprite2D" parent="UXOverlay" unique_id=1803161633]
-visible = false
-texture = ExtResource("8_curcir")
-
-[node name="LockedSquare" type="Sprite2D" parent="UXOverlay" unique_id=1803161634]
-visible = false
-texture = ExtResource("8_cursq")
-
-[node name="LockedX" type="Sprite2D" parent="UXOverlay" unique_id=1803161635]
-visible = false
-texture = ExtResource("8_curx0")
-
-[node name="Candidates" type="Node2D" parent="UXOverlay" unique_id=1803161636]
-
-[node name="DayNightController" type="Node" parent="." unique_id=2047375782 node_paths=PackedStringArray("canvas_modulate", "post_process_rect", "background_rect")]
-script = ExtResource("9_dnctrl")
-profile = SubResource("Resource_h8h76")
-canvas_modulate = NodePath("../AmbientModulate")
-post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
-background_rect = NodePath("../BackgroundLayer/BG")
-wind_materials = Array[ShaderMaterial]([ExtResource("12_dymf4"), ExtResource("13_4ycv7"), ExtResource("14_2amr8")])
-water_materials = Array[ShaderMaterial]([ExtResource("15_ws"), ExtResource("16_wne"), ExtResource("17_wse"), ExtResource("18_wsw"), ExtResource("19_wnw")])
-
-[node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=500016460]
-layer = 100
-
-[node name="PostProcessRect" type="ColorRect" parent="PostProcessLayer" unique_id=571572121]
-material = SubResource("SubResource_pp_mat")
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = 1.0
-offset_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="LayerConfigurator" type="Node" parent="." unique_id=625661186 node_paths=PackedStringArray("layers")]
-script = ExtResource("23_glcfg")
-layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
-altitudes = Array[int]([0, 2, 4, 6, 8, 10, 12])

@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://doynvxy141p3p"]
 
-[ext_resource type="PackedScene" uid="uid://bjr3p5tb7xyy0" path="res://scenes/tools/tileset_test.tscn" id="1_o5qli"]
+[ext_resource type="PackedScene" uid="uid://cw67jb5h24j4b" path="res://scenes/maps/procedural_test.tscn" id="1_level1"]
 [ext_resource type="PackedScene" path="res://scenes/ui/debug_overlay.tscn" id="2_dbg"]
 
 [node name="Main" type="Node2D" unique_id=196845560]
 
-[node name="TilesetTest" parent="." unique_id=209007275 instance=ExtResource("1_o5qli")]
+[node name="Level1" parent="." unique_id=209007275 instance=ExtResource("1_level1")]
 
-[node name="DebugOverlay" parent="." instance=ExtResource("2_dbg")]
+[node name="DebugOverlay" parent="." unique_id=1077235885 instance=ExtResource("2_dbg")]

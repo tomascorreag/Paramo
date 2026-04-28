@@ -208,6 +208,13 @@ func is_moving() -> bool:
 	return _stepping or not _path.is_empty()
 
 
+# Current altitude in half-steps (matches `meta/altitude` on ground layers).
+# Continuously interpolated during stepping; readers polling this each frame
+# (e.g. AltitudeFogController) get a smooth signal across stairs and ladders.
+func current_altitude() -> float:
+	return _altitude
+
+
 # ----------------------------------------------------------------------------
 # Physics loop
 # ----------------------------------------------------------------------------

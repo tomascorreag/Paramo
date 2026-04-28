@@ -1,0 +1,227 @@
+[gd_scene load_steps=27 format=4]
+
+[ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="1_tileset"]
+[ext_resource type="PackedScene" uid="uid://b6yjeuvgxs4" path="res://scenes/entities/player.tscn" id="2_player"]
+[ext_resource type="Script" uid="uid://dsgoe3t826dnu" path="res://scripts/systems/pathfinder.gd" id="3_pathfinder"]
+[ext_resource type="Script" uid="uid://b1gdukcvrdojy" path="res://scripts/systems/click_to_move_controller.gd" id="4_click"]
+[ext_resource type="Script" uid="uid://bx2jkwmncm5gq" path="res://scripts/systems/tile_debug_overlay.gd" id="5_tdovl"]
+[ext_resource type="Script" uid="uid://dj81k227gd1kx" path="res://scripts/systems/ux_overlay.gd" id="6_uxovr"]
+[ext_resource type="SpriteFrames" uid="uid://csu74l02k4moj" path="res://assets/sprites/UX/cursor/cursor_x.tres" id="7_curanx"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/circle.tres" id="8_curcir"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/square.tres" id="9_cursq"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/cursor/cursor_x_frame_0.tres" id="10_curx0"]
+[ext_resource type="Script" uid="uid://b7tp23uig1lpt" path="res://scripts/systems/day_night_scene_controller.gd" id="11_dnctrl"]
+[ext_resource type="Resource" path="res://resources/day_night/tileset_test_profile.tres" id="12_dnprof"]
+[ext_resource type="Shader" uid="uid://bfdxqyibbuy0x" path="res://assets/shaders/post_process.gdshader" id="13_ppshd"]
+[ext_resource type="Script" uid="uid://ctk6y3biaurur" path="res://scripts/systems/tile_interaction_controller.gd" id="14_tilei"]
+[ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="15_wind1"]
+[ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="16_wind2"]
+[ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="17_wind3"]
+[ext_resource type="Material" uid="uid://cngyo1chub5q8" path="res://resources/materials/water_still.tres" id="18_ws"]
+[ext_resource type="Material" uid="uid://c6mn6pv77d64n" path="res://resources/materials/water_flow_ne.tres" id="19_wne"]
+[ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="20_wse"]
+[ext_resource type="Material" uid="uid://c435ruakfvt7g" path="res://resources/materials/water_flow_sw.tres" id="21_wsw"]
+[ext_resource type="Material" uid="uid://dbn2r0ot4j1gk" path="res://resources/materials/water_flow_nw.tres" id="22_wnw"]
+[ext_resource type="Script" uid="uid://c7dopy3rarct7" path="res://scripts/systems/structure_layer_manager.gd" id="23_slm"]
+[ext_resource type="Script" uid="uid://bxivfefcu5f78" path="res://scripts/systems/traversal_placement_controller.gd" id="24_tpc"]
+[ext_resource type="PackedScene" uid="uid://dq8bridge000" path="res://scenes/traversals/bridge.tscn" id="25_brscn"]
+[ext_resource type="PackedScene" uid="uid://dq8ladder000" path="res://scenes/traversals/ladder.tscn" id="26_ldscn"]
+[ext_resource type="Script" uid="uid://d116hvslo5lvy" path="res://scripts/tools/ground_layer_configurator.gd" id="27_glcfg"]
+[ext_resource type="Script" path="res://scripts/systems/free_camera_controller.gd" id="28_fcam"]
+[ext_resource type="Script" path="res://scripts/systems/altitude_fog_controller.gd" id="29_afog"]
+
+[sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
+shader = ExtResource("13_ppshd")
+shader_parameter/color_temperature = 0.0
+shader_parameter/contrast = 1.0
+shader_parameter/saturation = 1.0
+shader_parameter/brightness = 0.0
+shader_parameter/vignette_strength = 0.0
+shader_parameter/vignette_radius = 0.5
+shader_parameter/tint_color = Color(1, 1, 1, 1)
+shader_parameter/tint_strength = 0.0
+
+[node name="GameplayBase" type="Node2D"]
+y_sort_enabled = true
+
+[node name="BackgroundLayer" type="CanvasLayer" parent="."]
+layer = -1
+
+[node name="BG" type="ColorRect" parent="BackgroundLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -474.0
+offset_top = -316.0
+offset_right = 402.0
+offset_bottom = 267.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="AmbientModulate" type="CanvasModulate" parent="."]
+
+[node name="World" type="Node2D" parent="."]
+y_sort_enabled = true
+position = Vector2(145, 99)
+
+[node name="Ground_n1" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -16)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = -16
+metadata/altitude = -2
+
+[node name="Ground0" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+tile_set = ExtResource("1_tileset")
+metadata/altitude = 0
+
+[node name="Ground1" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -16)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 16
+metadata/altitude = 2
+
+[node name="Ground2" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -32)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 32
+metadata/altitude = 4
+
+[node name="Ground3" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -48)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 48
+metadata/altitude = 6
+
+[node name="Ground4" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -64)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 64
+metadata/altitude = 8
+
+[node name="Ground5" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -80)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 80
+metadata/altitude = 10
+
+[node name="Ground6" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -96)
+tile_set = ExtResource("1_tileset")
+y_sort_origin = 96
+metadata/altitude = 12
+
+[node name="Player" parent="World" instance=ExtResource("2_player")]
+up_direction = Vector2(1, 0)
+
+[node name="UILayer" type="CanvasLayer" parent="."]
+
+[node name="DebugLabel" type="Label" parent="UILayer"]
+offset_right = 200.0
+offset_bottom = 23.0
+
+[node name="Pathfinder" type="Node" parent="." node_paths=PackedStringArray("tile_map_layers")]
+script = ExtResource("3_pathfinder")
+tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
+
+[node name="ClickToMoveController" type="Node" parent="." node_paths=PackedStringArray("pathfinder", "player")]
+script = ExtResource("4_click")
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")
+
+[node name="StructureLayerManager" type="Node" parent="." node_paths=PackedStringArray("pathfinder", "world")]
+script = ExtResource("23_slm")
+pathfinder = NodePath("../Pathfinder")
+world = NodePath("../World")
+structures_tileset = ExtResource("1_tileset")
+
+[node name="TileInteractionController" type="Node" parent="." node_paths=PackedStringArray("pathfinder", "player", "world", "traversal_placement_controller")]
+script = ExtResource("14_tilei")
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")
+world = NodePath("../World")
+traversal_placement_controller = NodePath("../TraversalPlacementController")
+
+[node name="TraversalPlacementController" type="Node" parent="." node_paths=PackedStringArray("pathfinder", "structure_layer_manager", "world", "ux_overlay")]
+script = ExtResource("24_tpc")
+pathfinder = NodePath("../Pathfinder")
+structure_layer_manager = NodePath("../StructureLayerManager")
+world = NodePath("../World")
+ux_overlay = NodePath("../UXOverlay")
+bridge_scene = ExtResource("25_brscn")
+ladder_scene = ExtResource("26_ldscn")
+
+[node name="TileDebugOverlay" type="Node2D" parent="." node_paths=PackedStringArray("pathfinder", "debug_label")]
+script = ExtResource("5_tdovl")
+pathfinder = NodePath("../Pathfinder")
+debug_label = NodePath("../UILayer/DebugLabel")
+
+[node name="UXOverlay" type="Node2D" parent="." node_paths=PackedStringArray("pathfinder", "tile_interaction_controller")]
+z_index = 1
+script = ExtResource("6_uxovr")
+pathfinder = NodePath("../Pathfinder")
+tile_interaction_controller = NodePath("../TileInteractionController")
+reticle_fade_duration = 0.2
+
+[node name="BaseX" type="AnimatedSprite2D" parent="UXOverlay"]
+sprite_frames = ExtResource("7_curanx")
+autoplay = "default"
+
+[node name="Circle" type="Sprite2D" parent="UXOverlay"]
+visible = false
+texture = ExtResource("8_curcir")
+
+[node name="LockedSquare" type="Sprite2D" parent="UXOverlay"]
+visible = false
+texture = ExtResource("9_cursq")
+
+[node name="LockedX" type="Sprite2D" parent="UXOverlay"]
+visible = false
+texture = ExtResource("10_curx0")
+
+[node name="Candidates" type="Node2D" parent="UXOverlay"]
+
+[node name="DayNightController" type="Node" parent="." node_paths=PackedStringArray("canvas_modulate", "post_process_rect", "background_rect")]
+script = ExtResource("11_dnctrl")
+profile = ExtResource("12_dnprof")
+canvas_modulate = NodePath("../AmbientModulate")
+post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
+background_rect = NodePath("../BackgroundLayer/BG")
+wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
+water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
+
+[node name="PostProcessLayer" type="CanvasLayer" parent="."]
+layer = 100
+
+[node name="PostProcessRect" type="ColorRect" parent="PostProcessLayer"]
+material = SubResource("SubResource_pp_mat")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 1.0
+offset_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="LayerConfigurator" type="Node" parent="." node_paths=PackedStringArray("layers")]
+script = ExtResource("27_glcfg")
+layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
+altitudes = Array[int]([0, 2, 4, 6, 8, 10, 12])
+
+[node name="FreeCamera" type="Camera2D" parent="."]
+script = ExtResource("28_fcam")
+
+[node name="AltitudeFogController" type="Node" parent="." node_paths=PackedStringArray("world", "player")]
+script = ExtResource("29_afog")
+world = NodePath("../World")
+player = NodePath("../World/Player")
