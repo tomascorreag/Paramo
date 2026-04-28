@@ -45,6 +45,14 @@ var _layer_altitudes: Array[int] = []
 var _current_brightness: Array[float] = []
 var _rescan_queued: bool = false
 
+# Convergence tracking. When the player altitude hasn't changed and every
+# layer's brightness has settled within _CONVERGE_EPSILON of its target, we
+# skip the per-layer modulate writes. Re-engages the moment the altitude
+# moves or rescan() injects fresh layers.
+const _CONVERGE_EPSILON: float = 0.001
+var _last_alt: float = INF
+var _converged: bool = false
+
 
 func _ready() -> void:
 	if player == null:
@@ -61,16 +69,25 @@ func _process(delta: float) -> void:
 	if player == null or _layers.is_empty():
 		return
 	var alt: float = player.current_altitude()
+	if alt != _last_alt:
+		_converged = false
+		_last_alt = alt
+	if _converged:
+		return
 	var k: float = 1.0 - exp(-lerp_rate * delta)
+	var all_settled: bool = true
 	for i in _layers.size():
 		var layer: TileMapLayer = _layers[i]
 		if layer == null:
 			continue
 		var target: float = _target_brightness(alt, _layer_altitudes[i])
 		var b: float = lerpf(_current_brightness[i], target, k)
+		if absf(b - target) > _CONVERGE_EPSILON:
+			all_settled = false
 		_current_brightness[i] = b
 		var c: Color = layer.modulate
 		layer.modulate = Color(b, b, b, c.a)
+	_converged = all_settled
 
 
 # Public: force a re-scan of `world`. Call after any code path that adds or
@@ -93,6 +110,8 @@ func rescan() -> void:
 	_layers = found
 	_layer_altitudes = alts
 	_current_brightness.resize(found.size())
+	# Fresh layers may not be at their target yet; resume the lerp loop.
+	_converged = false
 
 	var alt: float = player.current_altitude() if player != null else 0.0
 	for i in found.size():

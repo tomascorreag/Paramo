@@ -30,6 +30,19 @@ const SOURCE_SNOW:  int = 4
 const SOURCE_ROCK:  int = 5
 
 
+# Grass FULL_CUBE variant selection. Picker scores each painted variant against
+# the cell's altitude and biome-derived "centrality" using two gaussians, plus
+# a small floor so no variant ever vanishes (preserves randomness).
+const _GRASS_FULL_CUBE_KIND: StringName = &"FULL_CUBE"
+const _PA_LAYER: String = "preferred_altitude"
+const _PD_LAYER: String = "preferred_density"
+const _SIGMA_ALT: float = 2.0
+const _SIGMA_DENS: float = 0.35
+const _EPSILON: float = 0.05
+# Mirrors _biome_for() in terrain_generator.gd: GRASS band ends at perturbed = 4.
+const _GRASS_BAND_TOP: float = 4.0
+
+
 # Water alternative_tile mapping. Indexed by direction → alt id painted in
 # resources/tiles/base_tileset.tres on tile (0,0) of the water source:
 #   alt 0 = still
@@ -55,6 +68,7 @@ static func paint(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	tile_set: TileSet,
+	seed: int = 0,
 ) -> void:
 	if tile_set == null:
 		push_error("TerrainPainter.paint: tile_set is null.")
@@ -64,6 +78,10 @@ static func paint(
 	var indices: Dictionary[int, TileKindIndex] = {}
 	for src in [SOURCE_GRASS, SOURCE_DIRT, SOURCE_WATER, SOURCE_SNOW, SOURCE_ROCK]:
 		indices[src] = TileKindIndex.new(tile_set, src)
+
+	var grass_variants: Array = _build_variant_table(
+		indices[SOURCE_GRASS], _GRASS_FULL_CUBE_KIND
+	)
 
 	# Clear all target layers first so re-runs don't leave stale tiles.
 	for alt_key in layers_by_altitude:
@@ -76,7 +94,7 @@ static func paint(
 			var c: TerrainCell = grid.at(x, y)
 			if c.kind == TerrainCell.Kind.EMPTY:
 				continue
-			_paint_cell(grid, layers_by_altitude, indices, x, y, c)
+			_paint_cell(grid, layers_by_altitude, indices, grass_variants, seed, x, y, c)
 
 
 # ----------------------------------------------------------------------------
@@ -87,6 +105,8 @@ static func _paint_cell(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	indices: Dictionary,
+	grass_variants: Array,
+	seed: int,
 	x: int,
 	y: int,
 	c: TerrainCell,
@@ -103,7 +123,13 @@ static func _paint_cell(
 
 	match c.kind:
 		TerrainCell.Kind.GROUND:
-			_paint_ground(layer, indices, pos, c)
+			_paint_ground(layer, indices, grass_variants, seed, pos, c)
+			# A GROUND cell's cube only renders at one altitude. When a face
+			# neighbor sits more than one cube below, the cliff face exposes
+			# a void on the layers between this cell's altitude and the
+			# neighbor's. Stack biome-matched FULL_CUBEs at this cell's coord
+			# down to (lowest neighbor + 2) to fill that void.
+			_paint_ground_cliff_back(grid, layers_by_altitude, indices, grass_variants, seed, pos, c)
 		TerrainCell.Kind.WATER:
 			_paint_water(layer, indices, pos, c)
 			# Water shader is semi-transparent. Fill the volume directly under
@@ -113,18 +139,19 @@ static func _paint_cell(
 				grid, layers_by_altitude, indices, pos, c.altitude, c.shore_mask
 			)
 		TerrainCell.Kind.WATERFALL:
-			_paint_waterfall(layer, indices, pos, c)
-			# Waterfall tile only covers the cliff's wall face (upper layer).
-			# The cell directly under it would otherwise be void, so paint
-			# flowing water on the layer below to form the floor of the cliff
-			# basin. Flow points downstream (away from the rise direction).
-			var lower_layer: TileMapLayer = layers_by_altitude.get(c.altitude - 2, null)
+			_paint_waterfall_column(layers_by_altitude, indices, pos, c)
+			# Waterfall column covers the cliff's wall face on layers
+			# [c.altitude - drop_height + 2 .. c.altitude]. The basin (the
+			# floor of the drop) sits one tier below the bottommost fall tile,
+			# i.e. at c.altitude - drop_height, and would render as void if
+			# left unpainted.
+			var basin_alt: int = c.altitude - c.drop_height
+			var lower_layer: TileMapLayer = layers_by_altitude.get(basin_alt, null)
 			if lower_layer != null:
 				_paint_under_waterfall(grid, lower_layer, indices, pos, c)
-				# Underwater fill UNDER the basin water (basin_alt = T - 2).
-				# Same treatment as WATER cells: dirt floor on layer T-4 plus
-				# NE/NW back walls at the lateral bank coords.
-				var basin_alt: int = c.altitude - 2
+				# Underwater fill UNDER the basin water (basin_alt - 2 floor +
+				# NE/NW back walls). The wall stack already handles arbitrary
+				# bank heights, so this works for any drop_height.
 				var basin_mask: int = _basin_shore_mask(grid, pos, basin_alt)
 				_paint_underwater_fill(
 					grid, layers_by_altitude, indices, pos, basin_alt, basin_mask
@@ -136,6 +163,8 @@ static func _paint_cell(
 static func _paint_ground(
 	layer: TileMapLayer,
 	indices: Dictionary,
+	grass_variants: Array,
+	seed: int,
 	pos: Vector2i,
 	c: TerrainCell,
 ) -> void:
@@ -156,7 +185,90 @@ static func _paint_ground(
 		)
 		return
 	var coord: Vector2i = idx.coord(kind)
+	if src == SOURCE_GRASS and kind == _GRASS_FULL_CUBE_KIND:
+		var density: float = _grass_density_from_score(c.biome_score)
+		coord = _pick_grass_variant_coord(
+			grass_variants, c.altitude, density, pos.x, pos.y, c.altitude, seed, coord
+		)
 	layer.set_cell(pos, src, coord, 0)
+
+
+# Stacks biome-matched FULL_CUBE tiles at `pos` from `c.altitude - 2` down to
+# the highest layer above the lowest face neighbor. Without this, a 4-cube
+# plateau next to a 0-cube basin would render as a single floating cube with
+# 3 cubes of void below it on the cliff face. Mirrors the back-wall stacking
+# done by `_paint_underwater_fill` for waterfall basins, but applies to bare
+# GROUND cliffs (no adjacent water).
+#
+# For waterfall-adjacent plateaus, this paints first, then `_paint_underwater_fill`
+# overpaints with dirt — same shape, harmless overwrite, dirt wins (matching the
+# established underwater-fill convention for water-side back walls).
+static func _paint_ground_cliff_back(
+	grid: TerrainGrid,
+	layers_by_altitude: Dictionary,
+	indices: Dictionary,
+	grass_variants: Array,
+	seed: int,
+	pos: Vector2i,
+	c: TerrainCell,
+) -> void:
+	var min_alt: int = c.altitude
+	for d in [
+		DiamondCompass.DIR_NE,
+		DiamondCompass.DIR_NW,
+		DiamondCompass.DIR_SE,
+		DiamondCompass.DIR_SW,
+	]:
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null:
+			continue
+		if nc.kind == TerrainCell.Kind.EMPTY:
+			continue
+		if nc.altitude < min_alt:
+			min_alt = nc.altitude
+	if min_alt >= c.altitude - 2:
+		return
+	var stop_alt: int = min_alt + 2
+	# Resolve the source per stack tier so a tall cliff transitions through
+	# biome bands (e.g. SNOW lip → ROCK → DIRT → GRASS at the basin), instead
+	# of painting the entire column in the surface biome. This mirrors the
+	# generator's altitude→biome mapping but without the per-cell noise
+	# perturbation, which we don't have access to for cliff-back layers.
+	var alt: int = c.altitude - 2
+	while alt >= stop_alt:
+		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
+		if layer != null:
+			var tier_biome: int = _biome_for_altitude_band(alt)
+			var src: int = _source_for_biome(tier_biome)
+			var idx: TileKindIndex = indices[src]
+			if not idx.has(TileSlots.FULL_CUBE):
+				src = SOURCE_GRASS
+				idx = indices[src]
+			if idx.has(TileSlots.FULL_CUBE):
+				var coord: Vector2i = idx.coord(TileSlots.FULL_CUBE)
+				var stack_coord: Vector2i = coord
+				if src == SOURCE_GRASS:
+					var density: float = _grass_density_from_score(float(alt))
+					stack_coord = _pick_grass_variant_coord(
+						grass_variants, alt, density, pos.x, pos.y, alt, seed, coord
+					)
+				layer.set_cell(pos, src, stack_coord, 0)
+		alt -= 2
+
+
+# Mirrors `_biome_for` in terrain_generator.gd, sans noise. Used by
+# cliff-back painting where we need a biome per altitude tier without a
+# per-cell biome_score to read from. Bands: [0,4]=GRASS, (4,8]=DIRT,
+# (8,12]=ROCK, (12,top]=SNOW.
+static func _biome_for_altitude_band(alt: int) -> int:
+	if alt <= 4:
+		return TerrainCell.Biome.GRASS
+	if alt <= 8:
+		return TerrainCell.Biome.DIRT
+	if alt <= 12:
+		return TerrainCell.Biome.ROCK
+	return TerrainCell.Biome.SNOW
 
 
 static func _paint_water(
@@ -173,19 +285,37 @@ static func _paint_water(
 	_set_water_cell(layer, idx, pos, kind, c.water_flow)
 
 
-static func _paint_waterfall(
-	layer: TileMapLayer,
+static func _paint_waterfall_column(
+	layers_by_altitude: Dictionary,
 	indices: Dictionary,
 	pos: Vector2i,
 	c: TerrainCell,
 ) -> void:
+	# Stacked waterfall: one tile per altitude tier from the lip down to the
+	# bottommost fall tile. drop_height == 2 is a single-tile drop and uses
+	# FALL_*_BOTH (lip + splash in one tile). Taller columns use TOP at the
+	# lip, BOTTOM at the bottom, and NONE in between (continuous water, no
+	# rock framing).
 	var idx: TileKindIndex = indices[SOURCE_WATER]
-	var kind: StringName = _waterfall_kind_for_rise(c.fall_rise_dir)
-	# A waterfall cell flows in the opposite direction of its rise (downhill,
-	# away from the cliff above). The flow is meaningful for the WATER_FLAT
-	# fallback only — painted FALL_* variants are single-alt.
-	var flow: Vector2i = -c.fall_rise_dir
-	_set_water_cell(layer, idx, pos, kind, flow)
+	var rise: Vector2i = c.fall_rise_dir
+	var top: int = c.altitude
+	var bottom: int = c.altitude - c.drop_height + 2
+	var flow: Vector2i = -rise
+	var alt: int = top
+	while alt >= bottom:
+		var kind: StringName
+		if c.drop_height == 2:
+			kind = _fall_kind_for_rise_and_position(rise, &"BOTH")
+		elif alt == top:
+			kind = _fall_kind_for_rise_and_position(rise, &"TOP")
+		elif alt == bottom:
+			kind = _fall_kind_for_rise_and_position(rise, &"BOTTOM")
+		else:
+			kind = _fall_kind_for_rise_and_position(rise, &"NONE")
+		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
+		if layer != null:
+			_set_water_cell(layer, idx, pos, kind, flow)
+		alt -= 2
 
 
 # Shared painter for any water/waterfall cell. Tries `kind` first; if not
@@ -234,7 +364,7 @@ static func _paint_under_waterfall(
 	c: TerrainCell,
 ) -> void:
 	var idx: TileKindIndex = indices[SOURCE_WATER]
-	var basin_alt: int = c.altitude - 2
+	var basin_alt: int = c.altitude - c.drop_height
 	var mask: int = _basin_shore_mask(grid, pos, basin_alt)
 	var kind: StringName = _basin_kind_for_mask(mask, c.fall_rise_dir)
 	var flow: Vector2i = -c.fall_rise_dir
@@ -250,18 +380,11 @@ static func _paint_under_waterfall(
 # Anything else (off-grid, GROUND, WATER stored at the upper tier, EMPTY) is
 # treated as land for shore-edge purposes.
 static func _basin_shore_mask(grid: TerrainGrid, pos: Vector2i, basin_alt: int) -> int:
-	var dirs: Array[Vector2i] = [
-		TerrainGenerator.DIR_NE,
-		TerrainGenerator.DIR_NW,
-		TerrainGenerator.DIR_SE,
-		TerrainGenerator.DIR_SW,
-	]
-	var bits: Array[int] = [1, 2, 4, 8]
 	var mask: int = 0
-	for i in dirs.size():
-		var n: Vector2i = pos + dirs[i]
+	for i in DiamondCompass.FACE_DIRS.size():
+		var n: Vector2i = pos + DiamondCompass.FACE_DIRS[i]
 		if not _basin_neighbor_is_basin_water(grid, n, basin_alt):
-			mask |= bits[i]
+			mask |= DiamondCompass.FACE_BITS[i]
 	return mask
 
 
@@ -293,9 +416,10 @@ static func _basin_kind_for_mask(mask: int, rise_dir: Vector2i) -> StringName:
 	if face == 2: return TileSlots.EDGE_NW
 	if face == 4: return TileSlots.EDGE_SE
 	if face == 8: return TileSlots.EDGE_SW
-	# Both lateral sides are banks (1-wide drop with banks on NW+SE for
-	# NE-rise, or NE+SW for NW-rise). Pick a single bank arbitrarily — either
-	# is "toward the river edge" since both are land.
+	# Multi-bit fallback: lateral banks on more than one side (1-wide drop
+	# with banks on NW+SE for NE-rise, or NE+SW for NW-rise). Pick the first
+	# bank by deterministic priority (NW > SE > SW > NE) so paints stay
+	# stable seed-to-seed; either single bank reads as a shore edge.
 	if face & 2: return TileSlots.EDGE_NW
 	if face & 4: return TileSlots.EDGE_SE
 	if face & 8: return TileSlots.EDGE_SW
@@ -304,11 +428,7 @@ static func _basin_kind_for_mask(mask: int, rise_dir: Vector2i) -> StringName:
 
 
 static func _face_bit_for_dir(dir: Vector2i) -> int:
-	if dir == TerrainGenerator.DIR_NE: return 1
-	if dir == TerrainGenerator.DIR_NW: return 2
-	if dir == TerrainGenerator.DIR_SE: return 4
-	if dir == TerrainGenerator.DIR_SW: return 8
-	return 0
+	return DiamondCompass.face_bit_for_dir(dir)
 
 
 # ----------------------------------------------------------------------------
@@ -343,7 +463,7 @@ static func _paint_underwater_fill(
 		return
 	_set_dirt_cell(floor_layer, indices, water_pos, TileSlots.FLAT)
 
-	var wall_dirs: Array[Vector2i] = [TerrainGenerator.DIR_NE, TerrainGenerator.DIR_NW]
+	var wall_dirs: Array[Vector2i] = [DiamondCompass.DIR_NE, DiamondCompass.DIR_NW]
 	for d in wall_dirs:
 		var bit: int = _face_bit_for_dir(d)
 		if (shore_mask & bit) == 0:
@@ -380,6 +500,70 @@ static func _set_dirt_cell(
 		return
 	var coord: Vector2i = idx.coord(kind)
 	layer.set_cell(pos, SOURCE_DIRT, coord, 0)
+
+
+# ----------------------------------------------------------------------------
+# Grass variant selection
+# ----------------------------------------------------------------------------
+
+# Builds [{coord, pa, pd}, …] from every painted variant of `kind` on `idx`.
+# Reads preferred_altitude / preferred_density custom_data per variant; absent
+# layers default to 0.0 (which still scores reasonably via the gaussian + floor).
+static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
+	var out: Array = []
+	if idx == null:
+		return out
+	for coord in idx.coords_for(kind):
+		var pa_v: Variant = idx.get_attr(coord, _PA_LAYER)
+		var pd_v: Variant = idx.get_attr(coord, _PD_LAYER)
+		out.append({
+			"coord": coord,
+			"pa": float(pa_v) if pa_v != null else 0.0,
+			"pd": float(pd_v) if pd_v != null else 0.0,
+		})
+	return out
+
+
+# Maps the continuous biome score into a [0,1] "grass centrality":
+#   1.0 = deep in grass region (low altitude, no noise push toward dirt)
+#   0.0 = right at the grass/dirt threshold
+# Mirrors the GRASS band cutoff used by _biome_for in terrain_generator.gd.
+static func _grass_density_from_score(biome_score: float) -> float:
+	return clampf((_GRASS_BAND_TOP - biome_score) / _GRASS_BAND_TOP, 0.0, 1.0)
+
+
+# Weighted variant pick. Each variant scores against the cell via two gaussians
+# (altitude in half-steps, density in [0,1]) plus EPSILON so even mismatched
+# variants retain a nonzero chance — preserves randomness without making the
+# preferences meaningless. Determinism via hash([x, y, layer_alt, seed]).
+static func _pick_grass_variant_coord(
+	variants: Array,
+	altitude_half_steps: int,
+	density: float,
+	x: int, y: int, layer_alt: int, seed: int,
+	fallback: Vector2i,
+) -> Vector2i:
+	if variants.is_empty():
+		return fallback
+	var weights: Array[float] = []
+	var total: float = 0.0
+	for v in variants:
+		var ad: float = float(altitude_half_steps) - float(v["pa"])
+		var dd: float = density - float(v["pd"])
+		var w: float = exp(-(ad * ad) / (2.0 * _SIGMA_ALT * _SIGMA_ALT)) \
+				* exp(-(dd * dd) / (2.0 * _SIGMA_DENS * _SIGMA_DENS)) \
+				+ _EPSILON
+		weights.append(w)
+		total += w
+	# hash() on a typed array is stable in Godot 4.6.
+	var h: int = hash([x, y, layer_alt, seed]) & 0x7FFFFFFF
+	var roll: float = (float(h) / float(0x7FFFFFFF)) * total
+	var acc: float = 0.0
+	for i in weights.size():
+		acc += weights[i]
+		if roll <= acc:
+			return variants[i]["coord"]
+	return variants.back()["coord"]
 
 
 # ----------------------------------------------------------------------------
@@ -462,27 +646,33 @@ static func _shore_kind_for_mask(mask: int) -> StringName:
 # topmost of a multi-tile drop (lip only), BOTTOM = bottommost (splash only),
 # NONE = middle tile (continuous water, no rock framing).
 #
-# The current generator only produces 1-tile drops — `_trace_rivers` places
-# one waterfall per T->T-2 transition and `_smooth_altitude_jumps` caps any
-# altitude jump at 2 half-steps — so every waterfall is BOTH. Multi-tier
-# drops would need both a model change (storing stacked waterfalls per grid
-# cell) and a painter change to inspect upstream/downstream neighbors.
-static func _waterfall_kind_for_rise(rise_dir: Vector2i) -> StringName:
-	if rise_dir == TerrainGenerator.DIR_NE:
-		return TileSlots.FALL_NE_BOTH
-	if rise_dir == TerrainGenerator.DIR_NW:
-		return TileSlots.FALL_NW_BOTH
+# Drop height is stored on the WATERFALL cell as `drop_height` (half-steps).
+# `_paint_waterfall_column` walks layers between the lip and the bottom and
+# resolves each layer's tile kind via this helper.
+static func _fall_kind_for_rise_and_position(rise_dir: Vector2i, position: StringName) -> StringName:
+	if rise_dir == DiamondCompass.DIR_NE:
+		match position:
+			&"BOTH":   return TileSlots.FALL_NE_BOTH
+			&"TOP":    return TileSlots.FALL_NE_TOP
+			&"BOTTOM": return TileSlots.FALL_NE_BOTTOM
+			&"NONE":   return TileSlots.FALL_NE_NONE
+	elif rise_dir == DiamondCompass.DIR_NW:
+		match position:
+			&"BOTH":   return TileSlots.FALL_NW_BOTH
+			&"TOP":    return TileSlots.FALL_NW_TOP
+			&"BOTTOM": return TileSlots.FALL_NW_BOTTOM
+			&"NONE":   return TileSlots.FALL_NW_NONE
 	# SE/SW rises are unpainted in the current water atlas — caller falls back.
 	return &""
 
 
 static func _water_alt_for_flow(flow: Vector2i) -> int:
-	if flow == TerrainGenerator.DIR_NE:
+	if flow == DiamondCompass.DIR_NE:
 		return _WATER_ALT_NE
-	if flow == TerrainGenerator.DIR_NW:
+	if flow == DiamondCompass.DIR_NW:
 		return _WATER_ALT_NW
-	if flow == TerrainGenerator.DIR_SE:
+	if flow == DiamondCompass.DIR_SE:
 		return _WATER_ALT_SE
-	if flow == TerrainGenerator.DIR_SW:
+	if flow == DiamondCompass.DIR_SW:
 		return _WATER_ALT_SW
 	return _WATER_ALT_STILL

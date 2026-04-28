@@ -33,6 +33,23 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 var _post_process_material: ShaderMaterial
 var _time_manager: Node  # TimeManager autoload
 
+# Last time-of-day sampled. _process is gated on this changing so paused or
+# debug-slider-frozen states don't re-evaluate every curve and re-write
+# every uniform every frame.
+var _last_time: float = -INF
+
+# Cached node list for the "shadow" group. Refreshed lazily after any tree
+# change so the per-frame loop doesn't allocate via get_nodes_in_group.
+var _shadow_nodes: Array[Node] = []
+var _shadows_dirty: bool = true
+
+# Whether the post-process shader is currently doing visible work. When all
+# parameters are at neutral (no grading, no vignette, no tint) we hide the
+# ColorRect entirely so the back-buffer copy + fragment pass don't run.
+# Cheaper on the Compatibility renderer / WebGL2 / low-end GPUs.
+var _post_process_active: bool = true
+const _POST_NEUTRAL_EPSILON: float = 0.001
+
 
 func _ready() -> void:
 	_time_manager = get_node_or_null("/root/TimeManager")
@@ -46,12 +63,27 @@ func _ready() -> void:
 	if post_process_rect and post_process_rect.material:
 		_post_process_material = post_process_rect.material as ShaderMaterial
 
+	var tree := get_tree()
+	if tree:
+		tree.node_added.connect(_on_scene_tree_changed)
+		tree.node_removed.connect(_on_scene_tree_changed)
+
+
+func _on_scene_tree_changed(_n: Node) -> void:
+	_shadows_dirty = true
+
 
 func _process(_delta: float) -> void:
 	if _time_manager == null or profile == null:
 		return
 
 	var t: float = _time_manager.time_of_day
+	# Curves are functions of time-of-day only; if the clock hasn't moved,
+	# every uniform we'd write would be identical to last frame. Skip the
+	# whole pass — paused gameplay and frozen debug-slider states cost zero.
+	if absf(t - _last_time) < 0.0001:
+		return
+	_last_time = t
 
 	# --- Ambient tint ---
 	if profile.ambient_gradient:
@@ -64,27 +96,38 @@ func _process(_delta: float) -> void:
 
 	# --- Post-process shader ---
 	if _post_process_material:
-		if profile.temperature_curve:
-			_post_process_material.set_shader_parameter(
-				&"color_temperature", profile.temperature_curve.sample(t))
-		if profile.contrast_curve:
-			_post_process_material.set_shader_parameter(
-				&"contrast", profile.contrast_curve.sample(t))
-		if profile.saturation_curve:
-			_post_process_material.set_shader_parameter(
-				&"saturation", profile.saturation_curve.sample(t))
-		if profile.brightness_curve:
-			_post_process_material.set_shader_parameter(
-				&"brightness", profile.brightness_curve.sample(t))
-		if profile.vignette_strength_curve:
-			_post_process_material.set_shader_parameter(
-				&"vignette_strength", profile.vignette_strength_curve.sample(t))
-		if profile.tint_gradient:
-			_post_process_material.set_shader_parameter(
-				&"tint_color", profile.tint_gradient.sample(t))
-		if profile.tint_strength_curve:
-			_post_process_material.set_shader_parameter(
-				&"tint_strength", profile.tint_strength_curve.sample(t))
+		var temp_v: float = profile.temperature_curve.sample(t) if profile.temperature_curve else 0.0
+		var contrast_v: float = profile.contrast_curve.sample(t) if profile.contrast_curve else 1.0
+		var sat_v: float = profile.saturation_curve.sample(t) if profile.saturation_curve else 1.0
+		var bright_v: float = profile.brightness_curve.sample(t) if profile.brightness_curve else 0.0
+		var vig_v: float = profile.vignette_strength_curve.sample(t) if profile.vignette_strength_curve else 0.0
+		var tint_s: float = profile.tint_strength_curve.sample(t) if profile.tint_strength_curve else 0.0
+
+		# Only update uniforms when the pass is actually going to run. When all
+		# values are at neutral the ColorRect is hidden below; skipping the
+		# uniform writes keeps that path totally idle.
+		var active: bool = (
+			absf(temp_v) > _POST_NEUTRAL_EPSILON
+			or absf(contrast_v - 1.0) > _POST_NEUTRAL_EPSILON
+			or absf(sat_v - 1.0) > _POST_NEUTRAL_EPSILON
+			or absf(bright_v) > _POST_NEUTRAL_EPSILON
+			or vig_v > _POST_NEUTRAL_EPSILON
+			or tint_s > _POST_NEUTRAL_EPSILON
+		)
+		if active:
+			_post_process_material.set_shader_parameter(&"color_temperature", temp_v)
+			_post_process_material.set_shader_parameter(&"contrast", contrast_v)
+			_post_process_material.set_shader_parameter(&"saturation", sat_v)
+			_post_process_material.set_shader_parameter(&"brightness", bright_v)
+			_post_process_material.set_shader_parameter(&"vignette_strength", vig_v)
+			if profile.tint_gradient:
+				_post_process_material.set_shader_parameter(
+					&"tint_color", profile.tint_gradient.sample(t))
+			_post_process_material.set_shader_parameter(&"tint_strength", tint_s)
+		if active != _post_process_active:
+			_post_process_active = active
+			if post_process_rect:
+				post_process_rect.visible = active
 
 	# --- Wind ---
 	if profile.wind_intensity_curve and not wind_materials.is_empty():
@@ -99,8 +142,10 @@ func _process(_delta: float) -> void:
 			mat.set_shader_parameter(&"water_intensity", water_val)
 
 	# --- All shadows ---
-	var shadow_nodes := get_tree().get_nodes_in_group(&"shadow")
-	for node: Node in shadow_nodes:
+	if _shadows_dirty:
+		_shadows_dirty = false
+		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
+	for node: Node in _shadow_nodes:
 		var mat := (node as CanvasItem).material as ShaderMaterial
 		if mat == null:
 			continue

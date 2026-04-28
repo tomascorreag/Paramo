@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://b6tjikmfhpxro"]
+
+[ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+seed = 12345
+apex_x_jitter_frac = 0.25
+cone_steepness = 1.5
+branch_chance = 0.35
+height_noise_frequency = 0.11
+height_noise_amplitude = 5.0
+cliff_bias = 2.0
+biome_noise_frequency = 0.15
+biome_noise_amplitude = 4.0
+slope_chance = 0.2
+lake_radius = 2.8
+lake_jitter_strength = 1.5
+lake_aspect_min = 0.5
+lake_aspect_max = 2.0

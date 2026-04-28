@@ -69,13 +69,11 @@ func _on_tile_indices_changed(_is_enabled: bool) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not enabled or pathfinder == null:
-		return
-
-	var mouse_global := get_global_mouse_position()
-	_hover_cell = pathfinder.resolve_click(mouse_global)
+	if enabled and pathfinder != null:
+		var mouse_global := get_global_mouse_position()
+		_hover_cell = pathfinder.resolve_click(mouse_global)
+		queue_redraw()
 	_update_label()
-	queue_redraw()
 
 
 func _draw() -> void:
@@ -173,15 +171,20 @@ func _cell_visual_surface_global(cell: Vector2i) -> Vector2:
 func _update_label() -> void:
 	if debug_label == null:
 		return
-	if _hover_cell == Pathfinder.NO_CELL:
-		debug_label.text = "cell: —    kind: —    alt: —"
+	var fps: int = int(Engine.get_frames_per_second())
+	var draws: int = int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	var nodes: int = int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+	var perf_str: String = "FPS: %d    draws: %d    nodes: %d" % [fps, draws, nodes]
+
+	if not enabled or pathfinder == null or _hover_cell == Pathfinder.NO_CELL:
+		debug_label.text = perf_str
 		return
 	var tile := pathfinder.get_tile(_hover_cell)
 	if tile == null:
-		debug_label.text = "cell: %s    kind: —    alt: —" % _hover_cell
+		debug_label.text = "%s\ncell: %s    kind: —    alt: —" % [perf_str, _hover_cell]
 		return
 	var top: float = pathfinder.highest_visible_top(_hover_cell)
 	var top_str: String = "—" if is_nan(top) else "%d" % int(top)
-	debug_label.text = "cell: %s    kind: %s    alt: %s    vt: %s" % [
-		_hover_cell, tile.tile_kind, tile.altitude_center, top_str
+	debug_label.text = "%s\ncell: %s    kind: %s    alt: %s    vt: %s" % [
+		perf_str, _hover_cell, tile.tile_kind, tile.altitude_center, top_str
 	]

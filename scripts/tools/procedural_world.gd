@@ -17,48 +17,18 @@ extends Node
 
 
 @export_group("Generation")
-@export var seed: int = 12345
-@export_range(8, 200, 1) var width: int = 32
-@export_range(8, 200, 1) var height: int = 48
-@export_range(2, 32, 2) var top_altitude: int = 16
-## Per-seed apex jitter as a fraction of max(width, height). The apex base is
-## the visual N corner of the iso diamond; jitter slides along the NE / NW
-## edges (visually horizontal at the top of the screen). 0 = locked to the
-## corner; ~0.15 = visible per-seed variety. Always clamped to keep the lake
-## disc fully on-grid.
-@export_range(0.0, 0.5, 0.01) var apex_x_jitter_frac: float = 0.15
-## Multiplier on the auto-fit cone slope. Auto-fit makes the cone reach
-## altitude 0 at the far diagonal corner; >1 bottoms out earlier (wider flat
-## skirt around the mountain); <1 keeps the entire map elevated.
-@export_range(0.3, 2.0, 0.05) var cone_steepness: float = 1.0
-## Additive weight given to a south-going river step (positive Y) when the
-## walker has multiple downhill candidates. 0 = uniform random, higher = the
-## river hugs the south direction more aggressively.
-@export_range(0.0, 4.0, 0.05) var south_bias: float = 0.5
-@export_range(0.0, 1.0, 0.05) var branch_chance: float = 0.25
-@export_range(0.0, 1.0, 0.05) var slope_chance: float = 0.35
-
-@export_group("Noise")
-@export_range(0.005, 0.2, 0.005) var height_noise_frequency: float = 0.04
-@export_range(0.0, 8.0, 0.1) var height_noise_amplitude: float = 3.0
-@export_range(0.005, 0.2, 0.005) var biome_noise_frequency: float = 0.06
-@export_range(0.0, 6.0, 0.1) var biome_noise_amplitude: float = 2.0
-
-@export_group("Lake")
-@export_range(0.5, 12.0, 0.1) var lake_radius: float = 2.6
-## Strength of the noise that perturbs the lake's circular shape. 0 = perfect
-## disc (still aspect-stretched per seed); higher = more irregular shoreline.
-@export_range(0.0, 2.0, 0.05) var lake_jitter_strength: float = 0.5
-## Per-seed random aspect-ratio range. Each generation picks aspect_x and
-## aspect_y uniformly from [min, max], so the lake is round when both ~1,
-## oblong when they diverge. Different seeds → different orientations.
-@export_range(0.3, 1.0, 0.05) var lake_aspect_min: float = 0.7
-@export_range(1.0, 2.5, 0.05) var lake_aspect_max: float = 1.4
-
-@export_group("River")
-## Cell width of the stream leaving the lake. May shrink at branch points
-## (each side independently rolls keep / shrink-by-1, min 1).
-@export_range(1, 6, 1) var initial_river_width: int = 2
+## Resource preset driving the generator. Edit the .tres in the inspector
+## to tune values, swap `.tres` files to change biome / map style. If null
+## at runtime, defaults are used (see TerrainGenerationParams).
+@export var generation_params: TerrainGenerationParams
+## Per-instance overrides for the most commonly-tweaked fields. Set to a
+## non-default value to override the resource without forking it. The
+## sentinel for "use the resource value as-is" is shown in the comments.
+##
+## seed_override = -1  → use generation_params.seed
+@export var seed_override: int = -1
+## cone_steepness_override < 0  → use generation_params.cone_steepness
+@export var cone_steepness_override: float = -1.0
 
 @export_group("Wiring")
 ## Ground TileMapLayers indexed by altitude. Drag the layers in low-to-high.
@@ -104,29 +74,11 @@ func regenerate() -> void:
 		push_error("ProceduralWorld: ground_layers[0] has no TileSet.")
 		return
 
-	var params := TerrainGenerator.Params.new()
-	params.seed = seed
-	params.width = width
-	params.height = height
-	params.top_altitude = _ensure_even(top_altitude)
-	params.apex_x_jitter_frac = apex_x_jitter_frac
-	params.cone_steepness = cone_steepness
-	params.south_bias = south_bias
-	params.height_noise_frequency = height_noise_frequency
-	params.height_noise_amplitude = height_noise_amplitude
-	params.biome_noise_frequency = biome_noise_frequency
-	params.biome_noise_amplitude = biome_noise_amplitude
-	params.lake_radius = lake_radius
-	params.lake_jitter_strength = lake_jitter_strength
-	params.lake_aspect_min = lake_aspect_min
-	params.lake_aspect_max = lake_aspect_max
-	params.initial_river_width = initial_river_width
-	params.branch_chance = branch_chance
-	params.slope_chance = slope_chance
+	var params: TerrainGenerationParams = _resolve_params()
 
 	var grid: TerrainGrid = TerrainGenerator.generate(params)
 	var layers_by_altitude: Dictionary = _build_layer_map()
-	TerrainPainter.paint(grid, layers_by_altitude, tile_set)
+	TerrainPainter.paint(grid, layers_by_altitude, tile_set, params.seed)
 
 	# Pathfinder is not an @tool script — calling its methods from the editor
 	# (e.g. via the Regenerate button) errors out with "Attempt to call a
@@ -141,6 +93,28 @@ func regenerate() -> void:
 		"ProceduralWorld: generated %dx%d, top altitude %d, seed %d."
 		% [params.width, params.height, params.top_altitude, params.seed]
 	)
+
+
+# Builds the effective TerrainGenerationParams for this regenerate call.
+# Resource is duplicated before override application so we never mutate the
+# shared `.tres`. If no resource is assigned, falls back to default values
+# (defined on TerrainGenerationParams) and warns.
+func _resolve_params() -> TerrainGenerationParams:
+	var p: TerrainGenerationParams
+	if generation_params != null:
+		p = generation_params.duplicate() as TerrainGenerationParams
+	else:
+		push_warning(
+			"ProceduralWorld: no generation_params assigned — using defaults. "
+			+ "Assign a .tres under res://resources/terrain/ to tune."
+		)
+		p = TerrainGenerationParams.new()
+	if seed_override >= 0:
+		p.seed = seed_override
+	if cone_steepness_override >= 0.0:
+		p.cone_steepness = cone_steepness_override
+	p.top_altitude = _ensure_even(p.top_altitude)
+	return p
 
 
 func clear() -> void:
@@ -191,15 +165,22 @@ func _place_player_on_walkable(grid: TerrainGrid) -> void:
 	player.global_position = world_pos
 
 
-# Scans the abstract grid for GROUND cells with FLAT/FULL_CUBE shape, picks
-# the one with the lowest altitude (ties broken by distance to map center).
-# Slopes are excluded so the player starts on a stable footing — slopes work
-# fine to walk through but look odd as a starting pose.
+# Scans the abstract grid for GROUND cells with FLAT/FULL_CUBE shape AND at
+# least one walkable face neighbor (so the player isn't stranded on an
+# isolated 1x1 island), picks the one with the lowest altitude (ties broken
+# by distance to map center). Slopes are excluded as a starting pose because
+# the player anchor looks odd half-way up a tapered tile.
 func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
 	var center := Vector2(grid.width * 0.5, grid.height * 0.5)
 	var best := Vector2i(-1, -1)
 	var best_alt: int = 0x7FFFFFFF
 	var best_dist_sq: float = INF
+	# Fallback: best cell ignoring the neighbor-walkability requirement, in
+	# case generation produces a degenerate seed where every flat cell is
+	# isolated. Prefer a real spawn over a warning, but still warn.
+	var fallback := Vector2i(-1, -1)
+	var fallback_alt: int = 0x7FFFFFFF
+	var fallback_dist_sq: float = INF
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
@@ -211,12 +192,70 @@ func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
 			var cell := Vector2i(x, y)
 			var d := Vector2(x, y) - center
 			var dist_sq: float = d.x * d.x + d.y * d.y
+			if c.altitude < fallback_alt \
+					or (c.altitude == fallback_alt and dist_sq < fallback_dist_sq):
+				fallback = cell
+				fallback_alt = c.altitude
+				fallback_dist_sq = dist_sq
+			if not _has_walkable_neighbor(grid, cell, c.altitude):
+				continue
 			if c.altitude < best_alt \
 					or (c.altitude == best_alt and dist_sq < best_dist_sq):
 				best = cell
 				best_alt = c.altitude
 				best_dist_sq = dist_sq
+	if best.x < 0 and fallback.x >= 0:
+		push_warning(
+			"ProceduralWorld: no walkable cell with a walkable neighbor; "
+			+ "falling back to isolated cell %s (player may be stuck)." % fallback
+		)
+		return fallback
 	return best
+
+
+# A face neighbor is "walkable" if it's GROUND at the same altitude and
+# either flat or full-cube (so the player can step laterally), or if it's
+# a slope connecting this cell to its high end (alt+2). This is a coarse
+# proxy for the Pathfinder's walkability rules — sufficient to reject
+# truly isolated 1x1 islands, but doesn't substitute for a runtime path
+# check from the player anchor.
+func _has_walkable_neighbor(grid: TerrainGrid, cell: Vector2i, alt: int) -> bool:
+	var dirs: Array[Vector2i] = [
+		TerrainCell.DIR_NE,
+		TerrainCell.DIR_NW,
+		TerrainCell.DIR_SE,
+		TerrainCell.DIR_SW,
+	]
+	for d in dirs:
+		var n: Vector2i = cell + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+			continue
+		# Same-altitude flat / full cube → walk laterally.
+		if nc.altitude == alt and (
+				nc.ground_shape == TerrainCell.GroundShape.FULL_CUBE
+				or nc.ground_shape == TerrainCell.GroundShape.FLAT):
+			return true
+		# Slope on the same tier rising AWAY from us (so the slope's low
+		# end touches us) is walkable up. Slope altitude = LOW end.
+		if nc.altitude == alt and _slope_rises_in(nc.ground_shape, -d):
+			return true
+		# Slope at one tier below rising TOWARD us (so its high end sits at
+		# our altitude) is walkable down.
+		if nc.altitude == alt - 2 and _slope_rises_in(nc.ground_shape, d):
+			return true
+	return false
+
+
+# True iff the slope's rise direction matches `dir`. Returns false for
+# non-slope shapes.
+func _slope_rises_in(shape: int, dir: Vector2i) -> bool:
+	match shape:
+		TerrainCell.GroundShape.SLOPE_NE: return dir == TerrainCell.DIR_NE
+		TerrainCell.GroundShape.SLOPE_NW: return dir == TerrainCell.DIR_NW
+		TerrainCell.GroundShape.SLOPE_SE: return dir == TerrainCell.DIR_SE
+		TerrainCell.GroundShape.SLOPE_SW: return dir == TerrainCell.DIR_SW
+	return false
 
 
 # Editor-safe cell→world conversion. Mirrors Pathfinder.cell_to_world: uses

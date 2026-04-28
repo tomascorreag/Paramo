@@ -42,12 +42,13 @@ enum GroundShape {
 }
 
 
-# Diamond-axis directions (matches tile_slots.gd compass: cell ( 0,-1) → NE,
-# (-1, 0) → NW, ( 1, 0) → SE, ( 0, 1) → SW).
-const DIR_NE: Vector2i = Vector2i( 0, -1)
-const DIR_NW: Vector2i = Vector2i(-1,  0)
-const DIR_SE: Vector2i = Vector2i( 1,  0)
-const DIR_SW: Vector2i = Vector2i( 0,  1)
+# Diamond-axis directions — re-exported from DiamondCompass so consumers
+# can write `TerrainCell.DIR_NE` without round-tripping through the compass
+# class. Values are authoritative there; do not redefine here.
+const DIR_NE: Vector2i = DiamondCompass.DIR_NE
+const DIR_NW: Vector2i = DiamondCompass.DIR_NW
+const DIR_SE: Vector2i = DiamondCompass.DIR_SE
+const DIR_SW: Vector2i = DiamondCompass.DIR_SW
 
 
 # Half-step altitude this cell occupies. For SLOPE_* cells, this is the LOW
@@ -59,6 +60,12 @@ var kind: int = Kind.EMPTY  # use Kind enum values
 # Only meaningful when kind == GROUND.
 var biome: int = Biome.GRASS
 var ground_shape: int = GroundShape.FULL_CUBE
+
+# Continuous biome score (= altitude + biome_noise * amplitude) computed in
+# TerrainGenerator._assign_biomes. The painter uses it to derive a "centrality"
+# value for grass variant selection: cells with low score are deep in grass,
+# cells near 4.0 sit at the grass/dirt boundary.
+var biome_score: float = 0.0
 
 # Only meaningful when kind == WATER. ZERO = still water (lake interior).
 var water_flow: Vector2i = Vector2i.ZERO
@@ -74,6 +81,13 @@ var shore_mask: int = 0
 # the water is falling from. v1 supports DIR_NE and DIR_NW (matches the
 # painted FALL_NE_*/FALL_NW_* atlas variants).
 var fall_rise_dir: Vector2i = Vector2i.ZERO
+
+# Only meaningful when kind == WATERFALL. Vertical span of the drop in
+# half-steps (even values, >= 2). The cell is stored at the LIP altitude;
+# the basin sits at altitude - drop_height. drop_height == 2 reproduces the
+# original single-cube drop. The painter expands the column across multiple
+# layers using FALL_*_TOP/NONE/BOTTOM tiles.
+var drop_height: int = 2
 
 # Width of the river segment passing through this cell, in cells. 0 means
 # "not a river cell" (lake interior or any non-river water). The river

@@ -44,10 +44,14 @@ const _UNSET: Vector2i = Vector2i(-1, -1)
 
 var _source_id: int = -1
 var _name_to_coord: Dictionary[StringName, Vector2i] = {}
+var _name_to_all_coords: Dictionary[StringName, Array] = {}
+var _coord_to_data: Dictionary[Vector2i, TileData] = {}
+var _tile_set: TileSet = null
 
 
 func _init(tile_set: TileSet, source_id: int) -> void:
 	_source_id = source_id
+	_tile_set = tile_set
 
 	if tile_set == null:
 		push_error("TileKindIndex: tile_set is null.")
@@ -86,6 +90,27 @@ func has(kind_name: StringName) -> bool:
 	return _name_to_coord.has(kind_name)
 
 
+# All atlas coords with the given tile_kind on this source. Order matches the
+# atlas-scan order (TileSetAtlasSource.get_tile_id index). Empty if unpainted.
+func coords_for(kind_name: StringName) -> Array:
+	return _name_to_all_coords.get(kind_name, [])
+
+
+# Reads a custom_data field by layer name from the tile painted at `atlas_coord`
+# on this source. Returns `null` if the coord is unknown to this index or the
+# layer name doesn't exist on the TileSet.
+func get_attr(atlas_coord: Vector2i, layer_name: String) -> Variant:
+	var data: TileData = _coord_to_data.get(atlas_coord, null)
+	if data == null:
+		return null
+	if _tile_set == null:
+		return null
+	var layer_id := _find_custom_data_layer(_tile_set, layer_name)
+	if layer_id < 0:
+		return null
+	return data.get_custom_data_by_layer_id(layer_id)
+
+
 func source_id() -> int:
 	return _source_id
 
@@ -121,14 +146,14 @@ func _scan_atlas(source: TileSetAtlasSource, kind_layer_id: int) -> void:
 			continue
 
 		var kind_name := StringName(kind_str)
-		if _name_to_coord.has(kind_name):
-			push_warning(
-				"TileKindIndex: duplicate tile_kind '%s' on source %d — keeping %s, ignoring %s."
-				% [kind_name, _source_id, _name_to_coord[kind_name], atlas_coord]
-			)
-			continue
-
-		_name_to_coord[kind_name] = atlas_coord
+		_coord_to_data[atlas_coord] = data
+		if not _name_to_all_coords.has(kind_name):
+			_name_to_all_coords[kind_name] = []
+		_name_to_all_coords[kind_name].append(atlas_coord)
+		# First-painted coord wins for the single-coord lookup so legacy callers
+		# (painter slope/flat resolution, pathfinder) keep their existing tile.
+		if not _name_to_coord.has(kind_name):
+			_name_to_coord[kind_name] = atlas_coord
 
 
 # ----------------------------------------------------------------------------

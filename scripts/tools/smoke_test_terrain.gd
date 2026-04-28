@@ -8,8 +8,12 @@ extends SceneTree
 #   godot --headless --path . --script res://scripts/tools/smoke_test_terrain.gd
 
 func _init() -> void:
-	var params := TerrainGenerator.Params.new()
-	params.seed = 12345
+	var args: PackedStringArray = OS.get_cmdline_user_args()
+	var seed_arg: int = 12345
+	if args.size() > 0:
+		seed_arg = int(args[0])
+	var params := TerrainGenerationParams.new()
+	params.seed = seed_arg
 	params.width = 32
 	params.height = 48
 	params.top_altitude = 16
@@ -19,6 +23,8 @@ func _init() -> void:
 	params.branch_chance = 0.25
 	params.slope_chance = 0.35
 	params.lake_radius = 2.6
+	params.max_drop_cubes = 4
+	params.drop_height_bias = 0.0
 
 	var t0: int = Time.get_ticks_msec()
 	var grid: TerrainGrid = TerrainGenerator.generate(params)
@@ -28,6 +34,7 @@ func _init() -> void:
 	var kind_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0}
 	var biome_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0}
 	var shape_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+	var drop_counts: Dictionary = {}
 	var max_alt: int = 0
 	var min_alt: int = 999
 	for y in grid.height:
@@ -42,6 +49,8 @@ func _init() -> void:
 			if c.kind == TerrainCell.Kind.GROUND:
 				biome_counts[c.biome] = biome_counts.get(c.biome, 0) + 1
 				shape_counts[c.ground_shape] = shape_counts.get(c.ground_shape, 0) + 1
+			elif c.kind == TerrainCell.Kind.WATERFALL:
+				drop_counts[c.drop_height] = drop_counts.get(c.drop_height, 0) + 1
 
 	print("--- TerrainGenerator smoke test ---")
 	print("generation took %d ms" % dt)
@@ -71,4 +80,11 @@ func _init() -> void:
 	print("per-altitude cell count:")
 	for a in alt_keys:
 		print("  alt %2d: %d cells" % [a, alt_counts[a]])
+	var drop_keys: Array = drop_counts.keys()
+	drop_keys.sort()
+	print("waterfall drop_height histogram (half-steps → count):")
+	if drop_keys.is_empty():
+		print("  (no waterfalls)")
+	for d in drop_keys:
+		print("  drop %d (%d cubes): %d falls" % [d, d / 2, drop_counts[d]])
 	quit(0)

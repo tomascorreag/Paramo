@@ -539,6 +539,13 @@ func layers() -> Array[TileMapLayer]:
 	return _layers.duplicate()
 
 
+# Read-only view of the underlying layers array. For hot callers (per-frame
+# / per-shadow scans) that just iterate without mutating. Callers MUST NOT
+# mutate the returned array; use `layers()` if a copy is needed.
+func layers_readonly() -> Array[TileMapLayer]:
+	return _layers
+
+
 func layer_altitude(layer: TileMapLayer) -> int:
 	return _layer_altitudes.get(layer, 0)
 

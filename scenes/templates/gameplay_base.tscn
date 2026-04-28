@@ -70,18 +70,21 @@ position = Vector2(145, 99)
 y_sort_enabled = true
 position = Vector2(0, -16)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = -16
 metadata/altitude = -2
 
 [node name="Ground0" type="TileMapLayer" parent="World"]
 y_sort_enabled = true
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 metadata/altitude = 0
 
 [node name="Ground1" type="TileMapLayer" parent="World"]
 y_sort_enabled = true
 position = Vector2(0, -16)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 16
 metadata/altitude = 2
 
@@ -89,6 +92,7 @@ metadata/altitude = 2
 y_sort_enabled = true
 position = Vector2(0, -32)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 32
 metadata/altitude = 4
 
@@ -96,6 +100,7 @@ metadata/altitude = 4
 y_sort_enabled = true
 position = Vector2(0, -48)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 48
 metadata/altitude = 6
 
@@ -103,6 +108,7 @@ metadata/altitude = 6
 y_sort_enabled = true
 position = Vector2(0, -64)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 64
 metadata/altitude = 8
 
@@ -110,6 +116,7 @@ metadata/altitude = 8
 y_sort_enabled = true
 position = Vector2(0, -80)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 80
 metadata/altitude = 10
 
@@ -117,6 +124,7 @@ metadata/altitude = 10
 y_sort_enabled = true
 position = Vector2(0, -96)
 tile_set = ExtResource("1_tileset")
+rendering_quadrant_size = 32
 y_sort_origin = 96
 metadata/altitude = 12
 
@@ -126,8 +134,8 @@ up_direction = Vector2(1, 0)
 [node name="UILayer" type="CanvasLayer" parent="."]
 
 [node name="DebugLabel" type="Label" parent="UILayer"]
-offset_right = 200.0
-offset_bottom = 23.0
+offset_right = 320.0
+offset_bottom = 48.0
 
 [node name="Pathfinder" type="Node" parent="." node_paths=PackedStringArray("tile_map_layers")]
 script = ExtResource("3_pathfinder")

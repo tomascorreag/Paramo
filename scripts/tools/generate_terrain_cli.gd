@@ -11,11 +11,16 @@ extends SceneTree
 #
 # Usage:
 #   godot --headless --path . --script res://scripts/tools/generate_terrain_cli.gd \
-#         -- <scene_path> [seed] [top_altitude]
+#         -- <scene_path> [seed]
 #
 # Example:
 #   godot --headless --path . --script res://scripts/tools/generate_terrain_cli.gd \
-#         -- res://scenes/maps/procedural_test.tscn 12345 16
+#         -- res://scenes/maps/procedural_test.tscn 12345
+#
+# Top altitude (and every other generation knob) lives on the
+# `TerrainGenerationParams` Resource referenced by the scene's
+# ProceduralWorld node. To change it without touching code, edit the
+# referenced `.tres` directly under `res://resources/terrain/`.
 #
 # ============================================================================
 
@@ -47,9 +52,7 @@ func _init() -> void:
 		return
 
 	if args.size() > 1:
-		pw.seed = int(args[1])
-	if args.size() > 2:
-		pw.top_altitude = int(args[2])
+		pw.seed_override = int(args[1])
 
 	# Force-call generation. ProceduralWorld.regenerate is editor-safe.
 	pw.regenerate()
@@ -67,7 +70,10 @@ func _init() -> void:
 		quit(1)
 		return
 
-	print("generate_terrain_cli: baked '%s' (seed=%d, top_altitude=%d)." % [scene_path, pw.seed, pw.top_altitude])
+	var effective_seed: int = pw.seed_override
+	if effective_seed < 0 and pw.generation_params != null:
+		effective_seed = pw.generation_params.seed
+	print("generate_terrain_cli: baked '%s' (seed=%d)." % [scene_path, effective_seed])
 	quit(0)
 
 
@@ -90,4 +96,4 @@ func _parse_args() -> Array:
 
 
 func _print_usage() -> void:
-	print("Usage: --script res://scripts/tools/generate_terrain_cli.gd -- <scene_path> [seed] [top_altitude]")
+	print("Usage: --script res://scripts/tools/generate_terrain_cli.gd -- <scene_path> [seed]")

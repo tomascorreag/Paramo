@@ -30,96 +30,55 @@ extends RefCounted
 # ============================================================================
 
 
-# --- Public parameters (passed in via Params) -------------------------------
-
-class Params extends RefCounted:
-	var seed: int = 0
-	var width: int = 32
-	var height: int = 48
-	var top_altitude: int = 16            # half-steps; must be even
-	# Per-seed apex jitter as a fraction of max(width, height). The apex base
-	# is the visual N corner (grid (inset, inset)); jitter slides along the
-	# NE / NW edges of the diamond — visually horizontal at the top of the
-	# screen. 0 = locked to the corner; ~0.15 = visible per-seed variety.
-	var apex_x_jitter_frac: float = 0.15
-	# Multiplier on the auto-fit cone slope rate. Auto-fit makes the cone reach
-	# altitude 0 at the far diagonal corner; >1 = steeper (cone bottoms out
-	# before the corner, leaving a flat skirt); <1 = shallower (cone never
-	# reaches 0 inside the grid).
-	var cone_steepness: float = 1.0
-	# Additive weight given to a south-going step (dy > 0) when the river has
-	# multiple downhill candidates. Higher = more "always goes south".
-	var south_bias: float = 0.5
-	var height_noise_frequency: float = 0.04
-	var height_noise_amplitude: float = 3.0   # half-steps of perturbation
-	var biome_noise_frequency: float = 0.06
-	var biome_noise_amplitude: float = 2.0    # altitude perturbation for bands
-	var lake_radius: float = 2.6          # gives ~5x5 disc
-	# Multiplier on r^2 for the additive noise jitter when carving the lake.
-	# Larger values produce more irregular shorelines.
-	var lake_jitter_strength: float = 0.5
-	# Per-seed random aspect-ratio range for the lake disc. Each generation
-	# picks aspect_x and aspect_y uniformly from [min, max], stretching the
-	# lake along one axis.
-	var lake_aspect_min: float = 0.7
-	var lake_aspect_max: float = 1.4
-	# Width (in cells) of the river segment leaving the lake. May shrink at
-	# branch points down to 1.
-	var initial_river_width: int = 2
-	var branch_chance: float = 0.25       # split probability per waterfall
-	var slope_chance: float = 0.35        # extra slopes per uphill-edge cell
-	var max_river_steps: int = 4096       # safety cap on trace walks
-	# Cap on consecutive non-downhill steps a stalled walker may take while
-	# pushing south to reach the south edge. Aborts the walker if exceeded.
-	var max_stall_steps: int = 8
-
-	static func make_default() -> Params:
-		return Params.new()
+# Public parameters live on `TerrainGenerationParams` (Resource-backed, in
+# `scripts/data/terrain_generation_params.gd`). Internal references below
+# use the new type name directly; old `TerrainGenerator.Params` callers
+# should migrate to `TerrainGenerationParams`.
 
 
-# Compass directions used throughout (4-axis diamond).
-const DIR_NE: Vector2i = Vector2i( 0, -1)
-const DIR_NW: Vector2i = Vector2i(-1,  0)
-const DIR_SE: Vector2i = Vector2i( 1,  0)
-const DIR_SW: Vector2i = Vector2i( 0,  1)
-const _DIRS: Array[Vector2i] = [DIR_NE, DIR_NW, DIR_SE, DIR_SW]
+# Compass directions and shore-mask bits live on DiamondCompass — single
+# source of truth shared with TerrainPainter, TerrainCell, and ProceduralWorld.
+# Re-exported here so existing call sites (TerrainGenerator.DIR_NE, etc.)
+# keep compiling without touching every file.
+const DIR_NE: Vector2i = DiamondCompass.DIR_NE
+const DIR_NW: Vector2i = DiamondCompass.DIR_NW
+const DIR_SE: Vector2i = DiamondCompass.DIR_SE
+const DIR_SW: Vector2i = DiamondCompass.DIR_SW
+const _DIRS: Array[Vector2i] = DiamondCompass.FACE_DIRS
 
-# Apex (diamond-corner) directions — the cells visually straight up / right /
-# down / left of a tile, used to detect concave-shore (inner-corner) cases.
-const DIR_APEX_N: Vector2i = Vector2i(-1, -1)
-const DIR_APEX_E: Vector2i = Vector2i( 1, -1)
-const DIR_APEX_S: Vector2i = Vector2i( 1,  1)
-const DIR_APEX_W: Vector2i = Vector2i(-1,  1)
-const _APEX_DIRS: Array[Vector2i] = [DIR_APEX_N, DIR_APEX_E, DIR_APEX_S, DIR_APEX_W]
+const DIR_APEX_N: Vector2i = DiamondCompass.DIR_APEX_N
+const DIR_APEX_E: Vector2i = DiamondCompass.DIR_APEX_E
+const DIR_APEX_S: Vector2i = DiamondCompass.DIR_APEX_S
+const DIR_APEX_W: Vector2i = DiamondCompass.DIR_APEX_W
+const _APEX_DIRS: Array[Vector2i] = DiamondCompass.APEX_DIRS
 
-# Shore-mask bit positions (must align with TerrainCell.shore_mask docs).
-# Low nibble = face neighbors; high nibble = apex (diagonal) neighbors.
-const _BIT_NE: int = 1
-const _BIT_NW: int = 2
-const _BIT_SE: int = 4
-const _BIT_SW: int = 8
-const _BIT_APEX_N: int = 16
-const _BIT_APEX_E: int = 32
-const _BIT_APEX_S: int = 64
-const _BIT_APEX_W: int = 128
-const _FACE_MASK: int = _BIT_NE | _BIT_NW | _BIT_SE | _BIT_SW
+const _DIR_BITS: Array[int] = DiamondCompass.FACE_BITS
+const _APEX_BITS: Array[int] = DiamondCompass.APEX_BITS
 
-# Bit for each direction, in the same order as _DIRS.
-const _DIR_BITS: Array[int] = [_BIT_NE, _BIT_NW, _BIT_SE, _BIT_SW]
-const _APEX_BITS: Array[int] = [_BIT_APEX_N, _BIT_APEX_E, _BIT_APEX_S, _BIT_APEX_W]
+# Per-pass seed offsets so independent stochastic systems (biome noise, lake
+# shape jitter) don't lock-step with the master seed. Truncated golden-ratio
+# constant (0x9E3779B9) for biome — same trick splitmix64 uses to decorrelate
+# adjacent seeds. Lake offset is an arbitrary distinct value.
+const _SEED_OFFSET_BIOME: int = 0x9E3779B9
+const _SEED_OFFSET_LAKE_JITTER: int = 0xBEEF1010
 
 
 # ----------------------------------------------------------------------------
 # Public entry
 # ----------------------------------------------------------------------------
 
-static func generate(params: Params) -> TerrainGrid:
+static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 	var grid := TerrainGrid.new(params.width, params.height)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = params.seed
 
 	var height_noise := _make_noise(params.seed, params.height_noise_frequency)
-	var biome_noise := _make_noise(params.seed ^ 0x9E37, params.biome_noise_frequency)
+	var biome_noise := _make_noise(params.seed ^ _SEED_OFFSET_BIOME, params.biome_noise_frequency)
+
+	# Cap on neighbor altitude differences (in half-steps). Cells violating
+	# this cap get raised by _smooth_altitude_jumps; rivers may emit a waterfall
+	# of any drop in [2, max_drop_hs].
+	var max_drop_hs: int = maxi(2, params.max_drop_cubes * 2)
 
 	# Apex (cone peak / lake center). Drawn first so its rng consumption is
 	# stable across the rest of the pipeline; downstream rng calls (lake
@@ -129,19 +88,19 @@ static func generate(params: Params) -> TerrainGrid:
 	_fill_heightfield(grid, params, height_noise, apex)
 	var peak_center: Vector2i = _carve_lake(grid, params, rng, apex)
 	# Smooth jumps before tracing so the river walker sees a heightfield with
-	# at-most-one-tier altitude transitions. Carving the lake at top_altitude
-	# can leave a 4-step cliff straight off the lake (no alt 14 band where it
-	# was absorbed); without smoothing, the trace can't place a waterfall
-	# there because down_tier requires neighbor.altitude == alt - 2.
-	_smooth_altitude_jumps(grid)
+	# transitions no taller than max_drop_hs. Without smoothing, the lake can
+	# sit next to ground arbitrarily far below it after carve+noise; the trace
+	# would then have to fabricate intermediate altitudes.
+	_smooth_altitude_jumps(grid, max_drop_hs)
 	if peak_center.x >= 0:
-		_trace_rivers(grid, params, rng, peak_center)
+		_trace_rivers(grid, params, rng, peak_center, max_drop_hs)
+		_ensure_river_reaches_south(grid, params, rng, max_drop_hs)
 	_widen_rivers(grid)
 	_enforce_river_surroundings(grid)
 	# Surroundings may have lifted lateral cells to a river's altitude, which
-	# can re-introduce >2 jumps to cells one ring further out. Smooth again
-	# so slope placement works on a clean heightfield.
-	_smooth_altitude_jumps(grid)
+	# can re-introduce jumps a tier further out. Smooth again so slope
+	# placement works on a clean heightfield (within the same cap).
+	_smooth_altitude_jumps(grid, max_drop_hs)
 	_place_slopes(grid, params, rng)
 	_assign_biomes(grid, params, biome_noise)
 	_assign_water_flow(grid)
@@ -156,7 +115,7 @@ static func generate(params: Params) -> TerrainGrid:
 
 static func _fill_heightfield(
 	grid: TerrainGrid,
-	params: Params,
+	params: TerrainGenerationParams,
 	noise: FastNoiseLite,
 	apex: Vector2i,
 ) -> void:
@@ -175,13 +134,19 @@ static func _fill_heightfield(
 	var far_dy: float = float(grid.height - 1 - apex.y)
 	var max_d: float = maxf(1.0, sqrt(far_dx * far_dx + far_dy * far_dy))
 	var rate: float = float(params.top_altitude) / max_d * params.cone_steepness
+	# Cliff bias reshapes the [-1, 1] noise via sign(n) * pow(abs(n), 1/cliff_bias).
+	# At 1.0, the noise is unchanged (smooth Perlin). At >1, the distribution
+	# pushes toward the extremes, so adjacent cells are more likely to land on
+	# opposite tails — sharper altitude jumps. <1 flattens toward zero.
+	var cliff_exp: float = 1.0 / maxf(0.01, params.cliff_bias)
 	for y in grid.height:
 		for x in grid.width:
 			var dx: float = float(x - apex.x)
 			var dy: float = float(y - apex.y)
 			var d: float = sqrt(dx * dx + dy * dy)
 			var cone_alt: float = float(params.top_altitude) - d * rate
-			var n: float = noise.get_noise_2d(x, y) * params.height_noise_amplitude
+			var n_raw: float = noise.get_noise_2d(x, y)
+			var n: float = signf(n_raw) * pow(absf(n_raw), cliff_exp) * params.height_noise_amplitude
 			var raw: float = cone_alt + n
 			var snapped: int = _snap_even(int(round(raw)), 0, params.top_altitude)
 			var cell: TerrainCell = grid.at(x, y)
@@ -202,7 +167,7 @@ static func _fill_heightfield(
 #   t < 0  → grid (inset, inset-t)        — slides along NW edge (visual left)
 # This keeps the apex on the visual top of the screen at every seed, just
 # offset horizontally by jitter.
-static func _pick_apex(grid: TerrainGrid, params: Params, rng: RandomNumberGenerator) -> Vector2i:
+static func _pick_apex(grid: TerrainGrid, params: TerrainGenerationParams, rng: RandomNumberGenerator) -> Vector2i:
 	var inset: int = int(ceil(params.lake_radius)) + 1
 	var max_extent: int = maxi(grid.width, grid.height) - 1 - 2 * inset
 	var jitter_range: float = float(maxi(0, max_extent)) * params.apex_x_jitter_frac
@@ -245,7 +210,7 @@ static func _make_noise(seed: int, frequency: float) -> FastNoiseLite:
 # Returns the lake center cell (the apex), used downstream for river outlet.
 static func _carve_lake(
 	grid: TerrainGrid,
-	params: Params,
+	params: TerrainGenerationParams,
 	rng: RandomNumberGenerator,
 	apex: Vector2i,
 ) -> Vector2i:
@@ -255,7 +220,7 @@ static func _carve_lake(
 	var jitter_amp: float = params.lake_jitter_strength * r2
 	var aspect_x: float = rng.randf_range(params.lake_aspect_min, params.lake_aspect_max)
 	var aspect_y: float = rng.randf_range(params.lake_aspect_min, params.lake_aspect_max)
-	var n := _make_noise(params.seed ^ 0xBEEF, 0.4)
+	var n := _make_noise(params.seed ^ _SEED_OFFSET_LAKE_JITTER, 0.4)
 	# The disc may extend further along its longer axis; size the scan box
 	# to the worst-case stretched radius so we don't miss boundary cells.
 	var max_r: int = int(ceil(params.lake_radius * maxf(aspect_x, aspect_y))) + 1
@@ -307,9 +272,10 @@ static func _carve_lake(
 # walker aborts with a warning.
 static func _trace_rivers(
 	grid: TerrainGrid,
-	params: Params,
+	params: TerrainGenerationParams,
 	rng: RandomNumberGenerator,
 	lake_center: Vector2i,
+	max_drop_hs: int,
 ) -> void:
 	var outlet: Vector2i = _find_lake_outlet(grid, params, lake_center)
 	if outlet.x < 0:
@@ -346,63 +312,32 @@ static func _trace_rivers(
 		if cell_xy.y >= grid.height - 1:
 			continue
 
-		# Choose downhill neighbors. NE (the only -Y diamond step) is forbidden:
-		# the walker must never head back north, otherwise it can spiral. SE
-		# and NW are 0-Y steps — fine for lateral wandering. SW is the only
-		# +Y step and gets the south_bias weight.
-		#
-		# Down-tier candidates that would form an indented (concave) corner
-		# are filtered out: a single lower cell with upper plateaus on BOTH
-		# its NE and NW sides can't display two waterfall tiles at once. We
-		# only have the painted NE-rise and NW-rise variants, no combined
-		# corner tile, so the river must drop somewhere else.
-		var same_tier: Array[Vector2i] = []
-		var down_tier: Array[Vector2i] = []
-		for d in _DIRS:
-			if d == DIR_NE:
-				continue
-			# Don't immediately reverse direction (prevents tight U-turns on
-			# lateral wandering).
-			if last_dir != Vector2i.ZERO and d == -last_dir:
-				continue
-			var n: Vector2i = cell_xy + d
-			var nc: TerrainCell = grid.at_or_null(n.x, n.y)
-			if nc == null:
-				continue
-			if nc.kind == TerrainCell.Kind.WATER or nc.kind == TerrainCell.Kind.WATERFALL:
-				continue
-			if nc.kind != TerrainCell.Kind.GROUND:
-				continue
-			if nc.altitude == alt:
-				same_tier.append(n)
-			elif nc.altitude == alt - 2:
-				# The waterfall atlas only paints NE-rise and NW-rise variants.
-				# A drop in the NW direction would need an SE-rise waterfall
-				# (rise = -dir = SE), which the painter falls back to flat
-				# water for — so the cliff visual disappears. Skip those.
-				var rise: Vector2i = -d
-				if rise != DIR_NE and rise != DIR_NW:
-					continue
-				if _would_indent_corner(grid, n, rise, alt):
-					continue
-				down_tier.append(n)
+		var cands: Dictionary = _collect_walk_candidates(
+			grid, cell_xy, alt, last_dir, max_drop_hs
+		)
+		var same_tier: Array[Vector2i] = cands["same"]
+		var down_tier: Array[Vector2i] = cands["down"]
 
 		# Prefer dropping to a lower tier; otherwise meander on the same tier.
 		if not down_tier.is_empty():
-			var drop_dir_idx: int = _pick_south_biased(down_tier, cell_xy, params.south_bias, rng)
+			var drop_dir_idx: int = _pick_drop_candidate(
+				down_tier, grid, cell_xy, alt,
+				params.south_bias, params.drop_height_bias, rng,
+			)
 			var fall_to: Vector2i = down_tier[drop_dir_idx]
 			var fall_dir: Vector2i = fall_to - cell_xy
+			var lower_alt: int = grid.at(fall_to.x, fall_to.y).altitude
 			# Record this cell's flow toward the cliff edge.
 			here.water_flow = fall_dir
 			# WATERFALL cell sits at the LOWER neighbor's grid coord but is
-			# stored on the UPPER tier (`alt`, not `alt - 2`). The painter
-			# resolves layer-by-altitude, so this places the falling-water
-			# graphic on the upper layer — visually it occupies the cliff face
-			# of the upper cube rather than the floor of the lower tier.
+			# stored on the UPPER tier (`alt`). drop_height records the column
+			# span (alt - lower_alt half-steps); the painter expands this into
+			# stacked TOP/NONE*/BOTTOM tiles across multiple layers.
 			var fall_cell: TerrainCell = grid.at(fall_to.x, fall_to.y)
 			fall_cell.kind = TerrainCell.Kind.WATERFALL
 			fall_cell.altitude = alt
 			fall_cell.fall_rise_dir = -fall_dir   # rise dir = back toward the higher cliff
+			fall_cell.drop_height = alt - lower_alt
 			# Branching produces a SAME-TIER wander, never a second drop from
 			# this cell. Two simultaneous drops from the same source would
 			# always be in the SE+SW pair (the only paintable rises are NE/NW,
@@ -415,9 +350,9 @@ static func _trace_rivers(
 					and not same_tier.is_empty()
 			var main_width: int = _next_width(width, rng) if branching else width
 			fall_cell.river_width = main_width
-			# Continue river one step beyond the waterfall, at the lower tier.
+			# Continue river one step beyond the waterfall, at the basin tier.
 			var beyond: Vector2i = fall_to + fall_dir
-			walkers.append([beyond, alt - 2, fall_dir, 0, main_width])
+			walkers.append([beyond, lower_alt, fall_dir, 0, main_width])
 			if branching:
 				var br_idx: int = _pick_south_biased(same_tier, cell_xy, params.south_bias, rng)
 				var br_to: Vector2i = same_tier[br_idx]
@@ -433,17 +368,14 @@ static func _trace_rivers(
 			var ndir: Vector2i = nx - cell_xy
 			# Record flow direction along the river path for this cell.
 			here.water_flow = ndir
-			# Same-tier wandering counts as "non-progressive" if it doesn't move
-			# south; bump stall_count if so. (It's still less drastic than a
-			# true stall step into uphill terrain.)
-			var new_stall: int = stall_count + 1 if ndir.y <= 0 else 0
-			if new_stall > params.max_stall_steps:
-				push_warning(
-					"TerrainGenerator: river walker stalled near %s (alt %d); aborting branch."
-					% [cell_xy, alt]
-				)
-				continue
-			walkers.append([nx, alt, ndir, new_stall, width])
+			# Same-tier wandering does NOT bump stall_count: the walker is
+			# still progressing along the river path, and an east-west
+			# meander on a long ridge is legitimate. The walker can't loop
+			# forever here — the U-turn check prevents 2-cycle oscillation,
+			# and `max_river_steps` (4096) caps total steps. Stall accounting
+			# only applies to the forced-south fallback path below, which is
+			# the truly degenerate case.
+			walkers.append([nx, alt, ndir, 0, width])
 			continue
 
 		# Neither downhill nor same-tier GROUND candidate exists. If SW is
@@ -486,12 +418,60 @@ static func _trace_rivers(
 			fall_cell.kind = TerrainCell.Kind.WATERFALL
 			fall_cell.altitude = alt
 			fall_cell.fall_rise_dir = DIR_NE
+			fall_cell.drop_height = alt - stalled.alt
 			fall_cell.river_width = width
 			var beyond: Vector2i = stalled.cell + stalled.dir
 			walkers.append([beyond, stalled.alt, stalled.dir, stall_next, width])
 			continue
 		here.water_flow = stalled.dir
 		walkers.append([stalled.cell, stalled.alt, stalled.dir, stall_next, width])
+
+
+# Gathers `same_tier` (GROUND face neighbors at the walker's altitude) and
+# `down_tier` (GROUND face neighbors at any even altitude in [alt-max_drop_hs,
+# alt-2]) for one step of the river walker.
+#
+# NE (the only -Y diamond step) is forbidden — the walker must never head
+# north, otherwise it can spiral. The U-turn check skips immediate reversals
+# of `last_dir` to prevent tight 2-cycle oscillation on lateral wandering.
+#
+# Down-tier candidates are constrained to NE-rise / NW-rise drops (only
+# paintable directions in the atlas) and rejected if they would form an
+# indented (concave) corner that the atlas can't render.
+#
+# Returns a dict {"same": Array[Vector2i], "down": Array[Vector2i]} so the
+# caller can pick from either bucket without re-scanning. Pure (no rng, no
+# mutation), to keep `_trace_rivers` focused on the decision logic.
+static func _collect_walk_candidates(
+	grid: TerrainGrid,
+	cell_xy: Vector2i,
+	alt: int,
+	last_dir: Vector2i,
+	max_drop_hs: int,
+) -> Dictionary:
+	var same_tier: Array[Vector2i] = []
+	var down_tier: Array[Vector2i] = []
+	for d in _DIRS:
+		if d == DIR_NE:
+			continue
+		if last_dir != Vector2i.ZERO and d == -last_dir:
+			continue
+		var n: Vector2i = cell_xy + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null:
+			continue
+		if nc.kind != TerrainCell.Kind.GROUND:
+			continue
+		if nc.altitude == alt:
+			same_tier.append(n)
+		elif nc.altitude < alt and nc.altitude >= alt - max_drop_hs:
+			var rise: Vector2i = -d
+			if rise != DIR_NE and rise != DIR_NW:
+				continue
+			if _would_indent_corner(grid, n, rise, alt):
+				continue
+			down_tier.append(n)
+	return {"same": same_tier, "down": down_tier}
 
 
 # True iff placing a waterfall at `cell` with rise direction `rise_dir` would
@@ -541,6 +521,36 @@ static func _next_width(parent_width: int, rng: RandomNumberGenerator) -> int:
 	return maxi(1, parent_width - 1)
 
 
+# Pick an index into `cands` weighted by both south-direction (dy > 0) and
+# drop height (alt - candidate.altitude). Used for selecting which lower
+# neighbor a river drops into when multiple legal drops exist.
+#
+# Weight per candidate: pow(2, drop_bias * (drop_cubes - 1)) * (1 + south_bias
+# if south-going else 1). With drop_bias == 0 (default) the drop term is 1.0
+# for every candidate, so this reduces to plain south-bias weighting.
+static func _pick_drop_candidate(
+	cands: Array[Vector2i],
+	grid: TerrainGrid,
+	from: Vector2i,
+	alt: int,
+	south_bias: float,
+	drop_bias: float,
+	rng: RandomNumberGenerator,
+) -> int:
+	if cands.size() == 1:
+		return 0
+	var weights: Array[float] = []
+	weights.resize(cands.size())
+	for i in cands.size():
+		var nc: TerrainCell = grid.at(cands[i].x, cands[i].y)
+		var drop_cubes: int = (alt - nc.altitude) / 2
+		var drop_w: float = pow(2.0, drop_bias * float(drop_cubes - 1))
+		var dy: int = cands[i].y - from.y
+		var south_w: float = 1.0 + (south_bias if dy > 0 else 0.0)
+		weights[i] = drop_w * south_w
+	return _weighted_pick(weights, rng)
+
+
 # Pick an index into `cands` weighted toward south-going (dy > 0) candidates.
 # Stable, simple weighting: each south-going candidate gets weight 1+south_bias,
 # others get weight 1. Falls back to a uniform pick if nothing is south-going.
@@ -552,21 +562,29 @@ static func _pick_south_biased(
 ) -> int:
 	if cands.size() == 1:
 		return 0
-	var total: float = 0.0
 	var weights: Array[float] = []
 	weights.resize(cands.size())
 	for i in cands.size():
 		var dy: int = cands[i].y - from.y
-		var w: float = 1.0 + (south_bias if dy > 0 else 0.0)
-		weights[i] = w
+		weights[i] = 1.0 + (south_bias if dy > 0 else 0.0)
+	return _weighted_pick(weights, rng)
+
+
+# Linear-scan weighted pick. Returns an index into `weights`, with each
+# index's selection probability proportional to its weight. Assumes weights
+# are non-negative and at least one is positive; falls back to the last
+# index if floating-point rounding overshoots the cumulative roll.
+static func _weighted_pick(weights: Array[float], rng: RandomNumberGenerator) -> int:
+	var total: float = 0.0
+	for w in weights:
 		total += w
 	var roll: float = rng.randf() * total
 	var acc: float = 0.0
-	for i in cands.size():
+	for i in weights.size():
 		acc += weights[i]
 		if roll <= acc:
 			return i
-	return cands.size() - 1
+	return weights.size() - 1
 
 
 # Helper return for `_force_south_step`. Stays a tiny inner class so the call
@@ -604,6 +622,11 @@ static func _force_south_step(
 			continue
 		if nc.kind != TerrainCell.Kind.GROUND:
 			continue
+		# Refuse to flow uphill, even on a stall: a higher SW neighbor would
+		# produce visible water-on-top-of-cliff. Caller's "boxed in" warning
+		# fires instead.
+		if nc.altitude > alt:
+			continue
 		# Adopt the neighbor's altitude so the river sits flush with the cell.
 		out.cell = n
 		out.alt = nc.altitude
@@ -612,39 +635,243 @@ static func _force_south_step(
 	return out
 
 
+# Guarantees that at least one river path reaches the south edge of the map
+# (y == height - 1). Walkers in `_trace_rivers` can terminate early by getting
+# boxed in, exceeding `max_stall_steps`, or merging into a sibling branch that
+# itself didn't reach south. This pass fixes those cases:
+#
+#   1. If any WATER/WATERFALL cell already sits on the south row, no-op.
+#   2. Otherwise, find the southmost river tip and walk SW from it. The walker
+#      reuses `_collect_walk_candidates` (drop / same-tier) and the same
+#      south-bias picks as the main trace, so its choices match the rest of
+#      the river. When no candidate exists, it forces SW with NO stall cap,
+#      walking through pre-existing water, lowering uphill GROUND, or clamping
+#      over-tall drops. The forced path may carve a slot canyon through tall
+#      terrain — preferable to silently failing the "river reaches the sea"
+#      invariant. After smoothing already capped jumps to max_drop_hs, this
+#      fallback rarely triggers.
+#
+# Runs before `_widen_rivers` and `_enforce_river_surroundings` so the extended
+# segment picks up width, banks, and a final smoothing pass like any other
+# river cell.
+static func _ensure_river_reaches_south(
+	grid: TerrainGrid,
+	params: TerrainGenerationParams,
+	rng: RandomNumberGenerator,
+	max_drop_hs: int,
+) -> void:
+	if _river_reaches_south(grid):
+		return
+	var tip: Vector2i = _find_southmost_river_tip(grid)
+	if tip.x < 0:
+		return
+	var width: int = maxi(1, grid.at(tip.x, tip.y).river_width)
+	var cur: Vector2i = tip
+	var alt: int = grid.at(tip.x, tip.y).altitude
+	var last_dir: Vector2i = Vector2i.ZERO
+
+	# A waterfall's grid position sits at the basin's coord but stores the
+	# UPPER-tier altitude — walking from there at upper alt would treat the
+	# basin as a fresh drop. Step past the waterfall to the basin tier first.
+	if grid.at(tip.x, tip.y).kind == TerrainCell.Kind.WATERFALL:
+		var lip: TerrainCell = grid.at(tip.x, tip.y)
+		var fd: Vector2i = -lip.fall_rise_dir
+		var basin_pos: Vector2i = tip + fd
+		if grid.in_bounds(basin_pos.x, basin_pos.y):
+			var basin_alt: int = lip.altitude - lip.drop_height
+			var bcell: TerrainCell = grid.at(basin_pos.x, basin_pos.y)
+			if bcell.kind == TerrainCell.Kind.GROUND:
+				bcell.kind = TerrainCell.Kind.WATER
+				bcell.altitude = basin_alt
+				bcell.water_flow = fd
+				bcell.river_width = maxi(bcell.river_width, width)
+			cur = basin_pos
+			alt = basin_alt
+			last_dir = fd
+
+	var safety: int = grid.width + grid.height + 8
+	while cur.y < grid.height - 1 and safety > 0:
+		safety -= 1
+		var here_cell: TerrainCell = grid.at(cur.x, cur.y)
+		var cands: Dictionary = _collect_walk_candidates(grid, cur, alt, last_dir, max_drop_hs)
+		var same_tier: Array[Vector2i] = cands["same"]
+		var down_tier: Array[Vector2i] = cands["down"]
+
+		if not down_tier.is_empty():
+			var di: int = _pick_drop_candidate(
+				down_tier, grid, cur, alt,
+				params.south_bias, params.drop_height_bias, rng,
+			)
+			var fall_to: Vector2i = down_tier[di]
+			var fall_dir: Vector2i = fall_to - cur
+			var fall_cell: TerrainCell = grid.at(fall_to.x, fall_to.y)
+			var lower_alt: int = fall_cell.altitude
+			if here_cell.kind == TerrainCell.Kind.WATER:
+				here_cell.water_flow = fall_dir
+			fall_cell.kind = TerrainCell.Kind.WATERFALL
+			fall_cell.altitude = alt
+			fall_cell.fall_rise_dir = -fall_dir
+			fall_cell.drop_height = alt - lower_alt
+			fall_cell.river_width = maxi(fall_cell.river_width, width)
+			var beyond: Vector2i = fall_to + fall_dir
+			var bc: TerrainCell = grid.at_or_null(beyond.x, beyond.y)
+			if bc != null and bc.kind == TerrainCell.Kind.GROUND:
+				bc.kind = TerrainCell.Kind.WATER
+				bc.altitude = lower_alt
+				bc.water_flow = fall_dir
+				bc.river_width = maxi(bc.river_width, width)
+			if not grid.in_bounds(beyond.x, beyond.y):
+				break
+			cur = beyond
+			alt = lower_alt
+			last_dir = fall_dir
+			continue
+
+		if not same_tier.is_empty():
+			var si: int = _pick_south_biased(same_tier, cur, params.south_bias, rng)
+			var nx: Vector2i = same_tier[si]
+			var ndir: Vector2i = nx - cur
+			if here_cell.kind == TerrainCell.Kind.WATER:
+				here_cell.water_flow = ndir
+			var nc: TerrainCell = grid.at(nx.x, nx.y)
+			nc.kind = TerrainCell.Kind.WATER
+			nc.altitude = alt
+			nc.water_flow = ndir
+			nc.river_width = maxi(nc.river_width, width)
+			cur = nx
+			last_dir = ndir
+			continue
+
+		# No legal forward step — force SW. The candidate collector excludes
+		# uphill GROUND, water neighbors, and over-cap drops; this branch
+		# handles each of those by tunneling rather than aborting.
+		var sw: Vector2i = cur + DIR_SW
+		var swc: TerrainCell = grid.at_or_null(sw.x, sw.y)
+		if swc == null:
+			break
+		if here_cell.kind == TerrainCell.Kind.WATER:
+			here_cell.water_flow = DIR_SW
+
+		if swc.kind == TerrainCell.Kind.WATER or swc.kind == TerrainCell.Kind.WATERFALL:
+			# Walk through existing water; adopt its altitude so subsequent
+			# steps flow at the correct tier.
+			cur = sw
+			alt = swc.altitude
+			last_dir = DIR_SW
+			continue
+
+		# GROUND neighbor that the candidate collector rejected: either uphill,
+		# or a drop deeper than max_drop_hs.
+		if swc.altitude > alt:
+			# Uphill — tunnel by lowering it. Smoothing has already run, so
+			# the delta is small (≤ max_drop_hs); leaves a slot-canyon-style
+			# gap with the lateral banks staying tall.
+			swc.kind = TerrainCell.Kind.WATER
+			swc.altitude = alt
+			swc.water_flow = DIR_SW
+			swc.river_width = maxi(swc.river_width, width)
+			cur = sw
+			last_dir = DIR_SW
+		else:
+			# Drop > max_drop_hs. Clamp basin altitude so the painted column
+			# fits the atlas's stacked TOP/NONE/BOTTOM range.
+			var lower_alt: int = maxi(alt - max_drop_hs, swc.altitude)
+			swc.kind = TerrainCell.Kind.WATERFALL
+			swc.altitude = alt
+			swc.fall_rise_dir = DIR_NE
+			swc.drop_height = alt - lower_alt
+			swc.river_width = maxi(swc.river_width, width)
+			var beyond2: Vector2i = sw + DIR_SW
+			var bc2: TerrainCell = grid.at_or_null(beyond2.x, beyond2.y)
+			if bc2 != null and bc2.kind == TerrainCell.Kind.GROUND:
+				bc2.kind = TerrainCell.Kind.WATER
+				bc2.altitude = lower_alt
+				bc2.water_flow = DIR_SW
+				bc2.river_width = maxi(bc2.river_width, width)
+			if not grid.in_bounds(beyond2.x, beyond2.y):
+				break
+			cur = beyond2
+			alt = lower_alt
+			last_dir = DIR_SW
+
+	if not _river_reaches_south(grid):
+		push_warning(
+			"TerrainGenerator: failed to extend river to south edge from %s"
+			% [tip]
+		)
+
+
+static func _river_reaches_south(grid: TerrainGrid) -> bool:
+	var y: int = grid.height - 1
+	for x in grid.width:
+		var c: TerrainCell = grid.at(x, y)
+		if c.kind == TerrainCell.Kind.WATER or c.kind == TerrainCell.Kind.WATERFALL:
+			return true
+	return false
+
+
+# Southmost river cell, tiebreak by lowest altitude (closer to having descended
+# the cone). Used as the start of the south-edge extension.
+static func _find_southmost_river_tip(grid: TerrainGrid) -> Vector2i:
+	var best: Vector2i = Vector2i(-1, -1)
+	var best_y: int = -1
+	var best_alt: int = 0x7FFFFFFF
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.WATER and c.kind != TerrainCell.Kind.WATERFALL:
+				continue
+			if y > best_y or (y == best_y and c.altitude < best_alt):
+				best_y = y
+				best_alt = c.altitude
+				best = Vector2i(x, y)
+	return best
+
+
 static func _find_lake_outlet(
 	grid: TerrainGrid,
-	params: Params,
+	params: TerrainGenerationParams,
 	lake_center: Vector2i,
 ) -> Vector2i:
-	# Outlet = the lake cell furthest into the descending side of the cone.
-	# Cone apex is at small (x, y); altitude falls with distance from apex,
-	# so "downhill" maximizes x + y. Pick the lake cell with max (x + y) that
-	# has any GROUND face neighbor (regardless of altitude — neighbor cells
-	# close to the apex can saturate at top_altitude after snap+noise; the
-	# walker handles meandering and eventual drops itself).
+	# Outlet = the lake-edge cell whose lowest GROUND face neighbor is the
+	# lowest in the lake. Tie-break first by `x + y` (further down the cone),
+	# then by distance to lake_center. Ranking by neighbor altitude (rather
+	# than the older `x + y` heuristic) is robust to apex jitter, lake
+	# stretching, and post-smoothing terrain — wherever the actual lowest
+	# neighbor sits, that's where the river leaves.
+	var best_neighbor_alt: int = 0x7FFFFFFF
 	var best_score: int = -1
+	var best_dist: int = 0x7FFFFFFF
 	var best: Vector2i = Vector2i(-1, -1)
-	var best_dx: int = 0x7FFFFFFF
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
 			if c.kind != TerrainCell.Kind.WATER:
 				continue
-			var has_land_neighbor := false
+			var min_neighbor_alt: int = 0x7FFFFFFF
 			for d in _DIRS:
 				var n: Vector2i = Vector2i(x, y) + d
 				var nc: TerrainCell = grid.at_or_null(n.x, n.y)
-				if nc != null and nc.kind == TerrainCell.Kind.GROUND:
-					has_land_neighbor = true
-					break
-			if not has_land_neighbor:
-				continue
+				if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+					continue
+				if nc.altitude < min_neighbor_alt:
+					min_neighbor_alt = nc.altitude
+			if min_neighbor_alt == 0x7FFFFFFF:
+				continue  # no GROUND face neighbor
 			var score: int = x + y
-			var dx: int = absi(x - lake_center.x) + absi(y - lake_center.y)
-			if score > best_score or (score == best_score and dx < best_dx):
+			var dist: int = absi(x - lake_center.x) + absi(y - lake_center.y)
+			var better: bool = false
+			if min_neighbor_alt < best_neighbor_alt:
+				better = true
+			elif min_neighbor_alt == best_neighbor_alt:
+				if score > best_score:
+					better = true
+				elif score == best_score and dist < best_dist:
+					better = true
+			if better:
+				best_neighbor_alt = min_neighbor_alt
 				best_score = score
-				best_dx = dx
+				best_dist = dist
 				best = Vector2i(x, y)
 	return best
 
@@ -659,7 +886,7 @@ static func _find_lake_outlet(
 # per (upper-plateau) connected component.
 static func _place_slopes(
 	grid: TerrainGrid,
-	params: Params,
+	params: TerrainGenerationParams,
 	rng: RandomNumberGenerator,
 ) -> void:
 	# First pass: probabilistic slopes.
@@ -676,40 +903,125 @@ static func _place_slopes(
 		if here.kind != TerrainCell.Kind.GROUND or here.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
 			continue
 		var uphill_dirs: Array[Vector2i] = _uphill_neighbors(grid, c, here.altitude)
-		if uphill_dirs.is_empty():
+		# Filter to rise directions where the slope is geometrically valid:
+		# walkable low approach AND no lateral drops. Slopes have a tapered
+		# body, so any face neighbor below the slope's altitude exposes the
+		# underside as void — better to reject the placement than back-fill.
+		var valid_dirs: Array[Vector2i] = []
+		for d in uphill_dirs:
+			if _is_slope_geometrically_valid(grid, c, d, here.altitude):
+				valid_dirs.append(d)
+		if valid_dirs.is_empty():
 			continue
 		if rng.randf() >= params.slope_chance:
 			continue
-		var d: Vector2i = uphill_dirs[rng.randi_range(0, uphill_dirs.size() - 1)]
+		var d: Vector2i = valid_dirs[rng.randi_range(0, valid_dirs.size() - 1)]
 		here.ground_shape = _slope_shape_for(d)
 
-	# Second pass: per upper-plateau, ensure at least one tier-T slope leads
-	# to it. A "plateau" here is a connected component of cells with the same
-	# altitude > 0; we don't need exact components — guaranteeing per-cell
-	# coverage that at least one neighbor is a valid slope is sufficient and
-	# much simpler. So: for every cell with altitude > 0, if no tier-(alt-2)
-	# neighbor is already a slope rising into us, force one.
+	# Second pass: per-component reachability. Group same-altitude GROUND cells
+	# into connected plateaus (face-adjacency flood-fill). For each plateau at
+	# altitude > 0, ensure at least ONE cell in the plateau has an incoming
+	# slope from a tier-(alt-2) neighbor; if not, force one. Per-component
+	# (rather than per-cell) keeps total slope count proportional to the
+	# number of plateaus, not the number of cells, so slope_chance dominates
+	# the visual density on the slopes themselves.
+	var visited: Dictionary = {}
 	for y in grid.height:
 		for x in grid.width:
-			var top: TerrainCell = grid.at(x, y)
-			if top.kind != TerrainCell.Kind.GROUND or top.altitude == 0:
+			var start := Vector2i(x, y)
+			if visited.has(start):
 				continue
-			if _has_incoming_slope(grid, Vector2i(x, y), top.altitude):
+			visited[start] = true
+			var c0: TerrainCell = grid.at(x, y)
+			if c0.kind != TerrainCell.Kind.GROUND or c0.altitude == 0:
 				continue
-			# Find a tier-(alt-2) neighbor in any direction we can convert.
-			# Candidate dirs: directions FROM the lower neighbor TO us (i.e.
-			# the slope rises in -d direction relative to the lower cell).
-			for d in _DIRS:
-				var lower: Vector2i = Vector2i(x, y) + d
-				var lc: TerrainCell = grid.at_or_null(lower.x, lower.y)
-				if lc == null or lc.kind != TerrainCell.Kind.GROUND:
-					continue
-				if lc.altitude != top.altitude - 2:
-					continue
-				if lc.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
-					continue
-				lc.ground_shape = _slope_shape_for(-d)
-				break
+			var alt: int = c0.altitude
+			var component: Array[Vector2i] = [start]
+			var queue: Array[Vector2i] = [start]
+			while not queue.is_empty():
+				var cur: Vector2i = queue.pop_back()
+				for d2 in _DIRS:
+					var n: Vector2i = cur + d2
+					if visited.has(n):
+						continue
+					var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+					if nc == null:
+						continue
+					if nc.kind != TerrainCell.Kind.GROUND or nc.altitude != alt:
+						continue
+					visited[n] = true
+					component.append(n)
+					queue.append(n)
+			var has_entry: bool = false
+			for cell_xy in component:
+				if _has_incoming_slope(grid, cell_xy, alt):
+					has_entry = true
+					break
+			if has_entry:
+				continue
+			# No incoming slope yet — force one. Find any (alt-2) FULL_CUBE
+			# face-neighbor of any plateau cell that ALSO has a walkable cell
+			# at its low approach (so the slope is usable from the lower side
+			# rather than dangling off a cliff). If no such neighbor exists,
+			# leave this plateau without an entry — it's intentionally
+			# cliff-only reachable.
+			var placed: bool = false
+			for cell_xy in component:
+				if placed:
+					break
+				for d3 in _DIRS:
+					var lower: Vector2i = cell_xy + d3
+					var lc: TerrainCell = grid.at_or_null(lower.x, lower.y)
+					if lc == null or lc.kind != TerrainCell.Kind.GROUND:
+						continue
+					if lc.altitude != alt - 2:
+						continue
+					if lc.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
+						continue
+					var rise_dir: Vector2i = -d3
+					if not _is_slope_geometrically_valid(grid, lower, rise_dir, alt - 2):
+						continue
+					lc.ground_shape = _slope_shape_for(rise_dir)
+					placed = true
+					break
+
+
+# A slope at `pos` rising in `rise_dir` is geometrically valid iff:
+#   - The opposite-of-rise neighbor (low approach) is GROUND at altitude `alt`
+#     so the player can step onto the slope's low end.
+#   - The two lateral neighbors (perpendicular to rise) are GROUND at altitude
+#     >= alt, so the slope's lateral sides don't expose a cliff face.
+# (The uphill direction is implicitly at alt+2 — caller validates via
+# `_uphill_neighbors` before calling this.)
+#
+# Slope tiles render with a tapered body (full-cube height at the back, zero
+# at the front), so any direction with a lower neighbor leaves the slope's
+# underside visible as void. Rejecting those placements is cleaner than
+# back-filling cubes that would visually conflict with the slope's tapered
+# graphic.
+static func _is_slope_geometrically_valid(
+	grid: TerrainGrid,
+	pos: Vector2i,
+	rise_dir: Vector2i,
+	alt: int,
+) -> bool:
+	var low_approach: Vector2i = pos - rise_dir
+	var lac: TerrainCell = grid.at_or_null(low_approach.x, low_approach.y)
+	if lac == null or lac.kind != TerrainCell.Kind.GROUND or lac.altitude != alt:
+		return false
+	# Laterals are the two directions perpendicular to rise_dir.
+	for d in _DIRS:
+		if d == rise_dir or d == -rise_dir:
+			continue
+		var n: Vector2i = pos + d
+		var nc: TerrainCell = grid.at_or_null(n.x, n.y)
+		if nc == null:
+			return false
+		if nc.kind != TerrainCell.Kind.GROUND:
+			return false
+		if nc.altitude < alt:
+			return false
+	return true
 
 
 # Returns the diamond-face directions in which (cell)'s neighbor is one
@@ -770,18 +1082,20 @@ static func _slope_rise_vector(shape: int) -> Vector2i:
 # Step 2.5 / 5.5: smooth altitude jumps
 # ----------------------------------------------------------------------------
 
-# Ensures no GROUND cell has a neighbor more than 2 half-steps higher. Any
-# violation raises the offending cell to (max_neighbor_altitude - 2). Only
-# raises (never lowers); only mutates GROUND cells, leaving river/lake
-# altitudes invariant. Iterates to a fixed point so cascading raises
-# propagate outward — e.g. a lake at alt 16 next to ground at alt 12 first
-# raises that ground to 14, and a subsequent pass leaves cells at 12 alone
-# because their highest neighbor is now 14 (jump = 2, allowed).
+# Ensures no GROUND cell has a neighbor more than `max_drop_hs` half-steps
+# higher. Any violation raises the offending cell to
+# (max_neighbor_altitude - max_drop_hs). Only raises (never lowers); only
+# mutates GROUND cells, leaving river/lake altitudes invariant. Iterates to
+# a fixed point so cascading raises propagate outward.
 #
-# Runs after `_carve_lake` (so the trace sees a smooth field and can place
-# waterfalls at lake exits) and again after `_enforce_river_surroundings`
-# (which lifts banks and can re-introduce jumps a tier further out).
-static func _smooth_altitude_jumps(grid: TerrainGrid) -> void:
+# `max_drop_hs` must be a positive even number. With 2, this is the original
+# step-1 behavior. With 8 (= 4 cubes), tall cliffs are allowed.
+#
+# Runs after `_carve_lake` (so the trace sees a bounded field and can decide
+# how tall a waterfall to place at lake exits) and again after
+# `_enforce_river_surroundings` (which lifts banks and can re-introduce
+# jumps a tier further out).
+static func _smooth_altitude_jumps(grid: TerrainGrid, max_drop_hs: int) -> void:
 	var max_iter: int = 32
 	var changed: bool = true
 	while changed and max_iter > 0:
@@ -803,8 +1117,8 @@ static func _smooth_altitude_jumps(grid: TerrainGrid) -> void:
 						continue
 					if nc.altitude > max_alt:
 						max_alt = nc.altitude
-				if max_alt > c.altitude + 2:
-					c.altitude = max_alt - 2
+				if max_alt > c.altitude + max_drop_hs:
+					c.altitude = max_alt - max_drop_hs
 					changed = true
 
 
@@ -825,15 +1139,24 @@ const _WIDEN_OFFSET: Vector2i = Vector2i(1, 0)
 
 
 static func _widen_rivers(grid: TerrainGrid) -> void:
-	# Snapshot centerline (kind, altitude, flow, rise, width) before mutating
-	# so the widened cells we add this pass don't get re-widened in turn.
+	# Snapshot centerline (kind, altitude, flow, width) before mutating so the
+	# widened cells we add this pass don't get re-widened in turn.
+	#
+	# Waterfalls are intentionally NOT widened. The widening offset is fixed
+	# `(+1, 0)` (SE), but for an NE-rise waterfall the fall direction is SW —
+	# orthogonal to widening. The widened sibling would be a free-standing
+	# waterfall whose basin cell is plain GROUND, and the surroundings pass
+	# would lift that GROUND up to the lip altitude, leaving the column to
+	# render onto solid plateau. Letting waterfall lips stay narrow looks fine
+	# and avoids the orphan-column class of bug. Wide rivers reconverge on the
+	# lower tier where regular WATER cells widen normally.
 	var centerlines: Array = []
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
 			if c.river_width <= 1:
 				continue
-			if c.kind != TerrainCell.Kind.WATER and c.kind != TerrainCell.Kind.WATERFALL:
+			if c.kind != TerrainCell.Kind.WATER:
 				continue
 			centerlines.append([Vector2i(x, y), c])
 
@@ -853,8 +1176,10 @@ static func _widen_rivers(grid: TerrainGrid) -> void:
 			nc.kind = c.kind
 			nc.altitude = c.altitude
 			nc.water_flow = c.water_flow
-			nc.fall_rise_dir = c.fall_rise_dir
 			nc.river_width = c.river_width
+			# fall_rise_dir / drop_height are WATERFALL-only; centerline is
+			# guaranteed kind == WATER above, so leave the defaults on the
+			# widened sibling (no inherited stale waterfall metadata).
 
 
 # ----------------------------------------------------------------------------
@@ -903,7 +1228,7 @@ static func _enforce_river_surroundings(grid: TerrainGrid) -> void:
 #   ( 8, 12] → ROCK
 #   (12, 16] → SNOW
 # Local noise perturbs the band threshold up to ±biome_noise_amplitude.
-static func _assign_biomes(grid: TerrainGrid, params: Params, noise: FastNoiseLite) -> void:
+static func _assign_biomes(grid: TerrainGrid, params: TerrainGenerationParams, noise: FastNoiseLite) -> void:
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
@@ -911,6 +1236,7 @@ static func _assign_biomes(grid: TerrainGrid, params: Params, noise: FastNoiseLi
 				continue
 			var n: float = noise.get_noise_2d(x, y) * params.biome_noise_amplitude
 			var perturbed: float = float(c.altitude) + n
+			c.biome_score = perturbed
 			c.biome = _biome_for(perturbed)
 
 
@@ -930,10 +1256,14 @@ static func _biome_for(alt: float) -> int:
 
 # Water cells along the river are assigned `water_flow` directly during
 # `_trace_rivers` — the walker knows each step's direction, so flow is
-# recorded as the river is laid down. This pass is a safety net for any
-# water cell that ended up with ZERO flow but actually borders a waterfall
-# (e.g. cells the trace visited but couldn't progress from). Lake-interior
-# cells deliberately stay at ZERO (still water).
+# recorded as the river is laid down. Widened siblings inherit the
+# centerline's flow in `_widen_rivers`. Lake-interior cells deliberately
+# stay at ZERO (still water).
+#
+# This pass is a safety net for the rare case where a WATER cell ended up
+# adjacent to a WATERFALL whose rise points back at it (e.g. an unusual
+# topology produced by widening or branch merge). It's defensive — the
+# common path is already covered. Cheap O(N) scan; keep.
 static func _assign_water_flow(grid: TerrainGrid) -> void:
 	for y in grid.height:
 		for x in grid.width:
