@@ -14,17 +14,22 @@ func _init() -> void:
 		seed_arg = int(args[0])
 	var params := TerrainGenerationParams.new()
 	params.seed = seed_arg
-	params.width = 32
+	params.width = 48
 	params.height = 48
 	params.top_altitude = 16
-	params.apex_x_jitter_frac = 0.15
-	params.cone_steepness = 1.0
-	params.south_bias = 0.5
-	params.branch_chance = 0.25
-	params.slope_chance = 0.35
-	params.lake_radius = 2.6
+	params.noise_frequency = 0.05
+	params.noise_strength = 0.6
+	params.weight_n = 1.0
+	params.weight_ne = 0.6
+	params.weight_nw = 0.6
+	params.disc_center_x_frac = 0.35
+	params.disc_center_y_frac = 0.35
+	params.disc_radius_frac = 0.55
+	params.disc_edge_jitter = 0.35
+	params.lake_radius = 2.8
+	params.lake_back_margin = 2
+	params.south_bias = 1.0
 	params.max_drop_cubes = 4
-	params.drop_height_bias = 0.0
 
 	var t0: int = Time.get_ticks_msec()
 	var grid: TerrainGrid = TerrainGenerator.generate(params)
@@ -32,8 +37,6 @@ func _init() -> void:
 
 	var alt_counts: Dictionary = {}
 	var kind_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0}
-	var biome_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0}
-	var shape_counts: Dictionary = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
 	var drop_counts: Dictionary = {}
 	var max_alt: int = 0
 	var min_alt: int = 999
@@ -46,10 +49,7 @@ func _init() -> void:
 			alt_counts[c.altitude] = alt_counts.get(c.altitude, 0) + 1
 			max_alt = maxi(max_alt, c.altitude)
 			min_alt = mini(min_alt, c.altitude)
-			if c.kind == TerrainCell.Kind.GROUND:
-				biome_counts[c.biome] = biome_counts.get(c.biome, 0) + 1
-				shape_counts[c.ground_shape] = shape_counts.get(c.ground_shape, 0) + 1
-			elif c.kind == TerrainCell.Kind.WATERFALL:
+			if c.kind == TerrainCell.Kind.WATERFALL:
 				drop_counts[c.drop_height] = drop_counts.get(c.drop_height, 0) + 1
 
 	print("--- TerrainGenerator smoke test ---")
@@ -60,20 +60,6 @@ func _init() -> void:
 		kind_counts.get(TerrainCell.Kind.GROUND, 0),
 		kind_counts.get(TerrainCell.Kind.WATER, 0),
 		kind_counts.get(TerrainCell.Kind.WATERFALL, 0),
-	])
-	print("biome: GRASS=%d DIRT=%d ROCK=%d SNOW=%d" % [
-		biome_counts.get(TerrainCell.Biome.GRASS, 0),
-		biome_counts.get(TerrainCell.Biome.DIRT, 0),
-		biome_counts.get(TerrainCell.Biome.ROCK, 0),
-		biome_counts.get(TerrainCell.Biome.SNOW, 0),
-	])
-	print("shape: FULL_CUBE=%d FLAT=%d SLOPE_NE=%d SLOPE_NW=%d SLOPE_SE=%d SLOPE_SW=%d" % [
-		shape_counts.get(TerrainCell.GroundShape.FULL_CUBE, 0),
-		shape_counts.get(TerrainCell.GroundShape.FLAT, 0),
-		shape_counts.get(TerrainCell.GroundShape.SLOPE_NE, 0),
-		shape_counts.get(TerrainCell.GroundShape.SLOPE_NW, 0),
-		shape_counts.get(TerrainCell.GroundShape.SLOPE_SE, 0),
-		shape_counts.get(TerrainCell.GroundShape.SLOPE_SW, 0),
 	])
 	var alt_keys: Array = alt_counts.keys()
 	alt_keys.sort()

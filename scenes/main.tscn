@@ -5,6 +5,6 @@
 
 [node name="Main" type="Node2D" unique_id=196845560]
 
-[node name="Level1" parent="." unique_id=209007275 instance=ExtResource("1_level1")]
+[node name="ProceduralTest" parent="." unique_id=1959178868 instance=ExtResource("1_level1")]
 
 [node name="DebugOverlay" parent="." unique_id=1077235885 instance=ExtResource("2_dbg")]

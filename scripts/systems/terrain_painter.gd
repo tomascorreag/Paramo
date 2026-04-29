@@ -258,17 +258,10 @@ static func _paint_ground_cliff_back(
 
 
 # Mirrors `_biome_for` in terrain_generator.gd, sans noise. Used by
-# cliff-back painting where we need a biome per altitude tier without a
-# per-cell biome_score to read from. Bands: [0,4]=GRASS, (4,8]=DIRT,
-# (8,12]=ROCK, (12,top]=SNOW.
-static func _biome_for_altitude_band(alt: int) -> int:
-	if alt <= 4:
-		return TerrainCell.Biome.GRASS
-	if alt <= 8:
-		return TerrainCell.Biome.DIRT
-	if alt <= 12:
-		return TerrainCell.Biome.ROCK
-	return TerrainCell.Biome.SNOW
+# cliff-back painting. The generator now returns GRASS for every altitude;
+# kept as a function so cliff-back code keeps a single source of truth.
+static func _biome_for_altitude_band(_alt: int) -> int:
+	return TerrainCell.Biome.GRASS
 
 
 static func _paint_water(

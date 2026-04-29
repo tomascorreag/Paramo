@@ -27,8 +27,6 @@ extends Node
 ##
 ## seed_override = -1  → use generation_params.seed
 @export var seed_override: int = -1
-## cone_steepness_override < 0  → use generation_params.cone_steepness
-@export var cone_steepness_override: float = -1.0
 
 @export_group("Wiring")
 ## Ground TileMapLayers indexed by altitude. Drag the layers in low-to-high.
@@ -111,8 +109,6 @@ func _resolve_params() -> TerrainGenerationParams:
 		p = TerrainGenerationParams.new()
 	if seed_override >= 0:
 		p.seed = seed_override
-	if cone_steepness_override >= 0.0:
-		p.cone_steepness = cone_steepness_override
 	p.top_altitude = _ensure_even(p.top_altitude)
 	return p
 
