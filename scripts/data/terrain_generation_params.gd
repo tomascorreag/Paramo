@@ -233,6 +233,18 @@ extends Resource
 ## given the heightfield's smoothness).
 @export_range(1, 8, 1) var max_drop_cubes: int = 4
 
+## Per-step probability that the river walker spawns a tributary at the
+## unchosen SE/SW candidate. 0 = no branches (single river, current
+## behavior). 0.1 = on a 30-step river, ~3 branches on average. Branches are
+## single-depth (they don't recursively branch), run after the primary
+## walker completes, and don't widen. A branch that boxes in early simply
+## stops — it doesn't have to reach the south boundary.
+##
+## Capped at 0.5 to avoid pathological maps where a branch spawns at every
+## step. Branches CAN modify cells the primary walker already touched (no
+## merge logic): if a branch crosses the primary path, both cells stay WATER.
+@export_range(0.0, 0.5, 0.05) var river_branch_chance: float = 0.0
+
 
 # --- Corner rounding --------------------------------------------------------
 

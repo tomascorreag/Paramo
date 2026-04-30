@@ -284,31 +284,64 @@ static func _paint_waterfall_column(
 	pos: Vector2i,
 	c: TerrainCell,
 ) -> void:
-	# Stacked waterfall: one tile per altitude tier from the lip down to the
-	# bottommost fall tile. drop_height == 2 is a single-tile drop and uses
-	# FALL_*_BOTH (lip + splash in one tile). Taller columns use TOP at the
-	# lip, BOTTOM at the bottom, and NONE in between (continuous water, no
-	# rock framing).
+	# Stacked waterfall: one tile per altitude tier from the highest lip down
+	# to the basin+2 row.
+	#
+	# Single-face fall (fall_rise_dir_b == ZERO):
+	#   - drop_height == 2  → FALL_*_BOTH single tile (lip + splash)
+	#   - drop_height >= 4  → FALL_*_TOP at the lip, FALL_*_BOTTOM at basin+2,
+	#                         FALL_*_NONE for any tier in between
+	#
+	# Corner fall (fall_rise_dir_b != ZERO):
+	#   - Tiers where BOTH faces have water → single FALL_NENW tile
+	#   - Tiers above the shorter face's lip (asymmetric drops) → solo face
+	#     uses the existing FALL_*_TOP/NONE family for the taller column
+	#   - Both faces share the basin at altitude - drop_height; lip_b is
+	#     basin + drop_height_b (may differ from altitude / lip_a)
 	var idx: TileKindIndex = indices[SOURCE_WATER]
-	var rise: Vector2i = c.fall_rise_dir
-	var top: int = c.altitude
-	var bottom: int = c.altitude - c.drop_height + 2
-	var flow: Vector2i = -rise
+	var rise_a: Vector2i = c.fall_rise_dir
+	var rise_b: Vector2i = c.fall_rise_dir_b
+	var has_b: bool = rise_b != Vector2i.ZERO
+	var basin: int = c.altitude - c.drop_height
+	var lip_a: int = c.altitude
+	var lip_b: int = basin + c.drop_height_b
+	var bottom: int = basin + 2
+	var top: int = maxi(lip_a, lip_b) if has_b else lip_a
 	var alt: int = top
 	while alt >= bottom:
-		var kind: StringName
-		if c.drop_height == 2:
-			kind = _fall_kind_for_rise_and_position(rise, &"BOTH")
-		elif alt == top:
-			kind = _fall_kind_for_rise_and_position(rise, &"TOP")
-		elif alt == bottom:
-			kind = _fall_kind_for_rise_and_position(rise, &"BOTTOM")
-		else:
-			kind = _fall_kind_for_rise_and_position(rise, &"NONE")
+		var a_active: bool = alt <= lip_a
+		var b_active: bool = has_b and alt <= lip_b
+		var kind: StringName = &""
+		var flow: Vector2i = -rise_a
+		if a_active and b_active:
+			kind = TileSlots.FALL_NENW
+		elif a_active:
+			kind = _fall_kind_for_rise_and_position(
+				rise_a, _fall_position_for(alt, lip_a, basin, c.drop_height)
+			)
+		elif b_active:
+			kind = _fall_kind_for_rise_and_position(
+				rise_b, _fall_position_for(alt, lip_b, basin, c.drop_height_b)
+			)
+			flow = -rise_b
 		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
 		if layer != null:
 			_set_water_cell(layer, idx, pos, kind, flow)
 		alt -= 2
+
+
+# Resolves the TOP/BOTTOM/BOTH/NONE position suffix for one face of a
+# waterfall column. `lip` and `drop` describe THAT face's column; `basin` is
+# shared. drop == 2 collapses to BOTH (single-tile fall). For taller columns,
+# lip → TOP, basin+2 → BOTTOM, anything between → NONE.
+static func _fall_position_for(alt: int, lip: int, basin: int, drop: int) -> StringName:
+	if drop == 2:
+		return &"BOTH"
+	if alt == lip:
+		return &"TOP"
+	if alt == basin + 2:
+		return &"BOTTOM"
+	return &"NONE"
 
 
 # Shared painter for any water/waterfall cell. Tries `kind` first; if not
@@ -359,7 +392,9 @@ static func _paint_under_waterfall(
 	var idx: TileKindIndex = indices[SOURCE_WATER]
 	var basin_alt: int = c.altitude - c.drop_height
 	var mask: int = _basin_shore_mask(grid, pos, basin_alt)
-	var kind: StringName = _basin_kind_for_mask(mask, c.fall_rise_dir)
+	var kind: StringName = _basin_kind_for_mask(mask, c.fall_rise_dir, c.fall_rise_dir_b)
+	# Basin flow follows the primary face (the secondary face's walker
+	# terminates on corner upgrade, so primary's continuation owns the basin).
 	var flow: Vector2i = -c.fall_rise_dir
 	_set_water_cell(lower_layer, idx, pos, kind, flow)
 
@@ -399,10 +434,17 @@ static func _basin_neighbor_is_basin_water(
 # Basin-specific shore resolver. The cliff face is rendered by the waterfall
 # tile on the upper layer, so we strip the cliff direction from the mask and
 # then resolve to a single EDGE_* tile pointing at the river bank. No corner
-# tiles — the basin shows at most one shore edge.
-static func _basin_kind_for_mask(mask: int, rise_dir: Vector2i) -> StringName:
+# tiles — the basin shows at most one shore edge. For corner falls (two
+# perpendicular cliff faces), strip both rise directions.
+static func _basin_kind_for_mask(
+	mask: int,
+	rise_dir: Vector2i,
+	rise_dir_b: Vector2i = Vector2i.ZERO,
+) -> StringName:
 	var face: int = mask & 0xF
 	face &= ~_face_bit_for_dir(rise_dir)
+	if rise_dir_b != Vector2i.ZERO:
+		face &= ~_face_bit_for_dir(rise_dir_b)
 	if face == 0:
 		return TileSlots.WATER_FLAT
 	if face == 1: return TileSlots.EDGE_NE

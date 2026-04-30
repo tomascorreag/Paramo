@@ -226,6 +226,10 @@ func _cell_visual_surface_global(cell: Vector2i) -> Vector2:
 func _update_label() -> void:
 	if debug_label == null:
 		return
+	if not Debug.enabled and not enabled:
+		debug_label.visible = false
+		return
+	debug_label.visible = true
 	var fps: int = int(Engine.get_frames_per_second())
 	var draws: int = int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
 	var nodes: int = int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))

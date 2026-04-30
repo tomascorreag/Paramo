@@ -102,7 +102,9 @@ static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 	_enforce_south_descent(grid)
 	if peak_center.x >= 0:
 		_trace_simple_river(grid, params, rng, peak_center, max_drop_hs)
+		_emit_perpendicular_falls(grid, max_drop_hs)
 	_support_water(grid)
+	_remove_islands(grid)
 	_assign_biomes(grid, params, biome_noise)
 	_assign_shore_masks(grid)
 
@@ -194,6 +196,85 @@ static func _fill_heightfield(
 			cell.kind = TerrainCell.Kind.GROUND
 			cell.altitude = snapped
 			cell.ground_shape = TerrainCell.GroundShape.FULL_CUBE
+
+
+# Disc-mask noise and later passes (lake carve, river tracing, corner rounding)
+# can leave small pockets of non-EMPTY cells separated from the main landmass
+# by a ring of EMPTY. These read as floating "islands" in the painter and
+# aren't intended. Keep only the largest 4-connected component of non-EMPTY
+# cells (face neighbors only, no diagonals — diagonal-only adjacency still
+# counts as disconnected) and carve every other non-EMPTY cell back to EMPTY.
+#
+# Connectivity treats GROUND, WATER, and WATERFALL as a single "terrain"
+# class joined by EMPTY voids, so a continent split by a lake or river still
+# reads as one component (the lake/river is a bridge, not a break). Runs at
+# the very end of generation (after _support_water, before _assign_biomes /
+# _assign_shore_masks) so every kind-mutating pass has had its say.
+#
+# Tie-break for largest: first-seen, deterministic at fixed seed.
+static func _remove_islands(grid: TerrainGrid) -> void:
+	var w: int = grid.width
+	var h: int = grid.height
+	var component_id := PackedInt32Array()
+	component_id.resize(w * h)
+	for i in component_id.size():
+		component_id[i] = -1
+	var component_sizes: Array[int] = []
+	var largest_id: int = -1
+	var largest_size: int = 0
+
+	for sy in h:
+		for sx in w:
+			var seed_cell: TerrainCell = grid.at(sx, sy)
+			if seed_cell.kind == TerrainCell.Kind.EMPTY:
+				continue
+			var seed_idx: int = sy * w + sx
+			if component_id[seed_idx] != -1:
+				continue
+			var cid: int = component_sizes.size()
+			component_sizes.append(0)
+			var frontier: Array[Vector2i] = [Vector2i(sx, sy)]
+			component_id[seed_idx] = cid
+			var head: int = 0
+			while head < frontier.size():
+				var pos: Vector2i = frontier[head]
+				head += 1
+				component_sizes[cid] += 1
+				for d in _DIRS:
+					var np: Vector2i = pos + d
+					if not grid.in_bounds(np.x, np.y):
+						continue
+					var nidx: int = np.y * w + np.x
+					if component_id[nidx] != -1:
+						continue
+					var nc: TerrainCell = grid.at(np.x, np.y)
+					if nc.kind == TerrainCell.Kind.EMPTY:
+						continue
+					component_id[nidx] = cid
+					frontier.append(np)
+			if component_sizes[cid] > largest_size:
+				largest_size = component_sizes[cid]
+				largest_id = cid
+
+	if largest_id == -1:
+		return
+	for y in h:
+		for x in w:
+			var idx: int = y * w + x
+			var cell_cid: int = component_id[idx]
+			if cell_cid == -1 or cell_cid == largest_id:
+				continue
+			var c: TerrainCell = grid.at(x, y)
+			c.kind = TerrainCell.Kind.EMPTY
+			c.altitude = 0
+			c.ground_shape = TerrainCell.GroundShape.FULL_CUBE
+			c.water_flow = Vector2i.ZERO
+			c.shore_mask = 0
+			c.fall_rise_dir = Vector2i.ZERO
+			c.drop_height = 2
+			c.fall_rise_dir_b = Vector2i.ZERO
+			c.drop_height_b = 0
+			c.river_width = 0
 
 
 # Apex (= lake center) is the highest GROUND cell in a small corner window
@@ -627,15 +708,15 @@ static func _enforce_south_descent(grid: TerrainGrid) -> void:
 # Step 4: simple river
 # ----------------------------------------------------------------------------
 
-# Single-cell-wide gravity walker from the lake outlet to the open south
-# boundary. At each step:
-#   - filter face neighbors to GROUND or WATER (lake-merge OK)
-#   - weight by altitude (lower = higher weight) and south_bias (DIR_SE/DIR_SW
-#     get an additive bonus)
-#   - if the chosen step drops more than 1 cube, mark this cell WATERFALL with
-#     drop_height = altitude difference; otherwise mark it WATER
-#   - record water_flow as the step direction
-# Stops on EMPTY-adjacent or grid edge. No branching, no widening.
+# Gravity walker from the lake outlet to the open south boundary, optionally
+# spawning tributary branches. The walker is single-cell-wide and descends
+# strictly south (DIR_SE or DIR_SW).
+#
+# Pipeline:
+#   1. Run the primary walker. At each step, roll `river_branch_chance` to
+#      queue a branch seed at the unchosen SE/SW candidate.
+#   2. Run each queued branch as a single-depth sub-walker (no further
+#      branching). A branch that boxes in early simply stops.
 static func _trace_simple_river(
 	grid: TerrainGrid,
 	params: TerrainGenerationParams,
@@ -654,9 +735,51 @@ static func _trace_simple_river(
 	# outlet cell, not `params.top_altitude`: with `lake_depth_hs > 0` the
 	# lake sits below top_altitude, and using top_altitude here would emit
 	# a phantom waterfall floating above the actual water surface.
-	var pos: Vector2i = outlet
-	var alt: int = grid.at(outlet.x, outlet.y).altitude
+	var branch_seeds: Array = []  # entries: [from_pos: Vector2i, from_alt: int, to_dir: Vector2i]
+	_walk_river(
+		grid, params, rng,
+		outlet, grid.at(outlet.x, outlet.y).altitude,
+		max_drop_hs,
+		branch_seeds,
+		true,
+	)
+
+	if not branch_seeds.is_empty():
+		var dummy_branches: Array = []
+		for seed in branch_seeds:
+			var from_pos: Vector2i = seed[0]
+			var from_alt: int = seed[1]
+			var forced_dir: Vector2i = seed[2]
+			dummy_branches.clear()
+			_walk_river(
+				grid, params, rng,
+				from_pos, from_alt,
+				max_drop_hs,
+				dummy_branches,
+				false, forced_dir,
+			)
+
+
+# Single-walker step engine. Mutates `grid` in place. When `allow_branching`
+# is true, `branch_seeds_out` collects (from_pos, from_alt, to_dir) for the
+# unchosen candidate at each step that rolls `river_branch_chance`.
+# `first_step_dir` forces the very first step direction (used for branches
+# so they go down the unchosen fork); pass Vector2i.ZERO for unforced.
+static func _walk_river(
+	grid: TerrainGrid,
+	params: TerrainGenerationParams,
+	rng: RandomNumberGenerator,
+	start_pos: Vector2i,
+	start_alt: int,
+	max_drop_hs: int,
+	branch_seeds_out: Array,
+	allow_branching: bool,
+	first_step_dir: Vector2i = Vector2i.ZERO,
+) -> void:
+	var pos: Vector2i = start_pos
+	var alt: int = start_alt
 	var steps: int = 0
+	var force_first: bool = first_step_dir != Vector2i.ZERO
 
 	while steps < _MAX_RIVER_STEPS:
 		steps += 1
@@ -665,10 +788,41 @@ static func _trace_simple_river(
 			return
 
 		# Only convert GROUND to WATER — never overwrite WATER (lake) or
-		# WATERFALL once placed.
+		# WATERFALL once placed. The lake outlet cell starts as WATER and
+		# is therefore not re-converted.
+		var just_converted: bool = false
 		if here.kind == TerrainCell.Kind.GROUND:
 			here.kind = TerrainCell.Kind.WATER
 			here.altitude = alt
+			just_converted = true
+			# CORNER FALL UPGRADE (perpendicular wet face): this water cell may
+			# sit on the perpendicular upper face of an existing single-face
+			# waterfall — upgrade the waterfall to a corner so the painter
+			# renders the now-wet face. Only SE/SW neighbors are checked: a
+			# waterfall lip at our altitude with basin BELOW us must be in one
+			# of those positions for our cell to be its upper-perpendicular
+			# source. This catches cases where two parallel river forks land
+			# on perpendicular sides of the same lip altitude (the merge-on-
+			# lip and step-onto-fall paths only fire for falls placed in the
+			# same cell).
+			for d_check in [DIR_SE, DIR_SW]:
+				var npos: Vector2i = pos + d_check
+				var ncell: TerrainCell = grid.at_or_null(npos.x, npos.y)
+				if ncell == null or ncell.kind != TerrainCell.Kind.WATERFALL:
+					continue
+				if ncell.fall_rise_dir_b != Vector2i.ZERO:
+					continue
+				if ncell.altitude != alt:
+					continue
+				var sec_rise: Vector2i = -d_check
+				var perp: bool = (
+					(ncell.fall_rise_dir == DIR_NE and sec_rise == DIR_NW)
+					or (ncell.fall_rise_dir == DIR_NW and sec_rise == DIR_NE)
+				)
+				if not perp:
+					continue
+				ncell.fall_rise_dir_b = sec_rise
+				ncell.drop_height_b = ncell.drop_height
 
 		if _is_south_boundary(grid, pos.x, pos.y):
 			return
@@ -697,10 +851,36 @@ static func _trace_simple_river(
 			var nc: TerrainCell = grid.at_or_null(nxy.x, nxy.y)
 			if nc == null:
 				continue
-			if nc.kind != TerrainCell.Kind.GROUND:
-				continue
-			cands.append(nxy)
-			cand_alts.append(maxi(nc.altitude, alt - max_drop_hs))
+			if nc.kind == TerrainCell.Kind.GROUND:
+				cands.append(nxy)
+				cand_alts.append(maxi(nc.altitude, alt - max_drop_hs))
+			elif nc.kind == TerrainCell.Kind.WATERFALL:
+				# Concave-corner candidate: a previous walker placed a single-
+				# face fall here. We can step onto it from a perpendicular
+				# direction and upgrade it to a corner fall, IF the geometry
+				# allows a clean shared basin. Conditions:
+				#   - second face slot is still empty
+				#   - our rise direction (-step) is perpendicular to the
+				#     existing fall's rise direction (NE/NW pair)
+				#   - drop into the basin is >= 2 half-steps
+				#   - the cap wouldn't kick in (we can't change the existing
+				#     basin altitude, so capped landings can't merge cleanly)
+				if nc.fall_rise_dir_b != Vector2i.ZERO:
+					continue
+				var our_rise: Vector2i = -d
+				var perpendicular: bool = (
+					(nc.fall_rise_dir == DIR_NE and our_rise == DIR_NW)
+					or (nc.fall_rise_dir == DIR_NW and our_rise == DIR_NE)
+				)
+				if not perpendicular:
+					continue
+				var basin_alt: int = nc.altitude - nc.drop_height
+				if alt - basin_alt < 2:
+					continue
+				if alt - basin_alt > max_drop_hs:
+					continue
+				cands.append(nxy)
+				cand_alts.append(basin_alt)
 
 		if cands.is_empty():
 			push_warning(
@@ -709,35 +889,62 @@ static func _trace_simple_river(
 			)
 			return
 
-		# Weight each candidate by drop magnitude (lower neighbor = more
-		# weight). south_bias breaks ties between SE and SW: positive
-		# south_bias makes SW slightly preferred since it's "more south" in
-		# iso (visually lower on screen than SE). +1 floor so same-tier
-		# steps don't collapse to weight 0.
-		var weights: Array[float] = []
-		var total: float = 0.0
-		for i in cands.size():
-			var step_dir: Vector2i = cands[i] - pos
-			var w: float = float(alt - cand_alts[i] + 1)
-			if step_dir == DIR_SW:
-				w += params.south_bias
-			weights.append(w)
-			total += w
+		var pick_idx: int = -1
+		if force_first:
+			# Forced direction must match a candidate; if it doesn't (e.g. the
+			# branch's chosen neighbor is no longer GROUND), fall through to
+			# the weighted pick so the branch still has a chance to step.
+			for i in cands.size():
+				if (cands[i] - pos) == first_step_dir:
+					pick_idx = i
+					break
+			force_first = false
 
-		var roll: float = rng.randf() * total
-		var pick_idx: int = 0
-		var acc: float = 0.0
-		for i in weights.size():
-			acc += weights[i]
-			if roll <= acc:
-				pick_idx = i
-				break
+		if pick_idx < 0:
+			# Weight each candidate by drop magnitude (lower neighbor = more
+			# weight). south_bias breaks ties between SE and SW: positive
+			# south_bias makes SW slightly preferred since it's "more south" in
+			# iso (visually lower on screen than SE). +1 floor so same-tier
+			# steps don't collapse to weight 0.
+			var weights: Array[float] = []
+			var total: float = 0.0
+			for i in cands.size():
+				var step_dir_w: Vector2i = cands[i] - pos
+				var w: float = float(alt - cand_alts[i] + 1)
+				if step_dir_w == DIR_SW:
+					w += params.south_bias
+				weights.append(w)
+				total += w
+			var roll: float = rng.randf() * total
+			pick_idx = 0
+			var acc: float = 0.0
+			for i in weights.size():
+				acc += weights[i]
+				if roll <= acc:
+					pick_idx = i
+					break
+
+		# Branch seed: with prob branch_chance, queue the OTHER candidate so a
+		# tributary descends the unchosen fork after the primary walker
+		# finishes. Only fires when both SE and SW are valid candidates and
+		# branching is enabled.
+		if allow_branching and params.river_branch_chance > 0.0 and cands.size() >= 2:
+			if rng.randf() < params.river_branch_chance:
+				var branch_idx: int = 1 - pick_idx
+				var branch_dir: Vector2i = cands[branch_idx] - pos
+				branch_seeds_out.append([pos, alt, branch_dir])
 
 		var next_pos: Vector2i = cands[pick_idx]
 		var next_alt: int = cand_alts[pick_idx]
 		var step_dir: Vector2i = next_pos - pos
 
-		here.water_flow = step_dir
+		# Only update water_flow on cells THIS walker created. Skip cells
+		# that already belonged to another walker (lake outlet, primary path
+		# a branch starts on, primary cell a branch lands on after a
+		# waterfall jump) — overwriting their flow would repoint primary's
+		# arrow toward the branch's continuation.
+		if just_converted:
+			here.water_flow = step_dir
 
 		# Any altitude drop emits a waterfall at the LOWER cell. The
 		# waterfall tile sits at the upper tier (alt) and records
@@ -747,21 +954,209 @@ static func _trace_simple_river(
 		# - drop_height >= 4         → multi-tier stacked column
 		if alt - next_alt >= 2:
 			var fall: TerrainCell = grid.at(next_pos.x, next_pos.y)
+			# CORNER FALL UPGRADE: a previous walker placed a single-face
+			# waterfall here. If our incoming rise direction is perpendicular
+			# to its rise direction (one NE, one NW) AND the basins agree,
+			# attach a second face to the existing fall and terminate — the
+			# tributary has merged into the existing river at the lip. The
+			# painter renders the shared tiers with FALL_NENW; tiers above
+			# the shorter lip stay single-face.
+			if fall.kind == TerrainCell.Kind.WATERFALL:
+				var new_rise: Vector2i = -step_dir
+				var perpendicular: bool = (
+					(fall.fall_rise_dir == DIR_NE and new_rise == DIR_NW)
+					or (fall.fall_rise_dir == DIR_NW and new_rise == DIR_NE)
+				)
+				var existing_basin: int = fall.altitude - fall.drop_height
+				if (
+					perpendicular
+					and fall.fall_rise_dir_b == Vector2i.ZERO
+					and next_alt == existing_basin
+				):
+					fall.fall_rise_dir_b = new_rise
+					fall.drop_height_b = alt - existing_basin
+					return
+				# Else: basins disagree or the third walker arriving at an
+				# already-corner fall. Fall through — preserves the legacy
+				# silent-traverse behavior, which the harness has been green
+				# under for the v1 generator.
 			# Only place a waterfall if the neighbor is plain GROUND (don't
 			# overwrite WATER with WATERFALL — would corrupt the lake).
 			if fall.kind == TerrainCell.Kind.GROUND:
+				# Peek at the cell BEYOND the waterfall (where the walker
+				# would resume). If it's already part of another walker's
+				# river, this is a merge — the basin must land at that
+				# river's altitude, not the natural cap, otherwise the water
+				# surface "jumps" between adjacent cells. See the
+				# branch-merge artifacts at (15,32) / (26,34) in level1.
+				var landing_pos: Vector2i = next_pos + step_dir
+				var landing: TerrainCell = grid.at_or_null(landing_pos.x, landing_pos.y)
+				var merge: bool = (
+					landing != null
+					and (landing.kind == TerrainCell.Kind.WATER
+						or landing.kind == TerrainCell.Kind.WATERFALL)
+				)
+				if merge:
+					var adjusted_drop: int = alt - landing.altitude
+					if adjusted_drop >= 2:
+						fall.kind = TerrainCell.Kind.WATERFALL
+						fall.altitude = alt
+						fall.fall_rise_dir = -step_dir
+						fall.drop_height = adjusted_drop
+						fall.water_flow = step_dir
+						_try_corner_upgrade_perpendicular(grid, fall, next_pos)
+						# CORNER FALL UPGRADE on the landing cell: when the
+						# fall we just placed has its basin landing on
+						# another waterfall's LIP (same altitude), the river
+						# spills off two perpendicular cliff faces of the
+						# landing cell — primary from its existing rise, plus
+						# secondary from our step's rise. Both share the
+						# landing cell's basin and have equal drops (lip_b ==
+						# landing.altitude == primary lip).
+						if (
+							landing.kind == TerrainCell.Kind.WATERFALL
+							and landing.fall_rise_dir_b == Vector2i.ZERO
+						):
+							var sec_rise: Vector2i = -step_dir
+							var perpendicular: bool = (
+								(landing.fall_rise_dir == DIR_NE and sec_rise == DIR_NW)
+								or (landing.fall_rise_dir == DIR_NW and sec_rise == DIR_NE)
+							)
+							if perpendicular:
+								landing.fall_rise_dir_b = sec_rise
+								landing.drop_height_b = landing.drop_height
+					# adjusted_drop < 2: landing river is at-or-above this
+					# walker's tracked alt; no downward fall is geometrically
+					# possible here. Leave next_pos as GROUND.
+					return  # branch terminates; merged into existing river
 				fall.kind = TerrainCell.Kind.WATERFALL
 				fall.altitude = alt
 				fall.fall_rise_dir = -step_dir
 				fall.drop_height = alt - next_alt
 				fall.water_flow = step_dir
+				_try_corner_upgrade_perpendicular(grid, fall, next_pos)
 				# Walker resumes at the basin tier, one cell beyond the fall.
-				pos = next_pos + step_dir
+				# Off-disc landing terminates cleanly (next iteration reads
+				# null/EMPTY at top of loop and returns).
+				pos = landing_pos
 				alt = next_alt
 				continue
 
 		pos = next_pos
 		alt = next_alt
+
+
+# CORNER FALL UPGRADE (reverse-order): a fall has just been placed fresh at
+# `fall_pos`. If the perpendicular upper neighbor is already water (or a
+# WATERFALL whose basin spills into our lip) at the lip altitude, the
+# perpendicular face is already wet — upgrade `fall` to a concave-corner
+# fall. Mirror of the GROUND→WATER conversion check; covers the case where
+# the perpendicular water cell was placed by an earlier walker.
+static func _try_corner_upgrade_perpendicular(
+	grid: TerrainGrid,
+	fall: TerrainCell,
+	fall_pos: Vector2i,
+) -> void:
+	if fall.fall_rise_dir_b != Vector2i.ZERO:
+		return
+	var perp_dir: Vector2i = Vector2i.ZERO
+	if fall.fall_rise_dir == DIR_NE:
+		perp_dir = DIR_NW
+	elif fall.fall_rise_dir == DIR_NW:
+		perp_dir = DIR_NE
+	if perp_dir == Vector2i.ZERO:
+		return
+	var ppos: Vector2i = fall_pos + perp_dir
+	var pcell: TerrainCell = grid.at_or_null(ppos.x, ppos.y)
+	if pcell == null:
+		return
+	# Symmetric corner: WATER at our lip altitude, or WATERFALL whose basin
+	# matches our lip (chained falls upstream). Asymmetric perpendicular
+	# drops are not handled here — the candidate-pick path covers those.
+	var matches: bool = false
+	if pcell.kind == TerrainCell.Kind.WATER and pcell.altitude == fall.altitude:
+		matches = true
+	elif (pcell.kind == TerrainCell.Kind.WATERFALL
+			and (pcell.altitude - pcell.drop_height) == fall.altitude):
+		matches = true
+	if not matches:
+		return
+	fall.fall_rise_dir_b = perp_dir
+	fall.drop_height_b = fall.drop_height
+
+
+# Post-walker pass: detect WATER cells whose NE and/or NW face neighbor is
+# WATER at a strictly higher altitude (drop >= 2). Such a cell sits at the
+# base of an unmarked cliff — water on the upper face cascades down onto it
+# but no walker emitted a fall, because (a) the basin water arrived via a
+# different fork and (b) the walker that traced the upper water either chose
+# the other south-step or saw this cell as already-WATER (rejected by the
+# candidate filter). Convert these cells to WATERFALL so the painter renders
+# the cascade. If both NE and NW upper are higher water, mark a NENW corner
+# (asymmetric drops supported when lip altitudes differ).
+static func _emit_perpendicular_falls(grid: TerrainGrid, max_drop_hs: int) -> void:
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.WATER:
+				continue
+			var ne: TerrainCell = grid.at_or_null(x + DIR_NE.x, y + DIR_NE.y)
+			var nw: TerrainCell = grid.at_or_null(x + DIR_NW.x, y + DIR_NW.y)
+			var ne_lip: int = -1
+			var nw_lip: int = -1
+			if ne != null and ne.kind == TerrainCell.Kind.WATER:
+				var d: int = ne.altitude - c.altitude
+				if d >= 2 and d <= max_drop_hs:
+					ne_lip = ne.altitude
+			if nw != null and nw.kind == TerrainCell.Kind.WATER:
+				var d: int = nw.altitude - c.altitude
+				if d >= 2 and d <= max_drop_hs:
+					nw_lip = nw.altitude
+			if ne_lip < 0 and nw_lip < 0:
+				continue
+			var basin_alt: int = c.altitude
+			# Determine candidate primary direction (greater drop, NE wins ties)
+			# upfront so we can validate the landing cell before mutating.
+			var pre_primary_dir: Vector2i = DIR_NE if ne_lip >= nw_lip else DIR_NW
+			# Landing cell (basin direction) must agree with our basin alt, or
+			# be GROUND/EMPTY/off-grid. Otherwise emitting a fall here would
+			# violate branch_merge_altitudes (the river graph would have a
+			# fall whose basin tier doesn't match the next cell's alt).
+			var lp: Vector2i = Vector2i(x, y) + (-pre_primary_dir)
+			var land: TerrainCell = grid.at_or_null(lp.x, lp.y)
+			if (
+				land != null
+				and land.kind != TerrainCell.Kind.EMPTY
+				and land.kind != TerrainCell.Kind.GROUND
+				and land.altitude != basin_alt
+			):
+				continue
+			# Primary = greater drop (NE wins ties). Drop_a stored on
+			# c.altitude (lip_a); drop_b derived from secondary lip.
+			var primary_dir: Vector2i = Vector2i.ZERO
+			var primary_lip: int = 0
+			var secondary_dir: Vector2i = Vector2i.ZERO
+			var secondary_lip: int = 0
+			if ne_lip >= nw_lip:
+				primary_dir = DIR_NE
+				primary_lip = ne_lip
+				if nw_lip >= 0:
+					secondary_dir = DIR_NW
+					secondary_lip = nw_lip
+			else:
+				primary_dir = DIR_NW
+				primary_lip = nw_lip
+				if ne_lip >= 0:
+					secondary_dir = DIR_NE
+					secondary_lip = ne_lip
+			c.kind = TerrainCell.Kind.WATERFALL
+			c.altitude = primary_lip
+			c.fall_rise_dir = primary_dir
+			c.drop_height = primary_lip - basin_alt
+			c.water_flow = -primary_dir
+			if secondary_dir != Vector2i.ZERO:
+				c.fall_rise_dir_b = secondary_dir
+				c.drop_height_b = secondary_lip - basin_alt
 
 
 static func _find_lake_outlet(

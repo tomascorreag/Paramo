@@ -89,6 +89,15 @@ var fall_rise_dir: Vector2i = Vector2i.ZERO
 # layers using FALL_*_TOP/NONE/BOTTOM tiles.
 var drop_height: int = 2
 
+# Optional second face for concave-corner waterfalls. ZERO = no second face
+# (single-face fall). When set, MUST be perpendicular to fall_rise_dir
+# (NE↔NW pair only — matches the FALL_NENW corner-fall tile). The two faces
+# share the basin at altitude - drop_height; the secondary lip altitude is
+# (altitude - drop_height) + drop_height_b, which need not equal altitude
+# (asymmetric cliff heights are supported).
+var fall_rise_dir_b: Vector2i = Vector2i.ZERO
+var drop_height_b: int = 0
+
 # Width of the river segment passing through this cell, in cells. 0 means
 # "not a river cell" (lake interior or any non-river water). The river
 # starts at width 2 leaving the lake and may shrink at branches.

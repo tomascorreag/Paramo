@@ -191,3 +191,11 @@ const FALL_NW_NONE: StringName      = &"FALL_NW_NONE"
 const FALL_NW_TOP: StringName       = &"FALL_NW_TOP"
 const FALL_NW_BOTTOM: StringName    = &"FALL_NW_BOTTOM"
 const FALL_NW_BOTH: StringName      = &"FALL_NW_BOTH"
+
+# Concave-corner waterfall: water falls on BOTH the NE and NW cliff faces of a
+# single cell (used when two perpendicular rivers converge at the same lip).
+# A single tile covers TOP/BOTTOM/BOTH/NONE positions — visual fidelity is
+# slightly reduced compared to the single-face family in exchange for one
+# slot. Painted on tiers where both faces are active simultaneously; tiers
+# above the shorter face's lip still use FALL_NE_*/FALL_NW_*.
+const FALL_NENW: StringName        = &"FALL_NENW"

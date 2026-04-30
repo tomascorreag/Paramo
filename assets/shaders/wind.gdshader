@@ -48,9 +48,11 @@ const int WIND_PROBE_PX = 48;
 global uniform int shader_debug;
 
 varying vec2 world_pos;
+varying vec4 v_modulate;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
+	v_modulate = MODULATE;
 }
 
 void fragment() {
@@ -77,10 +79,10 @@ void fragment() {
 	vec2 offset = round((wind_strength * n1 + wind_strength_2 * n2) * mask * wind_intensity) * TEXTURE_PIXEL_SIZE;
 
 	if (shader_debug == 1) {
-		COLOR = vec4(vec3(mask), texture(TEXTURE, UV).a);
+		COLOR = vec4(vec3(mask), texture(TEXTURE, UV).a) * v_modulate;
 	} else if (shader_debug == 2) {
-		COLOR = vec4(vec3(opaque_below / float(WIND_PROBE_PX)), texture(TEXTURE, UV).a);
+		COLOR = vec4(vec3(opaque_below / float(WIND_PROBE_PX)), texture(TEXTURE, UV).a) * v_modulate;
 	} else {
-		COLOR = texture(TEXTURE, UV + offset);
+		COLOR = texture(TEXTURE, UV + offset) * v_modulate;
 	}
 }
