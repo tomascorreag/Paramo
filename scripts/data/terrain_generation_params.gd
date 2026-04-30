@@ -43,10 +43,13 @@ extends Resource
 ## rectangular grid still produces a roughly circular footprint.
 @export_range(8, 200, 1) var height: int = 48
 
-## Maximum altitude in half-steps (1 cube = 2 half-steps). Caps the lake
-## (always at top_altitude) and the heightfield's tallest peak. The scene's
-## TileMapLayer stack must have enough layers to render this — default
-## scene supports up to altitude 16 (8 cubes / 9 layers). Must be even.
+## Maximum altitude in half-steps (1 cube = 2 half-steps). Caps the
+## heightfield's tallest peak; the lake sits at `top_altitude - lake_depth_hs`.
+## The scene's TileMapLayer stack must have enough layers to render this —
+## `procedural_base.tscn` ships with Ground0..Ground16 covering altitudes
+## 0..32. Setting top_altitude beyond the tallest layer triggers a warning at
+## regenerate() and cells above the ceiling are dropped from the paint.
+## Must be even.
 @export_range(2, 32, 2) var top_altitude: int = 16
 
 
@@ -75,16 +78,23 @@ extends Resource
 ## Weight of the S→N envelope. Peaks at grid (0, 0) — the visual N corner —
 ## and falls to 0 at grid (W-1, H-1). This is the "main" gradient pulling
 ## the lake high in the N region. 0 = no overall north-up bias.
+##
+## Weights are ADDITIVE (not relative). The three gradients sum directly into
+## the final altitude; the sum is then clamped to [0, 1]. If `w_n + w_ne + w_nw`
+## exceeds 1.0 the back corner pins flat at top_altitude (a clipped plateau)
+## and noise terraces in that region disappear. To avoid clipping, keep the
+## sum near 1.0; to grow the lake plateau intentionally, push the sum higher.
 @export_range(0.0, 2.0, 0.05) var weight_n: float = 1.0
 
 ## Weight of the SW→NE gradient. Peaks along y=0 (the visual NE back edge).
 ## Adds height to the NE wall so it reads as a ridge, not just an apex.
-## 0 = no NE wall lift; the NE edge follows pure noise.
+## 0 = no NE wall lift; the NE edge follows pure noise. Stacks additively
+## with `weight_n` and `weight_nw` (see `weight_n` docs).
 @export_range(0.0, 2.0, 0.05) var weight_ne: float = 0.6
 
 ## Weight of the SE→NW gradient. Peaks along x=0 (the visual NW back edge).
 ## Symmetric companion to `weight_ne` — together they raise both back walls.
-## 0 = no NW wall lift.
+## 0 = no NW wall lift. Stacks additively with the other two weights.
 @export_range(0.0, 2.0, 0.05) var weight_nw: float = 0.6
 
 
@@ -107,6 +117,13 @@ extends Resource
 ##   ~0.4 = small disc, lots of EMPTY space
 ##   0.55 = covers most of the grid (recommended)
 ##   ~0.7+ = barely any carving; footprint approaches the full rectangle
+##
+## Also doubles as a gradient steepening factor: heightfield gradient
+## denominators scale by `max(0.05, 1 - disc_radius_frac)`, so a larger disc
+## produces a steeper gradient that hits 0 well inside the disc, leaving the
+## SW portion as a flat plain (noise-only altitude). At low frac the
+## denominators approach the full grid extent and the gradient spreads
+## evenly across the disc as before.
 @export_range(0.2, 1.2, 0.01) var disc_radius_frac: float = 0.55
 
 ## Frequency of the noise that wobbles the disc boundary. Lower = long,
@@ -176,6 +193,27 @@ extends Resource
 ##   0.5+  = lake can land deep into the map's interior
 @export_range(0.05, 0.6, 0.01) var lake_apex_window_frac: float = 0.25
 
+## Half-step depth of the lake below its apex (the highest GROUND in the
+## corner window). 0 = lake sits exactly at apex altitude (no peak nearby
+## stands above the water within the search window). 4 = lake sits 2 cubes
+## below the apex; surrounding GROUND peaks remain visible above the
+## waterline. Must be even to preserve half-step snapping; clamped so
+## lake_alt stays >= 0.
+@export_range(0, 12, 2) var lake_depth_hs: int = 4
+
+## Radius (in face-steps) of the apron lift around the lake. Each face-step
+## outward, GROUND cells are lifted to at least `lake_alt - dist * falloff`.
+## 0 = no apron (single-tile bank from `_support_water` only); 4 = the
+## terrain ramps gradually up to lake altitude over four cells.
+@export_range(0, 12, 1) var lake_apron_radius: int = 4
+
+## Half-steps lost per face-step of distance from the lake. Must be even
+## (altitudes are even half-steps). 2 = 1 cube per cell — combined with
+## radius 4 produces a 4-cube total ramp. Higher values produce a steeper
+## but still multi-cell apron; 0 produces a flat lifted plateau equal to
+## lake altitude across the whole apron radius.
+@export_range(0, 8, 2) var lake_apron_falloff_hs: int = 2
+
 
 # --- River walker -----------------------------------------------------------
 
@@ -194,3 +232,42 @@ extends Resource
 ## drops); 8 = up to 8-tile cliffs (more dramatic but rarer in practice
 ## given the heightfield's smoothness).
 @export_range(1, 8, 1) var max_drop_cubes: int = 4
+
+
+# --- Corner rounding --------------------------------------------------------
+
+## Radius (face-step distance) of the silhouette window. Each cell looks at
+## all in-bounds cells within this many face-steps and computes the GROUND
+## fraction of that window. 0 = silhouette unchanged. 2 = picks up corners
+## formed by 2-3-cell straight runs (recommended). 4-5 = picks up large
+## structural corners (4+ cell runs) but starts erasing FBM edge jitter.
+@export_range(0, 5, 1) var silhouette_round_radius: int = 2
+
+## Stickiness threshold for the silhouette majority filter. A GROUND cell
+## flips to EMPTY only if its window's GROUND fraction < 0.5 - stickiness;
+## an EMPTY cell flips to GROUND only if fraction > 0.5 + stickiness. Higher
+## stickiness preserves more of the original outline (only very lopsided
+## majorities trigger flips). 0 = pure majority (eager). 0.15 = balanced.
+## 0.3+ = preserves shape strongly; only obvious corners get rounded.
+@export_range(0.0, 0.4, 0.05) var silhouette_round_stickiness: float = 0.15
+
+## Radius (face-step distance) of the altitude window. Each GROUND cell
+## takes the median altitude of all GROUND/WATER/WATERFALL cells within
+## this radius and pulls toward it. 0 = altitude unchanged. 2 = catches
+## small altitude bumps and 90° cliff-corner taper (recommended). 4+ =
+## smooths longer altitude transitions (can erode peaks).
+@export_range(0, 5, 1) var altitude_round_radius: int = 2
+
+## How strongly the altitude pull replaces the cell's current altitude.
+## 0 = no change. 1 = full median replacement (classic median filter,
+## edge-preserving). 0.5 = halfway between current and median (gentler).
+## Median filtering naturally preserves clean cliffs (step functions) so
+## even at strength 1 long straight cliff faces remain intact; only their
+## corners and noise get smoothed.
+@export_range(0.0, 1.0, 0.05) var altitude_round_strength: float = 0.5
+
+## Number of (silhouette + altitude) iterations. Each iteration runs both
+## passes once. 0 = rounding disabled. 1 = single light pass (recommended).
+## 2-3 = progressively stronger; multi-cell promontories shrink layer by
+## layer and structural corners round more deeply.
+@export_range(0, 3, 1) var corner_round_passes: int = 1

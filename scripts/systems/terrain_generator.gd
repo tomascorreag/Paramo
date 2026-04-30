@@ -15,9 +15,16 @@ extends RefCounted
 #                   noisy disc mask carves the iso footprint into a roughly
 #                   circular shape; cells outside the disc are EMPTY.)
 #   2. Pick apex + carve lake  (apex = highest GROUND cell in the N quadrant;
-#                   noise-jittered ellipse around it)
+#                   noise-jittered ellipse at apex_alt - lake_depth_hs, then
+#                   a multi-cell BFS apron lifts surrounding GROUND with a
+#                   distance-based falloff so the transition isn't a single
+#                   hard cliff)
 #   3. Smooth altitude jumps   (caps any neighbor altitude difference at
 #                   max_drop_cubes * 2 half-steps so cliffs read as 1–4 tiles)
+#   3b. Round corners          (radius-R majority filter for silhouette and
+#                   radius-R median filter for altitude — each iteration
+#                   smooths structural corners formed by multi-cell straight
+#                   runs meeting at 90°. Median preserves clean cliffs.)
 #   4. Simple river            (single south-going walker from lake outlet to
 #                   the open boundary; emits WATERFALL on tier drops)
 #   5. Support water           (lifts every WATER cell's 4 face GROUND
@@ -83,7 +90,9 @@ static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 	var peak_center: Vector2i = Vector2i(-1, -1)
 	if apex.x >= 0:
 		peak_center = _carve_lake(grid, params, rng, apex)
+		_lift_lake_apron(grid, params)
 	_smooth_altitude_jumps(grid, max_drop_hs)
+	_round_corners(grid, params)
 	# Enforce monotonic descent toward south: a cell's SW and SE neighbors
 	# must sit at or below the cell. Equivalently, a cell sits at or below
 	# its NW and NE neighbors. Lowers any cell that violates this. Both
@@ -105,19 +114,36 @@ static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 # ----------------------------------------------------------------------------
 
 # Per cell:
-#   gN  = 1 - (x + y) / (W + H - 2)   # S→N envelope, peaks at grid (0,0)
-#   gNE = 1 - y / (H - 1)             # SW→NE, peaks along y=0 (NE back edge)
-#   gNW = 1 - x / (W - 1)             # SE→NW, peaks along x=0 (NW back edge)
-#   gradient = (w_n*gN + w_ne*gNE + w_nw*gNW) / weight_sum   # normalized to [0, 1]
+#   k   = max(0.05, 1 - disc_radius_frac)               # steepening factor
+#   gN  = max(0, 1 - (x + y) / ((W + H - 2) * k))       # S→N envelope, peaks at (0,0)
+#   gNE = max(0, 1 - y / ((H - 1) * k))                 # SW→NE, peaks along y=0
+#   gNW = max(0, 1 - x / ((W - 1) * k))                 # SE→NW, peaks along x=0
+#   gradient = w_n*gN + w_ne*gNE + w_nw*gNW             # ADDITIVE (no normalization)
 #   alt_t    = clamp(gradient + noise * noise_strength, 0, 1)
 #
-# Noise is added AFTER normalizing the gradient by weight_sum, so changing
-# the gradient weights doesn't silently shrink the noise contribution. Noise
-# in [-1, 1] (practically [-0.7, 0.7] for FBM) directly perturbs alt_t in
-# units of [0, 1]; with noise_strength=0.6, alt extremes can shift by up to
+# Gradients are tied to disc_radius_frac via the steepening factor k. With a
+# big disc (high frac → small k), the denominators shrink, so each gradient
+# falls to 0 well inside the disc and stays clamped there — that bottom
+# region becomes a flat plain (alt_t is just noise, near 0). With a small
+# disc (low frac → k near 1), denominators approach the full grid extent
+# and the gradients spread across the whole disc as before. The k-floor of
+# 0.05 prevents divide-by-zero at frac → 1.
+#
+# Weights are additive, not relative — raising w_ne from 0 to 1 ADDS a full
+# NE ridge on top of the N envelope. With multiple non-zero weights, gradient
+# can exceed 1.0 near the N corner and the clamp pins those cells flat at
+# top_altitude, producing a peak/lake plateau that suppresses noise terraces
+# in that region. Designer tunes the weights so the desired peak/back-wall
+# behavior emerges; if the back corner reads as too flat, lower the weights
+# so the sum at (0, 0) sits closer to 1.0 and noise can still terrace.
+#
+# Noise in [-1, 1] (practically [-0.7, 0.7] for FBM) directly perturbs alt_t
+# in units of [0, 1]; with noise_strength=0.6 alt extremes shift by up to
 # ~0.6 * top_altitude half-steps — enough to produce multi-cube drops between
 # adjacent cells in noise-peak regions, which the river walker turns into
-# waterfalls.
+# waterfalls. Where the gradient saturates against the clamp, noise loses
+# this effect on the upper side (it can still dip the cell back below 1).
+# In the flat-plain region (gradient = 0), noise alone determines altitude.
 #
 # Cells outside the noisy disc (mask_t < 0) are EMPTY. Surviving cells get
 # altitude = snap_even(round(alt_t * top_altitude), 0, top_altitude). The
@@ -129,10 +155,13 @@ static func _fill_heightfield(
 	noise: FastNoiseLite,
 	mask_noise: FastNoiseLite,
 ) -> void:
-	var w_denom: float = maxf(1.0, float(grid.width + grid.height - 2))
-	var x_denom: float = maxf(1.0, float(grid.width - 1))
-	var y_denom: float = maxf(1.0, float(grid.height - 1))
-	var weight_sum: float = maxf(0.001, params.weight_n + params.weight_ne + params.weight_nw)
+	# Gradient steepening tied to disc size: bigger disc → steeper gradient
+	# → flat plain emerges in the SW portion of the disc. Floored at 0.05
+	# so denominators don't collapse at frac → 1.
+	var grad_factor: float = maxf(0.05, 1.0 - params.disc_radius_frac)
+	var w_denom: float = maxf(1.0, float(grid.width + grid.height - 2) * grad_factor)
+	var x_denom: float = maxf(1.0, float(grid.width - 1) * grad_factor)
+	var y_denom: float = maxf(1.0, float(grid.height - 1) * grad_factor)
 
 	var disc_cx: float = float(grid.width) * params.disc_center_x_frac
 	var disc_cy: float = float(grid.height) * params.disc_center_y_frac
@@ -151,10 +180,10 @@ static func _fill_heightfield(
 				cell.kind = TerrainCell.Kind.EMPTY
 				continue
 
-			var g_n: float = 1.0 - float(x + y) / w_denom
-			var g_ne: float = 1.0 - float(y) / y_denom
-			var g_nw: float = 1.0 - float(x) / x_denom
-			var gradient: float = (params.weight_n * g_n + params.weight_ne * g_ne + params.weight_nw * g_nw) / weight_sum
+			var g_n: float = maxf(0.0, 1.0 - float(x + y) / w_denom)
+			var g_ne: float = maxf(0.0, 1.0 - float(y) / y_denom)
+			var g_nw: float = maxf(0.0, 1.0 - float(x) / x_denom)
+			var gradient: float = params.weight_n * g_n + params.weight_ne * g_ne + params.weight_nw * g_nw
 			var n: float = noise.get_noise_2d(x, y)
 			var alt_t: float = clampf(gradient + n * params.noise_strength, 0.0, 1.0)
 			var snapped: int = _snap_even(
@@ -238,8 +267,9 @@ static func _make_noise(seed: int, frequency: float) -> FastNoiseLite:
 # Carves a randomly-shaped lake at the apex. Per-seed aspect ratio
 # (lake_aspect_min..max along each axis) and large noise jitter produce
 # visibly different silhouettes from one generation to the next — round,
-# oblong, tilted, etc. Lake cells are forced to `top_altitude` regardless
-# of the heightfield underneath.
+# oblong, tilted, etc. Lake cells are set to apex_alt - lake_depth_hs (snapped
+# even, clamped to [0, top_altitude]); with depth > 0 the lake sits in a
+# bowl below the local peak, so surrounding GROUND can rise above the water.
 #
 # Returns the lake center cell, used downstream for river outlet.
 static func _carve_lake(
@@ -249,6 +279,12 @@ static func _carve_lake(
 	apex: Vector2i,
 ) -> Vector2i:
 	var center: Vector2i = apex
+	var apex_cell: TerrainCell = grid.at(apex.x, apex.y)
+	var lake_alt: int = _snap_even(
+		apex_cell.altitude - params.lake_depth_hs,
+		0,
+		params.top_altitude,
+	)
 
 	var r2: float = params.lake_radius * params.lake_radius
 	var jitter_amp: float = params.lake_jitter_strength * r2
@@ -272,9 +308,69 @@ static func _carve_lake(
 				if cell.kind == TerrainCell.Kind.EMPTY:
 					continue  # disc mask carved this cell out
 				cell.kind = TerrainCell.Kind.WATER
-				cell.altitude = params.top_altitude
+				cell.altitude = lake_alt
 
 	return center
+
+
+# Multi-source BFS apron: for every GROUND cell within `lake_apron_radius`
+# face-steps of any WATER cell, lift its altitude to at least
+# `lake_alt - dist * lake_apron_falloff_hs`. Only lifts; never lowers.
+#
+# BFS preserves south-descent monotonicity: for any visited cell C at face-
+# distance d, both NW and NE are face-neighbors of C, so they were visited
+# at distance ≤ d (BFS invariant). Their lift target is therefore ≥ C's,
+# so `_enforce_south_descent` won't undo apron lifts.
+#
+# Skips early if radius == 0 or falloff is 0 with no slack (degenerate).
+static func _lift_lake_apron(grid: TerrainGrid, params: TerrainGenerationParams) -> void:
+	var radius: int = params.lake_apron_radius
+	if radius <= 0:
+		return
+	var falloff: int = params.lake_apron_falloff_hs
+
+	# Seed BFS from every WATER cell. All water shares the same altitude
+	# (set in _carve_lake), so we read it from the first water cell found.
+	var visited: Dictionary = {}
+	var frontier: Array = []  # entries: [Vector2i, dist]
+	var lake_alt: int = -1
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.WATER:
+				continue
+			if lake_alt < 0:
+				lake_alt = c.altitude
+			var key: Vector2i = Vector2i(x, y)
+			visited[key] = 0
+			frontier.append([key, 0])
+
+	if lake_alt < 0:
+		return  # no lake on this seed
+
+	var head: int = 0
+	while head < frontier.size():
+		var entry: Array = frontier[head]
+		head += 1
+		var pos: Vector2i = entry[0]
+		var d: int = entry[1]
+		if d >= radius:
+			continue
+		var nd: int = d + 1
+		var target: int = lake_alt - nd * falloff
+		for dir in _DIRS:
+			var np: Vector2i = pos + dir
+			if visited.has(np):
+				continue
+			var nc: TerrainCell = grid.at_or_null(np.x, np.y)
+			if nc == null:
+				continue
+			if nc.kind != TerrainCell.Kind.GROUND:
+				continue
+			visited[np] = nd
+			if target > nc.altitude:
+				nc.altitude = target
+			frontier.append([np, nd])
 
 
 # ----------------------------------------------------------------------------
@@ -309,6 +405,180 @@ static func _smooth_altitude_jumps(grid: TerrainGrid, max_drop_hs: int) -> void:
 				if max_alt > c.altitude + max_drop_hs:
 					c.altitude = max_alt - max_drop_hs
 					changed = true
+
+
+# ----------------------------------------------------------------------------
+# Step 3b: round corners
+# ----------------------------------------------------------------------------
+
+# Multi-scale corner rounding. Each iteration runs a silhouette majority
+# filter at radius `silhouette_round_radius` and an altitude median filter
+# at radius `altitude_round_radius`. Sampling a window (instead of just the
+# 4 face neighbors) lets the pass detect structural corners — places where
+# two multi-cell straight runs meet at a 90° angle — and round them.
+#
+# Why median for altitude:
+#   - Median preserves clean cliff edges (step functions). At a long straight
+#     altitude transition, half the window is high and half is low; median
+#     lands on the boundary, so each side keeps its altitude.
+#   - Median rounds noise and corners. At a corner of a tall plateau, the
+#     window has fewer high cells (the plateau wraps around) than low; median
+#     pulls toward the dominant tier, dropping the corner.
+#   - Median ∈ [min, max] of the window, so this pass never invents new
+#     altitudes; it can only push toward existing ones.
+#
+# Why majority + stickiness for silhouette:
+#   - Pure majority (stickiness=0) flips eagerly near 0.5 fraction, which can
+#     ping-pong cells between passes. Stickiness adds a hysteresis band so
+#     only clear majorities flip.
+#   - At a convex L-corner (cell at the tip of two straight runs meeting),
+#     the window leans EMPTY → cell flips to EMPTY.
+#   - At a concave L-corner (EMPTY tucked inside two perpendicular GROUND
+#     runs), the window leans GROUND → cell flips to GROUND at median window
+#     altitude.
+#
+# WATER and WATERFALL cells are never modified (owned by lake/river logic).
+# Their altitudes participate in altitude windows so banks anchor properly.
+# Their kind counts as "GROUND-equivalent" in the silhouette window — they
+# are part of the disc body, not edges to be eaten by rounding.
+static func _round_corners(grid: TerrainGrid, params: TerrainGenerationParams) -> void:
+	if params.corner_round_passes <= 0:
+		return
+	var silhouette_offsets: Array[Vector2i] = _face_radius_offsets(params.silhouette_round_radius)
+	var altitude_offsets: Array[Vector2i] = _face_radius_offsets(params.altitude_round_radius)
+	for _i in params.corner_round_passes:
+		if params.silhouette_round_radius > 0:
+			_silhouette_round_pass(grid, params, silhouette_offsets)
+		if params.altitude_round_radius > 0:
+			_altitude_round_pass(grid, params, altitude_offsets)
+
+
+# Returns all (dx, dy) offsets in the face-Manhattan ball of radius r —
+# i.e., points reachable by ≤ r steps along DIR_NE/DIR_NW/DIR_SE/DIR_SW.
+# Includes (0, 0). For r=0 returns just [(0,0)]; r=1 returns 5 offsets;
+# r=2 returns 13; r=k returns 2k²+2k+1.
+static func _face_radius_offsets(r: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if r <= 0:
+		out.append(Vector2i.ZERO)
+		return out
+	for dy in range(-r, r + 1):
+		var x_span: int = r - absi(dy)
+		for dx in range(-x_span, x_span + 1):
+			out.append(Vector2i(dx, dy))
+	return out
+
+
+# Silhouette pass: radius-R majority filter with stickiness band.
+# Off-grid samples count as not-GROUND (so grid-corner cells lean toward
+# being EMPTY, matching the disc carve behavior). WATER and WATERFALL count
+# as GROUND-equivalent (part of the body).
+#
+# Decisions deferred until both pass scans complete so flips don't cascade
+# within one pass — keeps the filter idempotent for a fixed input.
+static func _silhouette_round_pass(
+	grid: TerrainGrid,
+	params: TerrainGenerationParams,
+	offsets: Array[Vector2i],
+) -> void:
+	var stickiness: float = params.silhouette_round_stickiness
+	var lo: float = 0.5 - stickiness
+	var hi: float = 0.5 + stickiness
+
+	var to_empty: Array[Vector2i] = []
+	var to_fill: Array = []  # entries: [Vector2i, alt:int]
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			# Only flip cells along the silhouette boundary — interior GROUND
+			# and far-from-disc EMPTY don't need analysis.
+			if c.kind != TerrainCell.Kind.GROUND and c.kind != TerrainCell.Kind.EMPTY:
+				continue
+			var ground_count: int = 0
+			var total: int = 0
+			var alt_samples: Array[int] = []  # only collected when this is an EMPTY cell that might fill
+			for o in offsets:
+				var nx: int = x + o.x
+				var ny: int = y + o.y
+				total += 1
+				var nc: TerrainCell = grid.at_or_null(nx, ny)
+				if nc == null:
+					continue  # off-grid counts as not-GROUND
+				if nc.kind == TerrainCell.Kind.EMPTY:
+					continue
+				ground_count += 1
+				if c.kind == TerrainCell.Kind.EMPTY:
+					alt_samples.append(nc.altitude)
+			if total == 0:
+				continue
+			var frac: float = float(ground_count) / float(total)
+			if c.kind == TerrainCell.Kind.GROUND:
+				if frac < lo:
+					to_empty.append(Vector2i(x, y))
+			else:  # EMPTY
+				if frac > hi and alt_samples.size() > 0:
+					alt_samples.sort()
+					var median: int = alt_samples[alt_samples.size() / 2]
+					to_fill.append([Vector2i(x, y), _snap_even(median, 0, params.top_altitude)])
+	for p in to_empty:
+		grid.at(p.x, p.y).kind = TerrainCell.Kind.EMPTY
+	for entry in to_fill:
+		var pos: Vector2i = entry[0]
+		var alt: int = entry[1]
+		var cell: TerrainCell = grid.at(pos.x, pos.y)
+		cell.kind = TerrainCell.Kind.GROUND
+		cell.altitude = alt
+		cell.ground_shape = TerrainCell.GroundShape.FULL_CUBE
+
+
+# Altitude pass: radius-R median filter at strength S. For each GROUND cell,
+# the median altitude across all GROUND/WATER/WATERFALL cells in the window
+# is computed; the cell's altitude is moved fractionally toward it.
+#
+# Strength=1 is a classic edge-preserving median filter. Strength<1 is a
+# gentler pull (lerp toward median) that leaves more of the original
+# heightfield intact. Final altitudes are snapped to even half-steps.
+#
+# WATER/WATERFALL altitudes participate in the median (so a bank cell next
+# to high water won't drop below water level on rounding) but are themselves
+# never modified.
+static func _altitude_round_pass(
+	grid: TerrainGrid,
+	params: TerrainGenerationParams,
+	offsets: Array[Vector2i],
+) -> void:
+	var strength: float = params.altitude_round_strength
+	if strength <= 0.0:
+		return
+	# Collect new altitudes first, write at end, so a cell's update doesn't
+	# bias its neighbor's window mid-pass.
+	var updates: Array = []  # entries: [Vector2i, new_alt:int]
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.GROUND:
+				continue
+			var alts: Array[int] = []
+			for o in offsets:
+				var nx: int = x + o.x
+				var ny: int = y + o.y
+				var nc: TerrainCell = grid.at_or_null(nx, ny)
+				if nc == null:
+					continue
+				if nc.kind == TerrainCell.Kind.EMPTY:
+					continue
+				alts.append(nc.altitude)
+			if alts.size() < 2:
+				continue
+			alts.sort()
+			var median: int = alts[alts.size() / 2]
+			var lerped: float = lerp(float(c.altitude), float(median), strength)
+			var new_alt: int = _snap_even(int(round(lerped)), 0, params.top_altitude)
+			if new_alt != c.altitude:
+				updates.append([Vector2i(x, y), new_alt])
+	for entry in updates:
+		var pos: Vector2i = entry[0]
+		grid.at(pos.x, pos.y).altitude = entry[1]
 
 
 # Enforces monotonic altitude descent in the SE/SW direction. After this
@@ -377,13 +647,15 @@ static func _trace_simple_river(
 	if outlet.x < 0:
 		return
 
-	# Walker starts ON the lake outlet (a WATER cell at top_altitude). Its
-	# first step will naturally drop to a GROUND cell south of the lake,
-	# emitting a WATERFALL for the lake's spillway. Without this — i.e. if
-	# we started directly on the GROUND entry cell — the lake-to-ground
-	# drop would never be recorded as a waterfall.
+	# Walker starts ON the lake outlet (a WATER cell at lake altitude). Its
+	# first step naturally drops to a GROUND cell south of the lake; if the
+	# apron didn't fully equalize the bank, the drop is recorded as a
+	# WATERFALL for the lake's spillway. Initial alt MUST be read from the
+	# outlet cell, not `params.top_altitude`: with `lake_depth_hs > 0` the
+	# lake sits below top_altitude, and using top_altitude here would emit
+	# a phantom waterfall floating above the actual water surface.
 	var pos: Vector2i = outlet
-	var alt: int = params.top_altitude
+	var alt: int = grid.at(outlet.x, outlet.y).altitude
 	var steps: int = 0
 
 	while steps < _MAX_RIVER_STEPS:
@@ -406,8 +678,18 @@ static func _trace_simple_river(
 		# at altitudes ≤ current, so the walker always descends or stays
 		# same-tier. Restricting to SE/SW prevents zig-zag back into the
 		# trail (which would otherwise close the walker off in a loop of its
-		# own WATER cells). Cap drop at max_drop_hs to keep waterfalls within
-		# the painter's vertical span.
+		# own WATER cells).
+		#
+		# Drops larger than max_drop_hs are CAPPED rather than rejected: the
+		# walker treats the neighbor as if it were at the max-drop basin and
+		# emits a max_drop_hs waterfall there. The walker then resumes one
+		# cell beyond at the capped basin altitude. If the underlying cliff
+		# is taller than max_drop_hs, the next iteration's drop is still too
+		# large and another waterfall is emitted — producing a stair-step
+		# cascade that descends the cliff one max_drop_hs tier at a time
+		# without ever boxing the walker in. Without this cap, a steep
+		# heightfield (small grad_factor / large weight sum) would abort the
+		# river walker whenever its tracked altitude exceeded a cliff edge.
 		var cands: Array[Vector2i] = []
 		var cand_alts: Array[int] = []
 		for d in [DIR_SE, DIR_SW]:
@@ -417,10 +699,8 @@ static func _trace_simple_river(
 				continue
 			if nc.kind != TerrainCell.Kind.GROUND:
 				continue
-			if alt - nc.altitude > max_drop_hs:
-				continue
 			cands.append(nxy)
-			cand_alts.append(nc.altitude)
+			cand_alts.append(maxi(nc.altitude, alt - max_drop_hs))
 
 		if cands.is_empty():
 			push_warning(

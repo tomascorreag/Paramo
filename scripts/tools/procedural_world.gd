@@ -74,8 +74,26 @@ func regenerate() -> void:
 
 	var params: TerrainGenerationParams = _resolve_params()
 
-	var grid: TerrainGrid = TerrainGenerator.generate(params)
+	# Validate layer ceiling: cells generated above the tallest layer's
+	# altitude have no place to be painted and silently disappear (the
+	# painter logs a per-cell warning, but by then the map is already
+	# half-rendered). Surface this up-front so the author sees a single
+	# clear message instead of N painter warnings.
 	var layers_by_altitude: Dictionary = _build_layer_map()
+	var max_layer_alt: int = -1
+	for alt in layers_by_altitude.keys():
+		if int(alt) > max_layer_alt:
+			max_layer_alt = int(alt)
+	if max_layer_alt >= 0 and params.top_altitude > max_layer_alt:
+		push_warning(
+			"ProceduralWorld: top_altitude=%d exceeds tallest TileMapLayer altitude=%d. "
+			% [params.top_altitude, max_layer_alt]
+			+ "Cells above %d will not be painted. " % max_layer_alt
+			+ "Add Ground layers up to altitude %d, or lower top_altitude to %d."
+			% [params.top_altitude, max_layer_alt]
+		)
+
+	var grid: TerrainGrid = TerrainGenerator.generate(params)
 	TerrainPainter.paint(grid, layers_by_altitude, tile_set, params.seed)
 
 	# Pathfinder is not an @tool script — calling its methods from the editor
