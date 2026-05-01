@@ -153,6 +153,17 @@ const EDGE_SE: StringName           = &"EDGE_SE"
 const EDGE_SW: StringName           = &"EDGE_SW"
 
 
+# --- Two-edge water channels (single-tile-wide rivers) ----------------------
+# Water tile with banks on the two named opposite faces; the perpendicular
+# axis is the open channel. Naming follows the existing EDGE_* convention:
+# the suffix lists the faces with land/banks.
+#
+#     EDGE_NE_SW = banks on NE + SW faces, channel runs along the NW-SE axis
+#     EDGE_NW_SE = banks on NW + SE faces, channel runs along the NE-SW axis
+const EDGE_NE_SW: StringName        = &"EDGE_NE_SW"
+const EDGE_NW_SE: StringName        = &"EDGE_NW_SE"
+
+
 # --- Water shore corners (named after the diamond apex they surround) -------
 # CORNER_N = water with both NW and NE faces meeting land (the N apex of the
 # diamond pokes into land). E/S/W follow analogously. Convex water corner

@@ -52,7 +52,7 @@ varying vec4 v_modulate;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
-	v_modulate = MODULATE;
+	v_modulate = COLOR;
 }
 
 void fragment() {

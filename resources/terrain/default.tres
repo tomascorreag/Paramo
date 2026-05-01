@@ -1,29 +1,27 @@
-[gd_resource type="Resource" script_class="TerrainGenerationParams" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://dtaxcdk7qsxnl"]
 
-[ext_resource type="Script" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+[ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/data/terrain_biome_band.gd" id="1_7ieos"]
+
+[sub_resource type="Resource" id="Resource_7bfmk"]
+script = ExtResource("1_7ieos")
+weight = 4.0
+
+[sub_resource type="Resource" id="Resource_22lfa"]
+script = ExtResource("1_7ieos")
+biome = 1
+weight = 0.5
+
+[sub_resource type="Resource" id="Resource_c2ujl"]
+script = ExtResource("1_7ieos")
+biome = 2
+
+[sub_resource type="Resource" id="Resource_qgnfn"]
+script = ExtResource("1_7ieos")
+biome = 3
+weight = 1.5
 
 [resource]
 script = ExtResource("1")
-seed = 0
-width = 48
-height = 48
-top_altitude = 16
-noise_frequency = 0.05
 noise_strength = 0.6
-weight_n = 1.0
-weight_ne = 0.6
-weight_nw = 0.6
-disc_center_x_frac = 0.35
-disc_center_y_frac = 0.35
-disc_radius_frac = 0.55
-disc_edge_frequency = 0.06
-disc_edge_jitter = 0.35
-biome_noise_frequency = 0.15
-biome_noise_amplitude = 4.0
-lake_radius = 2.8
-lake_jitter_strength = 1.5
-lake_aspect_min = 0.5
-lake_aspect_max = 2.0
-lake_back_margin = 2
-south_bias = 1.0
-max_drop_cubes = 4
+biome_bands = Array[ExtResource("1_7ieos")]([SubResource("Resource_7bfmk"), SubResource("Resource_22lfa"), SubResource("Resource_c2ujl"), SubResource("Resource_qgnfn")])

@@ -94,7 +94,7 @@ func regenerate() -> void:
 		)
 
 	var grid: TerrainGrid = TerrainGenerator.generate(params)
-	TerrainPainter.paint(grid, layers_by_altitude, tile_set, params.seed)
+	TerrainPainter.paint(grid, layers_by_altitude, tile_set, params)
 
 	# Pathfinder is not an @tool script — calling its methods from the editor
 	# (e.g. via the Regenerate button) errors out with "Attempt to call a

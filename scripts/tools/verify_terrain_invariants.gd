@@ -78,6 +78,12 @@ const SCENARIOS: Array = [
 		"silhouette_round_radius": 4, "altitude_round_radius": 4,
 		"altitude_round_strength": 1.0}},
 
+	# Slope swap stress.
+	{"name": "slope_swap_heavy",  "overrides": {"slope_swap_chance": 0.5}},
+	{"name": "slope_swap_clustered", "overrides": {
+		"slope_swap_chance": 0.05, "slope_swap_adjacent_multiplier": 10.0,
+	}},
+
 	# Combined worst-case.
 	{"name": "kitchen_sink",      "overrides": {
 		"top_altitude": 32, "noise_strength": 2.0, "noise_frequency": 0.2,
@@ -104,6 +110,7 @@ var CHECKS: Array = [
 	{"name": "lake_altitude_consistent", "fn": _check_lake_altitude_consistent},
 	{"name": "shore_mask_set_on_water", "fn": _check_shore_mask_on_water},
 	{"name": "no_islands", "fn": _check_no_islands},
+	{"name": "slope_endpoints_valid", "fn": _check_slope_endpoints_valid},
 ]
 
 
@@ -381,6 +388,48 @@ static func _check_no_islands(grid: TerrainGrid, _params: TerrainGenerationParam
 	return ["non-EMPTY terrain has %d disconnected components (sizes: %s)" % [
 		component_sizes.size(), str(component_sizes),
 	]]
+
+
+# Every SLOPE_NE/SLOPE_NW emitted by the slope-swap pass must still bridge
+# two FULL_CUBE GROUND neighbors at the right altitudes (low neighbor at
+# slope.altitude, high neighbor at slope.altitude + 2). The swap pass enforces
+# this at apply time; this check defends against future passes mutating
+# altitudes or shapes after the swap.
+static func _check_slope_endpoints_valid(grid: TerrainGrid, _params: TerrainGenerationParams) -> Array:
+	var fails: Array = []
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.GROUND:
+				continue
+			var hi_dir: Vector2i
+			var lo_dir: Vector2i
+			match c.ground_shape:
+				TerrainCell.GroundShape.SLOPE_NE:
+					hi_dir = DiamondCompass.DIR_NE
+					lo_dir = DiamondCompass.DIR_SW
+				TerrainCell.GroundShape.SLOPE_NW:
+					hi_dir = DiamondCompass.DIR_NW
+					lo_dir = DiamondCompass.DIR_SE
+				_:
+					continue
+			var hi: TerrainCell = grid.at_or_null(x + hi_dir.x, y + hi_dir.y)
+			if hi == null or hi.kind != TerrainCell.Kind.GROUND \
+					or hi.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
+					or hi.altitude != c.altitude + 2:
+				var hi_alt: int = hi.altitude if hi != null else -1
+				fails.append("slope (%d,%d) high neighbor invalid (alt=%d, expected %d)" % [
+					x, y, hi_alt, c.altitude + 2,
+				])
+			var lo: TerrainCell = grid.at_or_null(x + lo_dir.x, y + lo_dir.y)
+			if lo == null or lo.kind != TerrainCell.Kind.GROUND \
+					or lo.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
+					or lo.altitude != c.altitude:
+				var lo_alt: int = lo.altitude if lo != null else -1
+				fails.append("slope (%d,%d) low neighbor invalid (alt=%d, expected %d)" % [
+					x, y, lo_alt, c.altitude,
+				])
+	return fails
 
 
 # ----------------------------------------------------------------------------

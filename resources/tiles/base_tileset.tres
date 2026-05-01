@@ -647,6 +647,18 @@ use_texture_padding = false
 0:8/0/material = ExtResource("11_r4tim")
 0:8/0/y_sort_origin = -16
 0:8/0/custom_data_0 = "FALL_NENW"
+2:0/size_in_atlas = Vector2i(1, 2)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, -8)
+2:0/0/material = ExtResource("4_wsw")
+2:0/0/y_sort_origin = -16
+2:0/0/custom_data_0 = "EDGE_NW_SE"
+3:0/size_in_atlas = Vector2i(1, 2)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, -8)
+3:0/0/material = ExtResource("4_wse")
+3:0/0/y_sort_origin = -16
+3:0/0/custom_data_0 = "EDGE_NE_SW"
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_4ov3m"]
 texture = ExtResource("14_8eom5")
@@ -679,6 +691,13 @@ texture_region_size = Vector2i(32, 16)
 3:0/0/texture_origin = Vector2i(0, 8)
 3:0/0/y_sort_origin = -16
 3:0/0/custom_data_0 = "SLOPE_NE"
+0:2/size_in_atlas = Vector2i(1, 2)
+0:2/0 = 0
+0:2/0/texture_origin = Vector2i(0, -8)
+0:2/0/y_sort_origin = -16
+0:2/0/custom_data_0 = "FULL_CUBE"
+0:2/0/custom_data_2 = 0.2
+0:2/0/custom_data_3 = true
 
 [resource]
 tile_shape = 1

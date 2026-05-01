@@ -39,8 +39,6 @@ const _PD_LAYER: String = "preferred_density"
 const _SIGMA_ALT: float = 2.0
 const _SIGMA_DENS: float = 0.35
 const _EPSILON: float = 0.05
-# Mirrors _biome_for() in terrain_generator.gd: GRASS band ends at perturbed = 4.
-const _GRASS_BAND_TOP: float = 4.0
 
 
 # Water alternative_tile mapping. Indexed by direction → alt id painted in
@@ -64,14 +62,22 @@ const _WATER_ALT_NW: int = 4
 # `layers_by_altitude` maps altitude (int half-steps) → TileMapLayer.
 # Caller supplies the dict so the painter doesn't need to know the layer-naming
 # scheme; missing altitudes are skipped with a warning.
+#
+# `params` is required: the painter resolves biome-band thresholds and the
+# grass-band top from it (used by cliff-back biome stacking and the grass
+# variant density picker), and reads the rng seed for deterministic variant
+# selection.
 static func paint(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	tile_set: TileSet,
-	seed: int = 0,
+	params: TerrainGenerationParams,
 ) -> void:
 	if tile_set == null:
 		push_error("TerrainPainter.paint: tile_set is null.")
+		return
+	if params == null:
+		push_error("TerrainPainter.paint: params is null.")
 		return
 
 	# Cache one TileKindIndex per source we'll touch.
@@ -82,6 +88,13 @@ static func paint(
 	var grass_variants: Array = _build_variant_table(
 		indices[SOURCE_GRASS], _GRASS_FULL_CUBE_KIND
 	)
+
+	# Resolve once and thread through. Both are pure functions of params, so
+	# they're stable across the whole paint pass and cheap to compute (single
+	# linear walk over biome_bands).
+	var thresholds: Array = params.resolve_biome_thresholds()
+	var grass_top: float = params.grass_band_top()
+	var seed: int = params.seed
 
 	# Clear all target layers first so re-runs don't leave stale tiles.
 	for alt_key in layers_by_altitude:
@@ -94,7 +107,10 @@ static func paint(
 			var c: TerrainCell = grid.at(x, y)
 			if c.kind == TerrainCell.Kind.EMPTY:
 				continue
-			_paint_cell(grid, layers_by_altitude, indices, grass_variants, seed, x, y, c)
+			_paint_cell(
+				grid, layers_by_altitude, indices, grass_variants,
+				thresholds, grass_top, seed, x, y, c,
+			)
 
 
 # ----------------------------------------------------------------------------
@@ -106,6 +122,8 @@ static func _paint_cell(
 	layers_by_altitude: Dictionary,
 	indices: Dictionary,
 	grass_variants: Array,
+	thresholds: Array,
+	grass_top: float,
 	seed: int,
 	x: int,
 	y: int,
@@ -123,13 +141,16 @@ static func _paint_cell(
 
 	match c.kind:
 		TerrainCell.Kind.GROUND:
-			_paint_ground(layer, indices, grass_variants, seed, pos, c)
+			_paint_ground(layer, indices, grass_variants, grass_top, seed, pos, c)
 			# A GROUND cell's cube only renders at one altitude. When a face
 			# neighbor sits more than one cube below, the cliff face exposes
 			# a void on the layers between this cell's altitude and the
 			# neighbor's. Stack biome-matched FULL_CUBEs at this cell's coord
 			# down to (lowest neighbor + 2) to fill that void.
-			_paint_ground_cliff_back(grid, layers_by_altitude, indices, grass_variants, seed, pos, c)
+			_paint_ground_cliff_back(
+				grid, layers_by_altitude, indices, grass_variants,
+				thresholds, grass_top, seed, pos, c,
+			)
 		TerrainCell.Kind.WATER:
 			_paint_water(layer, indices, pos, c)
 			# Water shader is semi-transparent. Fill the volume directly under
@@ -164,6 +185,7 @@ static func _paint_ground(
 	layer: TileMapLayer,
 	indices: Dictionary,
 	grass_variants: Array,
+	grass_top: float,
 	seed: int,
 	pos: Vector2i,
 	c: TerrainCell,
@@ -186,7 +208,7 @@ static func _paint_ground(
 		return
 	var coord: Vector2i = idx.coord(kind)
 	if src == SOURCE_GRASS and kind == _GRASS_FULL_CUBE_KIND:
-		var density: float = _grass_density_from_score(c.biome_score)
+		var density: float = _grass_density_from_score(c.biome_score, grass_top)
 		coord = _pick_grass_variant_coord(
 			grass_variants, c.altitude, density, pos.x, pos.y, c.altitude, seed, coord
 		)
@@ -208,6 +230,8 @@ static func _paint_ground_cliff_back(
 	layers_by_altitude: Dictionary,
 	indices: Dictionary,
 	grass_variants: Array,
+	thresholds: Array,
+	grass_top: float,
 	seed: int,
 	pos: Vector2i,
 	c: TerrainCell,
@@ -239,7 +263,7 @@ static func _paint_ground_cliff_back(
 	while alt >= stop_alt:
 		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
 		if layer != null:
-			var tier_biome: int = _biome_for_altitude_band(alt)
+			var tier_biome: int = _biome_for_altitude_band(alt, thresholds)
 			var src: int = _source_for_biome(tier_biome)
 			var idx: TileKindIndex = indices[src]
 			if not idx.has(TileSlots.FULL_CUBE):
@@ -249,7 +273,7 @@ static func _paint_ground_cliff_back(
 				var coord: Vector2i = idx.coord(TileSlots.FULL_CUBE)
 				var stack_coord: Vector2i = coord
 				if src == SOURCE_GRASS:
-					var density: float = _grass_density_from_score(float(alt))
+					var density: float = _grass_density_from_score(float(alt), grass_top)
 					stack_coord = _pick_grass_variant_coord(
 						grass_variants, alt, density, pos.x, pos.y, alt, seed, coord
 					)
@@ -257,11 +281,18 @@ static func _paint_ground_cliff_back(
 		alt -= 2
 
 
-# Mirrors `_biome_for` in terrain_generator.gd, sans noise. Used by
-# cliff-back painting. The generator now returns GRASS for every altitude;
-# kept as a function so cliff-back code keeps a single source of truth.
-static func _biome_for_altitude_band(_alt: int) -> int:
-	return TerrainCell.Biome.GRASS
+# Resolves the biome for a cliff-back tier from the band thresholds (no
+# noise — cliff-back paint doesn't have access to the generator's biome
+# noise field, so band boundaries on cliff faces are sharp horizontal lines
+# even when surface tiles next to them are biome-jittered. Designer can
+# lower biome_noise_amplitude to minimize visible mismatch at cliff lips,
+# or accept the seam as a stylistic break between surface and cliff).
+static func _biome_for_altitude_band(alt: int, thresholds: Array) -> int:
+	var a: float = float(alt)
+	for entry in thresholds:
+		if a < entry[0]:
+			return entry[1]
+	return thresholds.back()[1]
 
 
 static func _paint_water(
@@ -451,10 +482,14 @@ static func _basin_kind_for_mask(
 	if face == 2: return TileSlots.EDGE_NW
 	if face == 4: return TileSlots.EDGE_SE
 	if face == 8: return TileSlots.EDGE_SW
-	# Multi-bit fallback: lateral banks on more than one side (1-wide drop
-	# with banks on NW+SE for NE-rise, or NE+SW for NW-rise). Pick the first
-	# bank by deterministic priority (NW > SE > SW > NE) so paints stay
-	# stable seed-to-seed; either single bank reads as a shore edge.
+	# 1-wide drop: lateral banks on opposite face neighbors. After stripping
+	# the cliff face(s), banks land on NW+SE for an NE-rise or NE+SW for an
+	# NW-rise — exactly the two channel tiles. Basin flow is -fall_rise_dir
+	# (SW for NE-rise, SE for NW-rise), matching the channel art's drawn flow.
+	if face == 6: return TileSlots.EDGE_NW_SE  # banks NW+SE, channel NE-SW
+	if face == 9: return TileSlots.EDGE_NE_SW  # banks NE+SW, channel NW-SE
+	# Remaining multi-bit cases (3-sided, adjacent pair after partial strip).
+	# Pick the first bank by deterministic priority so paints stay stable.
 	if face & 2: return TileSlots.EDGE_NW
 	if face & 4: return TileSlots.EDGE_SE
 	if face & 8: return TileSlots.EDGE_SW
@@ -560,11 +595,17 @@ static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
 
 
 # Maps the continuous biome score into a [0,1] "grass centrality":
-#   1.0 = deep in grass region (low altitude, no noise push toward dirt)
-#   0.0 = right at the grass/dirt threshold
-# Mirrors the GRASS band cutoff used by _biome_for in terrain_generator.gd.
-static func _grass_density_from_score(biome_score: float) -> float:
-	return clampf((_GRASS_BAND_TOP - biome_score) / _GRASS_BAND_TOP, 0.0, 1.0)
+#   1.0 = deep in grass region (low score, no noise push toward dirt)
+#   0.0 = at or above the grass band's top (i.e. would have transitioned
+#         out of grass without the floor at 0)
+# `grass_top` is the perturbed-altitude top of the GRASS band, resolved
+# from params.biome_bands. Treated as an upper bound; if 0 we'd divide by
+# zero, so the param resolver guarantees a positive value (falling back to
+# top_altitude when no GRASS band is present).
+static func _grass_density_from_score(biome_score: float, grass_top: float) -> float:
+	if grass_top <= 0.0:
+		return 1.0
+	return clampf((grass_top - biome_score) / grass_top, 0.0, 1.0)
 
 
 # Weighted variant pick. Each variant scores against the cell via two gaussians
@@ -655,9 +696,11 @@ static func _shore_kind_for_mask(mask: int) -> StringName:
 		5:  return TileSlots.CORNER_E
 		12: return TileSlots.CORNER_S
 		10: return TileSlots.CORNER_W
+		6:  return TileSlots.EDGE_NW_SE  # banks NW+SE, channel runs NE-SW axis
+		9:  return TileSlots.EDGE_NE_SW  # banks NE+SW, channel runs NW-SE axis
 	if face != 0:
-		# Unsupported face combination (opposite-pair, 3-sided, fully enclosed).
-		# Fall back to the lowest-bit single edge so something paints.
+		# Unsupported face combination (3-sided, fully enclosed). Fall back to
+		# the lowest-bit single edge so something paints.
 		if mask & 1: return TileSlots.EDGE_NE
 		if mask & 2: return TileSlots.EDGE_NW
 		if mask & 4: return TileSlots.EDGE_SE

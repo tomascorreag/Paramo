@@ -30,6 +30,10 @@ extends RefCounted
 #   5. Support water           (lifts every WATER cell's 4 face GROUND
 #                   neighbors to ≥ the water's altitude — banks the river;
 #                   WATERFALL cells are skipped so their cliff face shows)
+#   5b. Slope swap             (probabilistically replaces some FULL_CUBE
+#                   cells with SLOPE_NE/SLOPE_NW where the swap bridges two
+#                   walkable FULL_CUBE neighbors one cube apart along the
+#                   rise axis; default chance 0 leaves the grid unchanged)
 #   6. Biome assignment        (always GRASS; biome_score = altitude + noise
 #                   feeds the painter's grass variant picker)
 #   7. Shore mask              (4-bit land-neighbor mask → tile_kind at paint)
@@ -64,6 +68,7 @@ const _APEX_BITS: Array[int] = DiamondCompass.APEX_BITS
 const _SEED_OFFSET_BIOME: int = 0x9E3779B9
 const _SEED_OFFSET_LAKE_JITTER: int = 0xBEEF1010
 const _SEED_OFFSET_MASK: int = 0xC1FCD15C
+const _SEED_OFFSET_SLOPES: int = 0xA5105E0F
 
 # Safety cap on the river walker. Module-level constant — designers don't
 # need to tune this; it should only kick in on degenerate maps.
@@ -105,6 +110,7 @@ static func generate(params: TerrainGenerationParams) -> TerrainGrid:
 		_emit_perpendicular_falls(grid, max_drop_hs)
 	_support_water(grid)
 	_remove_islands(grid)
+	_swap_full_cubes_with_slopes(grid, params)
 	_assign_biomes(grid, params, biome_noise)
 	_assign_shore_masks(grid)
 
@@ -275,6 +281,213 @@ static func _remove_islands(grid: TerrainGrid) -> void:
 			c.fall_rise_dir_b = Vector2i.ZERO
 			c.drop_height_b = 0
 			c.river_width = 0
+
+
+# Step 5b: probabilistically replace some FULL_CUBE cells with SLOPE_NE or
+# SLOPE_NW so the player can walk between adjacent altitude tiers. A swap
+# fires when the cell sits next to two walkable FULL_CUBE neighbors one
+# cube apart along the rise axis. Two altitude variants are considered per
+# cell at altitude A (per orientation):
+#
+#   "low" variant  → slope altitude A     (cell stays at A; high end at A+2,
+#                    so the high-side neighbor must be FULL_CUBE at A+2 and
+#                    the low-side neighbor FULL_CUBE at A)
+#   "high" variant → slope altitude A-2   (cell drops to A-2; high end at A,
+#                    so the high-side neighbor must be FULL_CUBE at A and the
+#                    low-side neighbor FULL_CUBE at A-2)
+#
+# A cell's eligible variants are collected, a single rng roll < chance gates
+# the swap, then one variant is picked uniformly. This keeps the per-cell
+# swap probability equal to slope_swap_chance regardless of how many
+# variants are eligible.
+#
+# Downward ("high") variants (alt_offset > 0) are skipped when any face
+# neighbor is WATER or WATERFALL: that bank was lifted by _support_water to
+# match the water surface, so lowering the cell would leave water hanging
+# over a sunken bank. Low variants stay legal in the same situation because
+# they don't change cell.altitude.
+#
+# Iteration is row-major and deterministic at fixed seed; the rng is
+# decorrelated from the master seed via _SEED_OFFSET_SLOPES so changing
+# slope_swap_chance doesn't shift heightfield/lake/river patterns. Each
+# placed slope CLAIMS its two endpoint neighbors (low + high) so a later
+# swap can't repurpose them — which would silently invalidate the first
+# slope's bridge by turning a FULL_CUBE endpoint into a SLOPE_*.
+static func _swap_full_cubes_with_slopes(
+	grid: TerrainGrid,
+	params: TerrainGenerationParams,
+) -> void:
+	if params.slope_swap_chance <= 0.0:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = params.seed ^ _SEED_OFFSET_SLOPES
+	var claimed: Dictionary = {}
+	# Variant table: (shape, high_dir, low_dir, alt_offset). alt_offset is
+	# subtracted from the cell's current altitude to produce the slope's
+	# stored altitude (the low end). 0 = "low" variant, 2 = "high" variant.
+	var variants: Array = [
+		[TerrainCell.GroundShape.SLOPE_NE, DIR_NE, DIR_SW, 0],
+		[TerrainCell.GroundShape.SLOPE_NE, DIR_NE, DIR_SW, 2],
+		[TerrainCell.GroundShape.SLOPE_NW, DIR_NW, DIR_SE, 0],
+		[TerrainCell.GroundShape.SLOPE_NW, DIR_NW, DIR_SE, 2],
+	]
+	for y in grid.height:
+		for x in grid.width:
+			var pos := Vector2i(x, y)
+			if claimed.has(pos):
+				continue
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.GROUND:
+				continue
+			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
+				continue
+			# A downward variant lowers the cell's altitude. If any face
+			# neighbor is WATER or WATERFALL, that bank was lifted by
+			# _support_water to match the water surface; lowering it would
+			# leave the water hanging over a sunken cell. Cache once so we
+			# don't rescan four neighbors per variant.
+			var has_water_face: bool = _has_water_face_neighbor(grid, pos)
+			var eligible: Array = []
+			for v in variants:
+				var alt_offset: int = int(v[3])
+				if alt_offset > 0 and has_water_face:
+					continue
+				var slope_alt: int = c.altitude - alt_offset
+				if slope_alt < 0:
+					continue
+				if _slope_swap_eligible(grid, pos, slope_alt, v[1], v[2], claimed):
+					eligible.append(v)
+			if eligible.is_empty():
+				continue
+			# Cluster boost: multiply the base chance when a face neighbor is
+			# already a slope. Iteration is row-major and reads the live grid,
+			# so each placed slope expands the boosted area for cells the
+			# pass hasn't visited yet — slopes seed-and-grow into clusters.
+			var effective_chance: float = params.slope_swap_chance
+			if params.slope_swap_adjacent_multiplier > 1.0 \
+					and _has_slope_face_neighbor(grid, pos):
+				effective_chance = clampf(
+					effective_chance * params.slope_swap_adjacent_multiplier,
+					0.0,
+					1.0,
+				)
+			if rng.randf() >= effective_chance:
+				continue
+			var pick: Array = eligible[rng.randi() % eligible.size()]
+			c.ground_shape = pick[0]
+			c.altitude -= int(pick[3])
+			claimed[pos] = true
+			claimed[pos + (pick[1] as Vector2i)] = true
+			claimed[pos + (pick[2] as Vector2i)] = true
+			# Lift any GROUND face neighbor sitting below the slope's stored
+			# (low-end) altitude so the slope's four sides are fully backed by
+			# terrain — without this, the perpendicular SE/SW (or SW/NE for
+			# SLOPE_NW) faces can expose voids when those neighbors are on a
+			# lower tier. WATER/WATERFALL/EMPTY are left alone (their altitude
+			# is owned by other systems / they're off-disc).
+			_lift_slope_skirt(grid, pos, c.altitude)
+
+
+# Raises every GROUND face neighbor of `pos` to at least `min_alt` (the
+# slope's stored low-end altitude). Prevents visible holes around a freshly
+# placed slope: the painter only stacks fill cubes UNDER c.altitude, so a
+# perpendicular neighbor sitting on a lower tier leaves a void on the
+# slope's side face. The two bridging neighbors (low at min_alt, high at
+# min_alt+2) are no-ops here by construction; only the perpendicular pair
+# can need lifting. WATER/WATERFALL altitudes are owned by the river/lake
+# systems so we don't touch them — a slope abutting water at a lower
+# altitude is rare (the water-face guard already blocks downward swaps in
+# that case) and falls through to the painter's existing geometry.
+static func _lift_slope_skirt(grid: TerrainGrid, pos: Vector2i, min_alt: int) -> void:
+	for d in _DIRS:
+		var nc: TerrainCell = grid.at_or_null(pos.x + d.x, pos.y + d.y)
+		if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+			continue
+		if nc.altitude < min_alt:
+			nc.altitude = min_alt
+
+
+# True iff any of the cell's four face neighbors is already a SLOPE_NE or
+# SLOPE_NW. Drives the slope-swap pass's cluster boost: cells next to an
+# existing slope roll against a higher effective chance.
+static func _has_slope_face_neighbor(grid: TerrainGrid, pos: Vector2i) -> bool:
+	for d in _DIRS:
+		var nc: TerrainCell = grid.at_or_null(pos.x + d.x, pos.y + d.y)
+		if nc == null or nc.kind != TerrainCell.Kind.GROUND:
+			continue
+		if nc.ground_shape == TerrainCell.GroundShape.SLOPE_NE \
+				or nc.ground_shape == TerrainCell.GroundShape.SLOPE_NW:
+			return true
+	return false
+
+
+# True iff any of the cell's four face neighbors is WATER or WATERFALL.
+# Used by the slope-swap pass to forbid downward swaps next to water — the
+# bank was lifted to the water surface by _support_water, and lowering it
+# would leave the water unsupported.
+static func _has_water_face_neighbor(grid: TerrainGrid, pos: Vector2i) -> bool:
+	for d in _DIRS:
+		var nc: TerrainCell = grid.at_or_null(pos.x + d.x, pos.y + d.y)
+		if nc == null:
+			continue
+		if nc.kind == TerrainCell.Kind.WATER or nc.kind == TerrainCell.Kind.WATERFALL:
+			return true
+	return false
+
+
+# True iff the cell at `pos` could carry a slope of stored altitude `slope_alt`
+# rising toward `high_dir` (descending toward `low_dir`). The high-side
+# neighbor must be FULL_CUBE GROUND at slope_alt+2 and the low-side neighbor
+# FULL_CUBE GROUND at slope_alt — so the slope's two ends meet existing
+# walkable surfaces with no leftover cliff at either end. Either endpoint
+# already claimed by another slope disqualifies the candidate.
+#
+# The two perpendicular face neighbors (NW/SE for SLOPE_NE; NE/SW for
+# SLOPE_NW) get a softer check: they may sit below slope_alt and will be
+# lifted by _lift_slope_skirt after the swap — but only if they're not
+# already claimed as another slope's bridge endpoint, since lifting a
+# claimed endpoint would silently invalidate that slope's altitude pair.
+static func _slope_swap_eligible(
+	grid: TerrainGrid,
+	pos: Vector2i,
+	slope_alt: int,
+	high_dir: Vector2i,
+	low_dir: Vector2i,
+	claimed: Dictionary,
+) -> bool:
+	var hi_pos: Vector2i = pos + high_dir
+	if claimed.has(hi_pos):
+		return false
+	var hi: TerrainCell = grid.at_or_null(hi_pos.x, hi_pos.y)
+	if hi == null or hi.kind != TerrainCell.Kind.GROUND:
+		return false
+	if hi.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
+		return false
+	if hi.altitude != slope_alt + 2:
+		return false
+	var lo_pos: Vector2i = pos + low_dir
+	if claimed.has(lo_pos):
+		return false
+	var lo: TerrainCell = grid.at_or_null(lo_pos.x, lo_pos.y)
+	if lo == null or lo.kind != TerrainCell.Kind.GROUND:
+		return false
+	if lo.ground_shape != TerrainCell.GroundShape.FULL_CUBE:
+		return false
+	if lo.altitude != slope_alt:
+		return false
+	# Perpendicular faces — must not require lifting a claimed cell.
+	for d in _DIRS:
+		if d == high_dir or d == low_dir:
+			continue
+		var pp: Vector2i = pos + d
+		if not claimed.has(pp):
+			continue
+		var pn: TerrainCell = grid.at_or_null(pp.x, pp.y)
+		if pn == null or pn.kind != TerrainCell.Kind.GROUND:
+			continue
+		if pn.altitude < slope_alt:
+			return false
+	return true
 
 
 # Apex (= lake center) is the highest GROUND cell in a small corner window
@@ -1283,15 +1496,21 @@ static func _lift_neighbor(grid: TerrainGrid, x: int, y: int, min_alt: int) -> v
 
 
 # ----------------------------------------------------------------------------
-# Step 6: biomes (grass-only)
+# Step 6: biomes (banded)
 # ----------------------------------------------------------------------------
 
-# `_biome_for` returns GRASS unconditionally — DIRT/ROCK/SNOW bands are gone.
-# `biome_score` is still computed (altitude + biome_noise) because the
-# painter's grass variant picker reads it to drive its gaussian over
-# preferred_density per variant. The spatial correlation of the biome noise
-# is what produces the "clumping" effect on grass variant selection.
+# Picks each cell's biome by mapping its perturbed altitude into the band
+# thresholds resolved from params.biome_bands. `biome_score` (= altitude +
+# biome_noise * biome_noise_amplitude) drives both the band lookup and the
+# painter's grass variant picker — same noise field for both, so a cell that
+# noise-pushed into the dirt band visually carries the dirt biome AND a
+# higher grass-density score (only relevant if it remains GRASS via design).
+#
+# Band thresholds are resolved once per generate() — cheap (~1 lookup per
+# band per cell, typically 4 bands). Empty/zero-weight bands fall back to
+# grass-only via params.resolve_biome_thresholds().
 static func _assign_biomes(grid: TerrainGrid, params: TerrainGenerationParams, noise: FastNoiseLite) -> void:
+	var thresholds: Array = params.resolve_biome_thresholds()
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
@@ -1299,7 +1518,17 @@ static func _assign_biomes(grid: TerrainGrid, params: TerrainGenerationParams, n
 				continue
 			var n: float = noise.get_noise_2d(x, y) * params.biome_noise_amplitude
 			c.biome_score = float(c.altitude) + n
-			c.biome = TerrainCell.Biome.GRASS
+			c.biome = _biome_from_thresholds(c.biome_score, thresholds)
+
+
+# Returns the biome of the first band whose top exceeds `score`. The last
+# band's top is +INF so this always finds a match; thresholds is guaranteed
+# non-empty by `resolve_biome_thresholds`.
+static func _biome_from_thresholds(score: float, thresholds: Array) -> int:
+	for entry in thresholds:
+		if score < entry[0]:
+			return entry[1]
+	return thresholds.back()[1]
 
 
 # ----------------------------------------------------------------------------

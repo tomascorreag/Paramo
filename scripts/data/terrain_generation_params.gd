@@ -12,8 +12,10 @@ extends Resource
 #
 # Heightfield = noise + three gradients (S→N, SW→NE, SE→NW), snapped to
 # even half-steps. A noisy disc mask carves the iso footprint into a
-# roughly circular shape with the back walls (NW/NE) intact. Grass-only
-# biome — DIRT/ROCK/SNOW bands are not produced.
+# roughly circular shape with the back walls (NW/NE) intact. Biome bands
+# (see `biome_bands`) split the altitude range into stacked slices —
+# default preset gives GRASS at the bottom 50% and DIRT/ROCK/SNOW splitting
+# the top 50% evenly.
 #
 # Coordinate convention (matches DiamondCompass / TileMapLayer iso):
 #   - grid (0, 0)            = visual N corner (top of screen)
@@ -148,10 +150,113 @@ extends Resource
 @export_range(0.005, 0.2, 0.005) var biome_noise_frequency: float = 0.15
 
 ## Amplitude of the biome noise added to altitude when computing
-## `biome_score`. Effectively how much the per-cell grass variant can drift
-## away from the altitude-preferred variant. 0 = strict altitude bands;
-## higher = more visual variety per altitude tier.
+## `biome_score`. Two effects: (1) jitters band boundaries — a cell's
+## biome is picked by `altitude + biome_noise * amplitude` so band edges
+## become irregular rather than horizontal lines; (2) drives the painter's
+## grass variant picker. 0 = strict altitude bands. Higher = more
+## visual variety per altitude tier and more interleaving at band borders.
 @export_range(0.0, 6.0, 0.1) var biome_noise_amplitude: float = 4.0
+
+## Altitude bands defining which biome occupies which slice of the
+## [0, top_altitude] range. Bands stack bottom-up in array order: index 0
+## sits at altitude 0, last index sits at top_altitude. Each band's height
+## = (weight / sum_of_weights) * top_altitude.
+##
+## Default preset (populated in `_init` when the array is empty):
+##   GRASS w=3, DIRT w=1, ROCK w=1, SNOW w=1
+## → grass 50%, dirt 16.7%, rock 16.7%, snow 16.7%.
+##
+## Per-cell biome is picked by perturbed altitude (= altitude + biome_noise
+## * biome_noise_amplitude), so band borders are noisy. Set
+## biome_noise_amplitude = 0 for hard horizontal bands. Total weight ≤ 0
+## triggers the grass-only fallback (no painted dirt/rock/snow).
+@export var biome_bands: Array[TerrainBiomeBand] = []
+
+
+# Populate biome_bands with the default 4-band preset on a fresh resource.
+# Loaded .tres files overwrite this array during deserialization, so saved
+# customizations win; pre-existing .tres files (saved before biome_bands
+# existed) keep the new default since they have no saved value to restore.
+func _init() -> void:
+	if biome_bands.is_empty():
+		biome_bands = _default_biome_bands()
+
+
+static func _default_biome_bands() -> Array[TerrainBiomeBand]:
+	var out: Array[TerrainBiomeBand] = []
+	out.append(_make_band(TerrainCell.Biome.GRASS, 3.0))
+	out.append(_make_band(TerrainCell.Biome.DIRT, 1.0))
+	out.append(_make_band(TerrainCell.Biome.ROCK, 1.0))
+	out.append(_make_band(TerrainCell.Biome.SNOW, 1.0))
+	return out
+
+
+static func _make_band(p_biome: int, p_weight: float) -> TerrainBiomeBand:
+	var b := TerrainBiomeBand.new()
+	b.biome = p_biome
+	b.weight = p_weight
+	return b
+
+
+# Resolves biome_bands into ascending [top_altitude_float, biome_int]
+# threshold pairs. The last entry's threshold is +INF so any perturbed
+# altitude maps to a biome. Empty bands or non-positive total weight →
+# grass-only fallback so generation never produces unassigned cells.
+#
+# Both TerrainGenerator (per-cell biome assignment) and TerrainPainter
+# (cliff-back biome resolution + grass-band-top lookup) call this; keep it
+# pure and cheap (called once per generate / paint).
+func resolve_biome_thresholds() -> Array:
+	var bands: Array[TerrainBiomeBand] = biome_bands
+	if bands.is_empty():
+		bands = _default_biome_bands()
+	var total: float = 0.0
+	for b in bands:
+		if b == null:
+			continue
+		total += maxf(0.0, b.weight)
+	if total <= 0.0:
+		return [[INF, TerrainCell.Biome.GRASS]]
+	var thresholds: Array = []
+	var cum: float = 0.0
+	var last_idx: int = bands.size() - 1
+	for i in bands.size():
+		var b: TerrainBiomeBand = bands[i]
+		if b == null:
+			continue
+		cum += maxf(0.0, b.weight)
+		var top: float
+		if i == last_idx:
+			top = INF
+		else:
+			top = (cum / total) * float(top_altitude)
+		thresholds.append([top, b.biome])
+	return thresholds
+
+
+# Top of the GRASS band in perturbed-altitude units (= units of biome_score).
+# Used by the painter's grass variant picker to map biome_score into a [0, 1]
+# "grass centrality" — a cell at score 0 is deep in the grass region (returns
+# 1.0), a cell at the grass top is at the boundary (returns 0.0).
+#
+# If multiple GRASS bands exist (designer can split GRASS into multiple bands
+# with different weights), returns the highest grass-band top. If no GRASS
+# band exists, returns top_altitude as a sane fallback so the density math
+# in the painter doesn't divide by zero.
+func grass_band_top() -> float:
+	var thresholds: Array = resolve_biome_thresholds()
+	var best: float = 0.0
+	for entry in thresholds:
+		if entry[1] != TerrainCell.Biome.GRASS:
+			continue
+		var t: float = entry[0]
+		if is_inf(t):
+			t = float(top_altitude)
+		if t > best:
+			best = t
+	if best <= 0.0:
+		best = float(top_altitude)
+	return best
 
 
 # --- Lake -------------------------------------------------------------------
@@ -244,6 +349,25 @@ extends Resource
 ## step. Branches CAN modify cells the primary walker already touched (no
 ## merge logic): if a branch crosses the primary path, both cells stay WATER.
 @export_range(0.0, 0.5, 0.05) var river_branch_chance: float = 0.0
+
+## Per-cell probability that an eligible FULL_CUBE is swapped for a SLOPE_NE
+## or SLOPE_NW. Eligibility requires the cell to sit between a FULL_CUBE one
+## cube below (low side) and a FULL_CUBE one cube above (high side) along the
+## slope's rise axis (SW low + NE high for SLOPE_NE; SE low + NW high for
+## SLOPE_NW). Default 0 = no slopes (legacy behavior).
+@export_range(0.0, 1.0, 0.01) var slope_swap_chance: float = 0.0
+
+## Multiplier applied to slope_swap_chance when the candidate cell already
+## has a SLOPE_NE/SLOPE_NW on a face neighbor. Used to grow clusters of
+## slopes from initial seed placements rather than scattering them
+## uniformly. Effective per-cell chance is clamped to [0, 1].
+##   1.0 = no boost (uniform scatter)
+##   3.0 = 3× chance next to an existing slope (recommended starting point)
+##   10+ = strongly clustered; isolated swaps stay rare and pairs/runs of
+##         slopes form readable ramps along cliffs
+## Cluster seeding still happens at the base chance, so a value of 0 for
+## slope_swap_chance produces no slopes regardless of this multiplier.
+@export_range(1.0, 20.0, 0.5) var slope_swap_adjacent_multiplier: float = 1.0
 
 
 # --- Corner rounding --------------------------------------------------------

@@ -13,4 +13,3 @@ shader_parameter/wind_scale_2 = 0.1200000057
 shader_parameter/wind_dirt_height_px = 16.00000076
 shader_parameter/wind_ramp_px = 16.0000007125
 shader_parameter/wind_intensity = 1.0000000475
-shader_parameter/wind_debug = 0
