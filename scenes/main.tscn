@@ -1,10 +1,10 @@
 [gd_scene format=3 uid="uid://doynvxy141p3p"]
 
-[ext_resource type="PackedScene" uid="uid://cw67jb5h24j4b" path="res://scenes/maps/procedural_test.tscn" id="1_level1"]
+[ext_resource type="PackedScene" uid="uid://bf4q55ftkyndu" path="res://scenes/maps/level1.tscn" id="1_level1"]
 [ext_resource type="PackedScene" path="res://scenes/ui/debug_overlay.tscn" id="2_dbg"]
 
 [node name="Main" type="Node2D" unique_id=196845560]
 
-[node name="ProceduralTest" parent="." unique_id=1959178868 instance=ExtResource("1_level1")]
+[node name="Level1" parent="." unique_id=1959178868 instance=ExtResource("1_level1")]
 
 [node name="DebugOverlay" parent="." unique_id=1077235885 instance=ExtResource("2_dbg")]

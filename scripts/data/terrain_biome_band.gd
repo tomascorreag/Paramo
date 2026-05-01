@@ -34,3 +34,30 @@ extends Resource
 ## (weight / sum_of_weights) * top_altitude. Setting to 0 effectively
 ## removes the band. Negative values are clamped to 0 in the resolver.
 @export_range(0.0, 10.0, 0.05) var weight: float = 1.0
+
+
+# --- Per-biome variant-selection noise --------------------------------------
+#
+# Both fields drive the painter's tile-variant picker (currently grass
+# FULL_CUBE; any future multi-variant biome inherits this for free). They are
+# independent of params.biome_noise_* — that one jitters BAND BOUNDARIES (which
+# biome a cell gets); these tune VARIANT SELECTION within the biome.
+
+## Spatial coherence of variant selection. The picker normally rolls each cell
+## with a hash-based uniform [0,1] value. Strength blends a per-biome noise
+## sample into that roll (lerp(hash, noise, strength)).
+##   0.0 = no noise; pure uniform random within the gaussian preferences (legacy)
+##   0.5 = noticeable clumping; same-variant patches form but breaks of single
+##         cells still appear
+##   1.0 = roll is fully driven by noise; large coherent same-variant patches
+##         (a single hill paints uniformly with one variant)
+## When 0, `noise_frequency` has no effect and no FastNoiseLite is allocated.
+@export_range(0.0, 1.0, 0.05) var noise_strength: float = 0.0
+
+## Spatial frequency of the variant-selection noise. Lower = larger patches of
+## the same variant; higher = smaller, more cellular variation.
+##   ~0.02 = whole-mountain patches
+##   ~0.05 = recommended starting point
+##   ~0.2  = noisy, patches only a few cells across
+## Ignored when `noise_strength` is 0.
+@export_range(0.005, 0.5, 0.005) var noise_frequency: float = 0.05

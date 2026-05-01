@@ -6,11 +6,15 @@
 [sub_resource type="Resource" id="Resource_q2kmd"]
 script = ExtResource("1_q2kmd")
 weight = 4.0
+noise_strength = 1.0
+noise_frequency = 0.2
 
 [sub_resource type="Resource" id="Resource_it088"]
 script = ExtResource("1_q2kmd")
 biome = 1
 weight = 0.5
+noise_strength = 0.5
+noise_frequency = 0.15
 
 [sub_resource type="Resource" id="Resource_0vwww"]
 script = ExtResource("1_q2kmd")

@@ -166,7 +166,7 @@ static func _fill_heightfield(
 	# Gradient steepening tied to disc size: bigger disc → steeper gradient
 	# → flat plain emerges in the SW portion of the disc. Floored at 0.05
 	# so denominators don't collapse at frac → 1.
-	var grad_factor: float = maxf(0.05, 1.0 - params.disc_radius_frac)
+	var grad_factor: float = maxf(0.05, 1.0 - 1.1 * params.disc_radius_frac)
 	var w_denom: float = maxf(1.0, float(grid.width + grid.height - 2) * grad_factor)
 	var x_denom: float = maxf(1.0, float(grid.width - 1) * grad_factor)
 	var y_denom: float = maxf(1.0, float(grid.height - 1) * grad_factor)
@@ -600,7 +600,7 @@ static func _carve_lake(
 			if d2 <= r2 + jitter:
 				var cell: TerrainCell = grid.at(x, y)
 				if cell.kind == TerrainCell.Kind.EMPTY:
-					continue  # disc mask carved this cell out
+					continue # disc mask carved this cell out
 				cell.kind = TerrainCell.Kind.WATER
 				cell.altitude = lake_alt
 
@@ -626,7 +626,7 @@ static func _lift_lake_apron(grid: TerrainGrid, params: TerrainGenerationParams)
 	# Seed BFS from every WATER cell. All water shares the same altitude
 	# (set in _carve_lake), so we read it from the first water cell found.
 	var visited: Dictionary = {}
-	var frontier: Array = []  # entries: [Vector2i, dist]
+	var frontier: Array = [] # entries: [Vector2i, dist]
 	var lake_alt: int = -1
 	for y in grid.height:
 		for x in grid.width:
@@ -640,7 +640,7 @@ static func _lift_lake_apron(grid: TerrainGrid, params: TerrainGenerationParams)
 			frontier.append([key, 0])
 
 	if lake_alt < 0:
-		return  # no lake on this seed
+		return # no lake on this seed
 
 	var head: int = 0
 	while head < frontier.size():
@@ -780,7 +780,7 @@ static func _silhouette_round_pass(
 	var hi: float = 0.5 + stickiness
 
 	var to_empty: Array[Vector2i] = []
-	var to_fill: Array = []  # entries: [Vector2i, alt:int]
+	var to_fill: Array = [] # entries: [Vector2i, alt:int]
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
@@ -790,14 +790,14 @@ static func _silhouette_round_pass(
 				continue
 			var ground_count: int = 0
 			var total: int = 0
-			var alt_samples: Array[int] = []  # only collected when this is an EMPTY cell that might fill
+			var alt_samples: Array[int] = [] # only collected when this is an EMPTY cell that might fill
 			for o in offsets:
 				var nx: int = x + o.x
 				var ny: int = y + o.y
 				total += 1
 				var nc: TerrainCell = grid.at_or_null(nx, ny)
 				if nc == null:
-					continue  # off-grid counts as not-GROUND
+					continue # off-grid counts as not-GROUND
 				if nc.kind == TerrainCell.Kind.EMPTY:
 					continue
 				ground_count += 1
@@ -809,7 +809,7 @@ static func _silhouette_round_pass(
 			if c.kind == TerrainCell.Kind.GROUND:
 				if frac < lo:
 					to_empty.append(Vector2i(x, y))
-			else:  # EMPTY
+			else: # EMPTY
 				if frac > hi and alt_samples.size() > 0:
 					alt_samples.sort()
 					var median: int = alt_samples[alt_samples.size() / 2]
@@ -846,7 +846,7 @@ static func _altitude_round_pass(
 		return
 	# Collect new altitudes first, write at end, so a cell's update doesn't
 	# bias its neighbor's window mid-pass.
-	var updates: Array = []  # entries: [Vector2i, new_alt:int]
+	var updates: Array = [] # entries: [Vector2i, new_alt:int]
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
@@ -948,7 +948,7 @@ static func _trace_simple_river(
 	# outlet cell, not `params.top_altitude`: with `lake_depth_hs > 0` the
 	# lake sits below top_altitude, and using top_altitude here would emit
 	# a phantom waterfall floating above the actual water surface.
-	var branch_seeds: Array = []  # entries: [from_pos: Vector2i, from_alt: int, to_dir: Vector2i]
+	var branch_seeds: Array = [] # entries: [from_pos: Vector2i, from_alt: int, to_dir: Vector2i]
 	_walk_river(
 		grid, params, rng,
 		outlet, grid.at(outlet.x, outlet.y).altitude,
@@ -1027,7 +1027,7 @@ static func _walk_river(
 					continue
 				if ncell.altitude != alt:
 					continue
-				var sec_rise: Vector2i = -d_check
+				var sec_rise: Vector2i = - d_check
 				var perp: bool = (
 					(ncell.fall_rise_dir == DIR_NE and sec_rise == DIR_NW)
 					or (ncell.fall_rise_dir == DIR_NW and sec_rise == DIR_NE)
@@ -1175,7 +1175,7 @@ static func _walk_river(
 			# painter renders the shared tiers with FALL_NENW; tiers above
 			# the shorter lip stay single-face.
 			if fall.kind == TerrainCell.Kind.WATERFALL:
-				var new_rise: Vector2i = -step_dir
+				var new_rise: Vector2i = - step_dir
 				var perpendicular: bool = (
 					(fall.fall_rise_dir == DIR_NE and new_rise == DIR_NW)
 					or (fall.fall_rise_dir == DIR_NW and new_rise == DIR_NE)
@@ -1214,7 +1214,7 @@ static func _walk_river(
 					if adjusted_drop >= 2:
 						fall.kind = TerrainCell.Kind.WATERFALL
 						fall.altitude = alt
-						fall.fall_rise_dir = -step_dir
+						fall.fall_rise_dir = - step_dir
 						fall.drop_height = adjusted_drop
 						fall.water_flow = step_dir
 						_try_corner_upgrade_perpendicular(grid, fall, next_pos)
@@ -1230,7 +1230,7 @@ static func _walk_river(
 							landing.kind == TerrainCell.Kind.WATERFALL
 							and landing.fall_rise_dir_b == Vector2i.ZERO
 						):
-							var sec_rise: Vector2i = -step_dir
+							var sec_rise: Vector2i = - step_dir
 							var perpendicular: bool = (
 								(landing.fall_rise_dir == DIR_NE and sec_rise == DIR_NW)
 								or (landing.fall_rise_dir == DIR_NW and sec_rise == DIR_NE)
@@ -1241,10 +1241,10 @@ static func _walk_river(
 					# adjusted_drop < 2: landing river is at-or-above this
 					# walker's tracked alt; no downward fall is geometrically
 					# possible here. Leave next_pos as GROUND.
-					return  # branch terminates; merged into existing river
+					return # branch terminates; merged into existing river
 				fall.kind = TerrainCell.Kind.WATERFALL
 				fall.altitude = alt
-				fall.fall_rise_dir = -step_dir
+				fall.fall_rise_dir = - step_dir
 				fall.drop_height = alt - next_alt
 				fall.water_flow = step_dir
 				_try_corner_upgrade_perpendicular(grid, fall, next_pos)
@@ -1366,7 +1366,7 @@ static func _emit_perpendicular_falls(grid: TerrainGrid, max_drop_hs: int) -> vo
 			c.altitude = primary_lip
 			c.fall_rise_dir = primary_dir
 			c.drop_height = primary_lip - basin_alt
-			c.water_flow = -primary_dir
+			c.water_flow = - primary_dir
 			if secondary_dir != Vector2i.ZERO:
 				c.fall_rise_dir_b = secondary_dir
 				c.drop_height_b = secondary_lip - basin_alt
@@ -1401,7 +1401,7 @@ static func _find_lake_outlet(
 				if nc.altitude < min_neighbor_alt:
 					min_neighbor_alt = nc.altitude
 			if min_neighbor_alt == 0x7FFFFFFF:
-				continue  # no SE/SW GROUND neighbor
+				continue # no SE/SW GROUND neighbor
 			var score: int = x + y
 			var dist: int = absi(x - lake_center.x) + absi(y - lake_center.y)
 			var better: bool = false

@@ -24,21 +24,35 @@ extends RefCounted
 
 
 const SOURCE_GRASS: int = 0
-const SOURCE_DIRT:  int = 2
+const SOURCE_DIRT: int = 2
 const SOURCE_WATER: int = 3
-const SOURCE_SNOW:  int = 4
-const SOURCE_ROCK:  int = 5
+const SOURCE_SNOW: int = 4
+const SOURCE_ROCK: int = 5
 
 
-# Grass FULL_CUBE variant selection. Picker scores each painted variant against
-# the cell's altitude and biome-derived "centrality" using two gaussians, plus
-# a small floor so no variant ever vanishes (preserves randomness).
-const _GRASS_FULL_CUBE_KIND: StringName = &"FULL_CUBE"
+# Variant selection. Any kind on any ground biome source (grass / dirt / rock /
+# snow) with 2+ painted variants is randomized via `_pick_variant_coord`. Today
+# only grass FULL_CUBE has multiple variants, but the picker is wired uniformly
+# across every biome — paint a 2nd variant on any source and randomization
+# kicks in with no code change. Single-variant kinds bypass the picker.
 const _PA_LAYER: String = "preferred_altitude"
 const _PD_LAYER: String = "preferred_density"
-const _SIGMA_ALT: float = 2.0
-const _SIGMA_DENS: float = 0.35
-const _EPSILON: float = 0.05
+const _SW_LAYER: String = "selection_weight"
+const _SIGMA_ALT: float = 3.0
+# Floor on per-variant weight. Tiny — purely a divide-by-zero / fully-zero
+# safety net for the cumulative-weight roll. Per-variant variation comes from
+# `selection_weight` (multiplier) and per-biome `noise_strength` (lerp on the
+# roll); a larger floor here would re-introduce visible noise at high mismatch
+# (the old 0.05 value made variants with sw>1 appear ~5–10% at altitudes far
+# from their pa, defeating the gaussian).
+const _EPSILON: float = 1e-6
+# Clumping multiplier on the neighbor-density pull. Each already-painted face
+# neighbor contributes its variant's pd to `pull` (range [0, 4]). The variant's
+# clumping factor is `1 + _CLUMP_GAIN * pull * v.pd`. With gain=1, a pd=1
+# variant fully surrounded by pd=1 neighbors gets a 5x score boost relative to
+# a pd=0 candidate at the same cell. Tunable; per-biome exposure can come
+# later if needed.
+const _CLUMP_GAIN: float = 1.0
 
 
 # Water alternative_tile mapping. Indexed by direction → alt id painted in
@@ -85,16 +99,34 @@ static func paint(
 	for src in [SOURCE_GRASS, SOURCE_DIRT, SOURCE_WATER, SOURCE_SNOW, SOURCE_ROCK]:
 		indices[src] = TileKindIndex.new(tile_set, src)
 
-	var grass_variants: Array = _build_variant_table(
-		indices[SOURCE_GRASS], _GRASS_FULL_CUBE_KIND
-	)
+	# Per-source variant tables keyed by tile_kind. Built once for every ground
+	# biome source we paint; water is excluded — its tile selection is fully
+	# driven by shore_mask/flow and randomization would break flow-coherent art.
+	# Inner dicts only contain kinds with 2+ painted variants; everything else
+	# short-circuits to the fallback coord in `_resolve_variant_coord`. Adding
+	# a 2nd dirt/rock/snow variant is a pure-data change — no code edits needed.
+	var variants_by_source: Dictionary[int, Dictionary] = {}
+	for src in [SOURCE_GRASS, SOURCE_DIRT, SOURCE_ROCK, SOURCE_SNOW]:
+		variants_by_source[src] = _build_variants_by_kind(indices[src])
 
-	# Resolve once and thread through. Both are pure functions of params, so
-	# they're stable across the whole paint pass and cheap to compute (single
-	# linear walk over biome_bands).
+	# Resolve once and thread through. Pure function of params — stable across
+	# the whole paint pass and cheap (single linear walk over biome_bands).
 	var thresholds: Array = params.resolve_biome_thresholds()
-	var grass_top: float = params.grass_band_top()
 	var seed: int = params.seed
+	# Per-biome variant-selection noise. Keyed by TerrainCell.Biome int. Bands
+	# with noise_strength == 0 are omitted so the picker takes the legacy
+	# uniform-hash path with zero overhead. Last band wins on duplicate biome
+	# (designer can have multiple GRASS bands; the topmost-listed one's noise
+	# settings apply).
+	var biome_noise: Dictionary[int, Dictionary] = _build_biome_noise(params)
+	# Per-biome record of painted-variant pd. Keyed by TerrainCell.Biome int →
+	# {pos → pd}. Each biome clumps independently — a rock cell's pd doesn't
+	# pull a grass neighbor, since pd is a per-source affinity (different
+	# atlases have unrelated affinity scales). Cliff-back tiers still pass an
+	# empty per-tier scratch dict; vertical stacks don't bias horizontal
+	# clumping in any biome. Iteration is y outer, x inner — deterministic, so
+	# paint output stays stable per seed.
+	var painted_pd_by_biome: Dictionary[int, Dictionary] = {}
 
 	# Clear all target layers first so re-runs don't leave stale tiles.
 	for alt_key in layers_by_altitude:
@@ -108,8 +140,8 @@ static func paint(
 			if c.kind == TerrainCell.Kind.EMPTY:
 				continue
 			_paint_cell(
-				grid, layers_by_altitude, indices, grass_variants,
-				thresholds, grass_top, seed, x, y, c,
+				grid, layers_by_altitude, indices, variants_by_source,
+				thresholds, seed, biome_noise, painted_pd_by_biome, x, y, c,
 			)
 
 
@@ -121,10 +153,11 @@ static func _paint_cell(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	indices: Dictionary,
-	grass_variants: Array,
+	variants_by_source: Dictionary,
 	thresholds: Array,
-	grass_top: float,
 	seed: int,
+	biome_noise: Dictionary,
+	painted_pd_by_biome: Dictionary,
 	x: int,
 	y: int,
 	c: TerrainCell,
@@ -141,15 +174,18 @@ static func _paint_cell(
 
 	match c.kind:
 		TerrainCell.Kind.GROUND:
-			_paint_ground(layer, indices, grass_variants, grass_top, seed, pos, c)
+			_paint_ground(
+				layer, indices, variants_by_source, seed, biome_noise,
+				painted_pd_by_biome, pos, c,
+			)
 			# A GROUND cell's cube only renders at one altitude. When a face
 			# neighbor sits more than one cube below, the cliff face exposes
 			# a void on the layers between this cell's altitude and the
 			# neighbor's. Stack biome-matched FULL_CUBEs at this cell's coord
 			# down to (lowest neighbor + 2) to fill that void.
 			_paint_ground_cliff_back(
-				grid, layers_by_altitude, indices, grass_variants,
-				thresholds, grass_top, seed, pos, c,
+				grid, layers_by_altitude, indices, variants_by_source,
+				thresholds, seed, biome_noise, pos, c,
 			)
 		TerrainCell.Kind.WATER:
 			_paint_water(layer, indices, pos, c)
@@ -184,9 +220,10 @@ static func _paint_cell(
 static func _paint_ground(
 	layer: TileMapLayer,
 	indices: Dictionary,
-	grass_variants: Array,
-	grass_top: float,
+	variants_by_source: Dictionary,
 	seed: int,
+	biome_noise: Dictionary,
+	painted_pd_by_biome: Dictionary,
 	pos: Vector2i,
 	c: TerrainCell,
 ) -> void:
@@ -194,12 +231,21 @@ static func _paint_ground(
 	var kind: StringName = _ground_shape_to_kind(c.ground_shape)
 	var src: int = primary_src
 	var idx: TileKindIndex = indices[src]
-	# Fallback: rock/snow only have FULL_CUBE painted. For any other shape on
-	# those biomes, paint the slope/flat using grass tiles so the geometry is
-	# still correct even if the biome look "leaks" at slope edges.
+	# Fallback chain when the biome's source doesn't paint this kind:
+	#   1. Stay on the biome's source but substitute FULL_CUBE — preserves
+	#      biome look at the cost of slope geometry (a SLOPE_SE on rock
+	#      becomes a rock cube; the cliff reads as a step instead of a ramp,
+	#      but no grass leaks into rocky terrain).
+	#   2. If the biome's source has no FULL_CUBE either, fall through to the
+	#      grass source for the original kind — geometry-correct but biome-
+	#      incorrect. This is a true degenerate case and a sign the biome's
+	#      atlas is incomplete (every painted source SHOULD have FULL_CUBE).
 	if not idx.has(kind):
-		src = SOURCE_GRASS
-		idx = indices[src]
+		if idx.has(TileSlots.FULL_CUBE):
+			kind = TileSlots.FULL_CUBE
+		else:
+			src = SOURCE_GRASS
+			idx = indices[src]
 	if not idx.has(kind):
 		push_warning(
 			"TerrainPainter: tile_kind '%s' missing on source %d AND grass fallback — skipping cell %s."
@@ -207,11 +253,17 @@ static func _paint_ground(
 		)
 		return
 	var coord: Vector2i = idx.coord(kind)
-	if src == SOURCE_GRASS and kind == _GRASS_FULL_CUBE_KIND:
-		var density: float = _grass_density_from_score(c.biome_score, grass_top)
-		coord = _pick_grass_variant_coord(
-			grass_variants, c.altitude, density, pos.x, pos.y, c.altitude, seed, coord
-		)
+	# Variant resolution runs for every biome. When the source has <2 painted
+	# variants of `kind`, the resolver returns `coord` unchanged (cheap no-op).
+	# Clumping pull is per-biome — `painted_pd_by_biome` is keyed by biome int
+	# so a rock cell's pd doesn't influence a neighboring grass cell and vice
+	# versa.
+	var pd_for_biome: Dictionary = painted_pd_by_biome.get_or_add(c.biome, {})
+	coord = _resolve_variant_coord(
+		variants_by_source.get(src, {}), kind, coord,
+		c.altitude, pos, c.altitude, seed, c.biome,
+		biome_noise, pd_for_biome,
+	)
 	layer.set_cell(pos, src, coord, 0)
 
 
@@ -229,10 +281,10 @@ static func _paint_ground_cliff_back(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	indices: Dictionary,
-	grass_variants: Array,
+	variants_by_source: Dictionary,
 	thresholds: Array,
-	grass_top: float,
 	seed: int,
+	biome_noise: Dictionary,
 	pos: Vector2i,
 	c: TerrainCell,
 ) -> void:
@@ -264,6 +316,13 @@ static func _paint_ground_cliff_back(
 		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
 		if layer != null:
 			var tier_biome: int = _biome_for_altitude_band(alt, thresholds)
+			# Snow only paints at the surface tier — any cliff-back tier that
+			# would otherwise resolve to snow is demoted to rock so the column
+			# under a snow cap reads as rocky peak with a thin snow layer on
+			# top, not a solid block of snow. Surface paint (`_paint_ground`)
+			# is unaffected; this loop only runs strictly below the surface.
+			if tier_biome == TerrainCell.Biome.SNOW:
+				tier_biome = TerrainCell.Biome.ROCK
 			var src: int = _source_for_biome(tier_biome)
 			var idx: TileKindIndex = indices[src]
 			if not idx.has(TileSlots.FULL_CUBE):
@@ -271,12 +330,17 @@ static func _paint_ground_cliff_back(
 				idx = indices[src]
 			if idx.has(TileSlots.FULL_CUBE):
 				var coord: Vector2i = idx.coord(TileSlots.FULL_CUBE)
-				var stack_coord: Vector2i = coord
-				if src == SOURCE_GRASS:
-					var density: float = _grass_density_from_score(float(alt), grass_top)
-					stack_coord = _pick_grass_variant_coord(
-						grass_variants, alt, density, pos.x, pos.y, alt, seed, coord
-					)
+				# Cliff-back tiers paint vertical stacks at the same (x,y); they
+				# have no horizontal neighbor relationships worth clumping over.
+				# Each tier passes a fresh empty pd dict so the picker takes the
+				# pull=0 fast path and the column doesn't pollute surface
+				# clumping in any biome.
+				var no_pd: Dictionary = {}
+				var stack_coord: Vector2i = _resolve_variant_coord(
+					variants_by_source.get(src, {}), TileSlots.FULL_CUBE, coord,
+					alt, pos, alt, seed, tier_biome,
+					biome_noise, no_pd,
+				)
 				layer.set_cell(pos, src, stack_coord, 0)
 		alt -= 2
 
@@ -343,7 +407,7 @@ static func _paint_waterfall_column(
 		var a_active: bool = alt <= lip_a
 		var b_active: bool = has_b and alt <= lip_b
 		var kind: StringName = &""
-		var flow: Vector2i = -rise_a
+		var flow: Vector2i = - rise_a
 		if a_active and b_active:
 			kind = TileSlots.FALL_NENW
 		elif a_active:
@@ -354,7 +418,7 @@ static func _paint_waterfall_column(
 			kind = _fall_kind_for_rise_and_position(
 				rise_b, _fall_position_for(alt, lip_b, basin, c.drop_height_b)
 			)
-			flow = -rise_b
+			flow = - rise_b
 		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
 		if layer != null:
 			_set_water_cell(layer, idx, pos, kind, flow)
@@ -486,8 +550,8 @@ static func _basin_kind_for_mask(
 	# the cliff face(s), banks land on NW+SE for an NE-rise or NE+SW for an
 	# NW-rise — exactly the two channel tiles. Basin flow is -fall_rise_dir
 	# (SW for NE-rise, SE for NW-rise), matching the channel art's drawn flow.
-	if face == 6: return TileSlots.EDGE_NW_SE  # banks NW+SE, channel NE-SW
-	if face == 9: return TileSlots.EDGE_NE_SW  # banks NE+SW, channel NW-SE
+	if face == 6: return TileSlots.EDGE_NW_SE # banks NW+SE, channel NE-SW
+	if face == 9: return TileSlots.EDGE_NE_SW # banks NE+SW, channel NW-SE
 	# Remaining multi-bit cases (3-sided, adjacent pair after partial strip).
 	# Pick the first bank by deterministic priority so paints stay stable.
 	if face & 2: return TileSlots.EDGE_NW
@@ -573,12 +637,88 @@ static func _set_dirt_cell(
 
 
 # ----------------------------------------------------------------------------
-# Grass variant selection
+# Variant selection
 # ----------------------------------------------------------------------------
 
-# Builds [{coord, pa, pd}, …] from every painted variant of `kind` on `idx`.
-# Reads preferred_altitude / preferred_density custom_data per variant; absent
-# layers default to 0.0 (which still scores reasonably via the gaussian + floor).
+# Picks the atlas coord for a tile of `kind` on whichever biome source the
+# caller has resolved. Looks `kind` up in `variants_by_kind` (the inner dict for
+# this source — only kinds with 2+ painted variants appear there); single-
+# variant kinds short-circuit to `fallback`. Routes multi-variant picks through
+# `_pick_variant_coord` so altitude / clumping / per-biome noise apply uniformly
+# across every biome (grass FULL_CUBE today; any biome's slopes, half-slopes,
+# stairs as soon as a 2nd variant is authored on that source).
+#
+# Surface callers pass the live per-biome `painted_pd` dict so the chosen
+# variant's pd is recorded for future same-biome neighbors' clumping pull.
+# Cliff-back callers pass a fresh empty dict — vertical stacks shouldn't
+# influence horizontal clumping in any biome.
+static func _resolve_variant_coord(
+	variants_by_kind: Dictionary,
+	kind: StringName,
+	fallback: Vector2i,
+	altitude_half_steps: int,
+	pos: Vector2i,
+	layer_alt: int,
+	seed: int,
+	biome: int,
+	biome_noise: Dictionary,
+	painted_pd: Dictionary,
+) -> Vector2i:
+	var variants: Array = variants_by_kind.get(kind, [])
+	if variants.size() < 2:
+		return fallback
+	var nb: Dictionary = biome_noise.get(biome, {})
+	var picked_out: Dictionary = {}
+	var coord: Vector2i = _pick_variant_coord(
+		variants, altitude_half_steps, pos.x, pos.y, layer_alt, seed, fallback,
+		nb, painted_pd, picked_out,
+	)
+	# Record the chosen pd so future cells can clump against this one. For
+	# cliff-back callers `painted_pd` is a fresh per-tier scratch dict (the
+	# write is harmless — discarded at end of loop iteration), so no extra
+	# "is_surface" flag is needed here.
+	painted_pd[pos] = picked_out.get("pd", 0.0)
+	return coord
+
+
+# Builds the per-kind variant table for a single source. Each entry maps a
+# tile_kind that has 2+ painted variants to its `_build_variant_table` array.
+# Single-variant kinds are omitted (the picker would reduce to fallback).
+# Called once per ground biome source in `paint()`; the source-agnostic
+# resolver looks up the right inner dict by source id.
+static func _build_variants_by_kind(idx: TileKindIndex) -> Dictionary[StringName, Array]:
+	var out: Dictionary[StringName, Array] = {}
+	if idx == null:
+		return out
+	for kind in idx.all_painted_names():
+		var table: Array = _build_variant_table(idx, kind)
+		if table.size() >= 2:
+			out[kind] = table
+	return out
+
+
+# Builds [{coord, pa, pd, sw}, …] from every painted variant of `kind` on `idx`.
+# Reads preferred_altitude / preferred_density / selection_weight custom_data per
+# variant; absent layers default to 0.0 (which the picker treats as "skip this
+# term" — see field semantics below).
+#
+# Field semantics (interpreted by `_pick_variant_coord`):
+#   ANY ATTRIBUTE <= 0 IS IGNORED for that variant — its term is dropped from
+#   the score (treated as multiplicative identity 1.0). This applies uniformly
+#   to all three attributes; the inspector default of 0.0 thus means "no
+#   preference along this axis" and a designer never has to author a sentinel
+#   value to opt out.
+#
+#   - pa (preferred_altitude, half-steps): when > 0, gaussian center on the
+#     cell's altitude axis (closer to pa → higher weight). When <= 0, altitude
+#     is ignored and the variant is equally available at any altitude.
+#   - pd (preferred_density, [0, 1] when used): clumping affinity. When > 0,
+#     painted neighbors with pd>0 contribute their pd to a `pull` sum; the
+#     candidate's score is multiplied by `1 + _CLUMP_GAIN * pull * pd`.
+#     When <= 0, the candidate gets no clumping factor AND when painted as a
+#     neighbor it doesn't contribute to other cells' pull.
+#   - sw (selection_weight): per-variant frequency multiplier. When > 0, used
+#     as-is. When <= 0, dropped from the score (treated as 1.0).
 static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
 	var out: Array = []
 	if idx == null:
@@ -586,60 +726,129 @@ static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
 	for coord in idx.coords_for(kind):
 		var pa_v: Variant = idx.get_attr(coord, _PA_LAYER)
 		var pd_v: Variant = idx.get_attr(coord, _PD_LAYER)
+		var sw_v: Variant = idx.get_attr(coord, _SW_LAYER)
+		# Store raw values; the picker is responsible for the "<=0 → ignore"
+		# logic so the rule is in one place and consistent across attributes.
 		out.append({
 			"coord": coord,
 			"pa": float(pa_v) if pa_v != null else 0.0,
 			"pd": float(pd_v) if pd_v != null else 0.0,
+			"sw": float(sw_v) if sw_v != null else 0.0,
 		})
 	return out
 
 
-# Maps the continuous biome score into a [0,1] "grass centrality":
-#   1.0 = deep in grass region (low score, no noise push toward dirt)
-#   0.0 = at or above the grass band's top (i.e. would have transitioned
-#         out of grass without the floor at 0)
-# `grass_top` is the perturbed-altitude top of the GRASS band, resolved
-# from params.biome_bands. Treated as an upper bound; if 0 we'd divide by
-# zero, so the param resolver guarantees a positive value (falling back to
-# top_altitude when no GRASS band is present).
-static func _grass_density_from_score(biome_score: float, grass_top: float) -> float:
-	if grass_top <= 0.0:
-		return 1.0
-	return clampf((grass_top - biome_score) / grass_top, 0.0, 1.0)
-
-
-# Weighted variant pick. Each variant scores against the cell via two gaussians
-# (altitude in half-steps, density in [0,1]) plus EPSILON so even mismatched
-# variants retain a nonzero chance — preserves randomness without making the
-# preferences meaningless. Determinism via hash([x, y, layer_alt, seed]).
-static func _pick_grass_variant_coord(
+# Weighted variant pick.
+#
+# Per-variant score builds multiplicatively from three optional terms; each
+# term is dropped (treated as 1.0) when its source attribute is <= 0:
+#
+#   w = pa_term * sw_term * clump_term + EPSILON
+#
+#   pa_term    = exp(-(cell_alt - v.pa)^2 / (2σ^2))   if v.pa > 0, else 1.0
+#   sw_term    = v.sw                                  if v.sw > 0, else 1.0
+#   clump_term = 1 + _CLUMP_GAIN * pull * v.pd         if v.pd > 0, else 1.0
+#
+# `pull` is the sum of pd values across the cell's already-painted face
+# neighbors, with neighbors whose pd <= 0 excluded. Range [0, 4]. Empty
+# `painted_pd` (cliff-back tier) → pull = 0 → clump_term = 1 regardless.
+#
+# Roll is hash([x, y, layer_alt, seed]) → uniform [0, 1]. When the cell's
+# biome supplies a noise field (`nb` = {noise, strength}), the roll is
+# `lerp(hash, noise_sample, strength)` — strength=0 keeps uniform, strength=1
+# is fully spatially coherent (large same-variant patches at noise frequency).
+#
+# EPSILON (1e-6) is purely a divide-by-zero safety net for the cumulative
+# roll; it is not a randomness source.
+#
+# Output: returns the chosen variant's atlas coord. Also writes
+# `out["pd"] = chosen.pd` so the caller can record the chosen pd into
+# `painted_pd` for future neighbors. `out` is required (caller passes a fresh
+# Dictionary); on `variants.is_empty()` fallback, out["pd"] = 0.0.
+static func _pick_variant_coord(
 	variants: Array,
 	altitude_half_steps: int,
-	density: float,
 	x: int, y: int, layer_alt: int, seed: int,
 	fallback: Vector2i,
+	nb: Dictionary,
+	painted_pd: Dictionary,
+	out: Dictionary,
 ) -> Vector2i:
 	if variants.is_empty():
+		out["pd"] = 0.0
 		return fallback
+
+	# Neighbor-density pull. Skipped when painted_pd is empty (cliff-back).
+	# Neighbors with pd <= 0 don't contribute (their clumping is "off").
+	var pull: float = 0.0
+	if not painted_pd.is_empty():
+		for d in DiamondCompass.FACE_DIRS:
+			var n_key := Vector2i(x + d.x, y + d.y)
+			if painted_pd.has(n_key):
+				var n_pd: float = float(painted_pd[n_key])
+				if n_pd > 0.0:
+					pull += n_pd
+
 	var weights: Array[float] = []
 	var total: float = 0.0
 	for v in variants:
-		var ad: float = float(altitude_half_steps) - float(v["pa"])
-		var dd: float = density - float(v["pd"])
-		var w: float = exp(-(ad * ad) / (2.0 * _SIGMA_ALT * _SIGMA_ALT)) \
-				* exp(-(dd * dd) / (2.0 * _SIGMA_DENS * _SIGMA_DENS)) \
-				+ _EPSILON
+		var w: float = 1.0
+		var pa: float = float(v["pa"])
+		if pa > 0.0:
+			var ad: float = float(altitude_half_steps) - pa
+			w *= exp(- (ad * ad) / (2.0 * _SIGMA_ALT * _SIGMA_ALT))
+		var sw: float = float(v["sw"])
+		if sw > 0.0:
+			w *= sw
+		var pd: float = float(v["pd"])
+		if pd > 0.0:
+			w *= 1.0 + _CLUMP_GAIN * pull * pd
+		w += _EPSILON
 		weights.append(w)
 		total += w
 	# hash() on a typed array is stable in Godot 4.6.
 	var h: int = hash([x, y, layer_alt, seed]) & 0x7FFFFFFF
-	var roll: float = (float(h) / float(0x7FFFFFFF)) * total
+	var u01: float = float(h) / float(0x7FFFFFFF)
+	if not nb.is_empty():
+		var noise: FastNoiseLite = nb["noise"]
+		var strength: float = clampf(float(nb["strength"]), 0.0, 1.0)
+		# get_noise_2d returns roughly [-1, 1]; rescale to [0, 1].
+		var nval: float = (noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
+		u01 = lerpf(u01, nval, strength)
+	var roll: float = u01 * total
 	var acc: float = 0.0
 	for i in weights.size():
 		acc += weights[i]
 		if roll <= acc:
+			out["pd"] = float(variants[i]["pd"])
 			return variants[i]["coord"]
+	out["pd"] = float(variants.back()["pd"])
 	return variants.back()["coord"]
+
+
+# Builds the per-biome variant-selection noise lookup. Returns a dict keyed by
+# TerrainCell.Biome int → {"noise": FastNoiseLite, "strength": float}. Bands
+# with strength <= 0 are omitted so the picker takes the cheap legacy path.
+# Each biome gets its own decorrelated stream (seed XOR per-biome offset) so
+# two biomes with the same frequency don't paint identical patterns.
+#
+# When multiple bands list the same biome (allowed: designer can split GRASS
+# into multiple altitude ranges), the LAST entry's settings win — iteration
+# order matches `params.biome_bands` array order.
+static func _build_biome_noise(params: TerrainGenerationParams) -> Dictionary[int, Dictionary]:
+	var out: Dictionary[int, Dictionary] = {}
+	for band: TerrainBiomeBand in params.biome_bands:
+		if band == null:
+			continue
+		if band.noise_strength <= 0.0:
+			out.erase(band.biome)
+			continue
+		var n := FastNoiseLite.new()
+		n.seed = params.seed ^ (0x4B10E001 + band.biome * 17)
+		n.frequency = band.noise_frequency
+		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		out[band.biome] = {"noise": n, "strength": band.noise_strength}
+	return out
 
 
 # ----------------------------------------------------------------------------
@@ -649,20 +858,20 @@ static func _pick_grass_variant_coord(
 static func _source_for_biome(biome: int) -> int:
 	match biome:
 		TerrainCell.Biome.GRASS: return SOURCE_GRASS
-		TerrainCell.Biome.DIRT:  return SOURCE_DIRT
-		TerrainCell.Biome.ROCK:  return SOURCE_ROCK
-		TerrainCell.Biome.SNOW:  return SOURCE_SNOW
+		TerrainCell.Biome.DIRT: return SOURCE_DIRT
+		TerrainCell.Biome.ROCK: return SOURCE_ROCK
+		TerrainCell.Biome.SNOW: return SOURCE_SNOW
 	return SOURCE_GRASS
 
 
 static func _ground_shape_to_kind(shape: int) -> StringName:
 	match shape:
 		TerrainCell.GroundShape.FULL_CUBE: return TileSlots.FULL_CUBE
-		TerrainCell.GroundShape.FLAT:      return TileSlots.FLAT
-		TerrainCell.GroundShape.SLOPE_NE:  return TileSlots.SLOPE_NE
-		TerrainCell.GroundShape.SLOPE_NW:  return TileSlots.SLOPE_NW
-		TerrainCell.GroundShape.SLOPE_SE:  return TileSlots.SLOPE_SE
-		TerrainCell.GroundShape.SLOPE_SW:  return TileSlots.SLOPE_SW
+		TerrainCell.GroundShape.FLAT: return TileSlots.FLAT
+		TerrainCell.GroundShape.SLOPE_NE: return TileSlots.SLOPE_NE
+		TerrainCell.GroundShape.SLOPE_NW: return TileSlots.SLOPE_NW
+		TerrainCell.GroundShape.SLOPE_SE: return TileSlots.SLOPE_SE
+		TerrainCell.GroundShape.SLOPE_SW: return TileSlots.SLOPE_SW
 	return TileSlots.FULL_CUBE
 
 
@@ -688,16 +897,16 @@ static func _shore_kind_for_mask(mask: int) -> StringName:
 	# Face shores dominate. When any face neighbor is land, the apex bits are
 	# implied or ambiguous and we render the face/corner tile instead.
 	match face:
-		1:  return TileSlots.EDGE_NE
-		2:  return TileSlots.EDGE_NW
-		4:  return TileSlots.EDGE_SE
-		8:  return TileSlots.EDGE_SW
-		3:  return TileSlots.CORNER_N
-		5:  return TileSlots.CORNER_E
+		1: return TileSlots.EDGE_NE
+		2: return TileSlots.EDGE_NW
+		4: return TileSlots.EDGE_SE
+		8: return TileSlots.EDGE_SW
+		3: return TileSlots.CORNER_N
+		5: return TileSlots.CORNER_E
 		12: return TileSlots.CORNER_S
 		10: return TileSlots.CORNER_W
-		6:  return TileSlots.EDGE_NW_SE  # banks NW+SE, channel runs NE-SW axis
-		9:  return TileSlots.EDGE_NE_SW  # banks NE+SW, channel runs NW-SE axis
+		6: return TileSlots.EDGE_NW_SE # banks NW+SE, channel runs NE-SW axis
+		9: return TileSlots.EDGE_NE_SW # banks NE+SW, channel runs NW-SE axis
 	if face != 0:
 		# Unsupported face combination (3-sided, fully enclosed). Fall back to
 		# the lowest-bit single edge so something paints.
@@ -730,16 +939,16 @@ static func _shore_kind_for_mask(mask: int) -> StringName:
 static func _fall_kind_for_rise_and_position(rise_dir: Vector2i, position: StringName) -> StringName:
 	if rise_dir == DiamondCompass.DIR_NE:
 		match position:
-			&"BOTH":   return TileSlots.FALL_NE_BOTH
-			&"TOP":    return TileSlots.FALL_NE_TOP
+			&"BOTH": return TileSlots.FALL_NE_BOTH
+			&"TOP": return TileSlots.FALL_NE_TOP
 			&"BOTTOM": return TileSlots.FALL_NE_BOTTOM
-			&"NONE":   return TileSlots.FALL_NE_NONE
+			&"NONE": return TileSlots.FALL_NE_NONE
 	elif rise_dir == DiamondCompass.DIR_NW:
 		match position:
-			&"BOTH":   return TileSlots.FALL_NW_BOTH
-			&"TOP":    return TileSlots.FALL_NW_TOP
+			&"BOTH": return TileSlots.FALL_NW_BOTH
+			&"TOP": return TileSlots.FALL_NW_TOP
 			&"BOTTOM": return TileSlots.FALL_NW_BOTTOM
-			&"NONE":   return TileSlots.FALL_NW_NONE
+			&"NONE": return TileSlots.FALL_NW_NONE
 	# SE/SW rises are unpainted in the current water atlas — caller falls back.
 	return &""
 
