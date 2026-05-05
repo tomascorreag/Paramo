@@ -153,5 +153,60 @@ const EDGE_SE: StringName           = &"EDGE_SE"
 const EDGE_SW: StringName           = &"EDGE_SW"
 
 
+# --- Two-edge water channels (single-tile-wide rivers) ----------------------
+# Water tile with banks on the two named opposite faces; the perpendicular
+# axis is the open channel. Naming follows the existing EDGE_* convention:
+# the suffix lists the faces with land/banks.
+#
+#     EDGE_NE_SW = banks on NE + SW faces, channel runs along the NW-SE axis
+#     EDGE_NW_SE = banks on NW + SE faces, channel runs along the NE-SW axis
+const EDGE_NE_SW: StringName        = &"EDGE_NE_SW"
+const EDGE_NW_SE: StringName        = &"EDGE_NW_SE"
+
+
+# --- Water shore corners (named after the diamond apex they surround) -------
+# CORNER_N = water with both NW and NE faces meeting land (the N apex of the
+# diamond pokes into land). E/S/W follow analogously. Convex water corner
+# (concave land corner).
+const CORNER_N: StringName          = &"CORNER_N"
+const CORNER_E: StringName          = &"CORNER_E"
+const CORNER_S: StringName          = &"CORNER_S"
+const CORNER_W: StringName          = &"CORNER_W"
+
+
+# --- Water inner (concave) corners ------------------------------------------
+# INNER_N = all four face neighbors are water, but the N apex cell (the
+# diagonal cell straight up on screen) is land. The shore shows a small notch
+# poking into the water from the N apex. E/S/W follow analogously. Concave
+# water corner (convex land corner).
+const INNER_N: StringName           = &"INNER_N"
+const INNER_E: StringName           = &"INNER_E"
+const INNER_S: StringName           = &"INNER_S"
+const INNER_W: StringName           = &"INNER_W"
+
+
 # --- Water (flat overlay tiles with flow direction via alternatives) --------
 const WATER_FLAT: StringName        = &"WATER_FLAT"
+
+
+# --- Waterfalls (oriented by the rise direction of the cliff above them) ----
+# FALL_NE_* = water falling from a NE-rising cliff (water runs SW->down).
+# FALL_NW_* = water falling from a NW-rising cliff.
+# Suffix encodes which adjacent walls are present (TOP/BOTTOM/BOTH/NONE rock
+# faces). v1 generator picks NONE variants for clean rendering.
+const FALL_NE_NONE: StringName      = &"FALL_NE_NONE"
+const FALL_NE_TOP: StringName       = &"FALL_NE_TOP"
+const FALL_NE_BOTTOM: StringName    = &"FALL_NE_BOTTOM"
+const FALL_NE_BOTH: StringName      = &"FALL_NE_BOTH"
+const FALL_NW_NONE: StringName      = &"FALL_NW_NONE"
+const FALL_NW_TOP: StringName       = &"FALL_NW_TOP"
+const FALL_NW_BOTTOM: StringName    = &"FALL_NW_BOTTOM"
+const FALL_NW_BOTH: StringName      = &"FALL_NW_BOTH"
+
+# Concave-corner waterfall: water falls on BOTH the NE and NW cliff faces of a
+# single cell (used when two perpendicular rivers converge at the same lip).
+# A single tile covers TOP/BOTTOM/BOTH/NONE positions — visual fidelity is
+# slightly reduced compared to the single-face family in exchange for one
+# slot. Painted on tiers where both faces are active simultaneously; tiers
+# above the shorter face's lip still use FALL_NE_*/FALL_NW_*.
+const FALL_NENW: StringName        = &"FALL_NENW"

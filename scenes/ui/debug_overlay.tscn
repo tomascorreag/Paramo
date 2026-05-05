@@ -91,3 +91,18 @@ text = "Altitude"
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 8
+
+[node name="FreeMoveRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Label" type="Label" parent="Panel/VBox/FreeMoveRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 8
+text = "Free Move (WASD)"
+
+[node name="FreeMoveToggle" type="CheckButton" parent="Panel/VBox/FreeMoveRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 8

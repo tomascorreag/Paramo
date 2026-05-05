@@ -63,6 +63,13 @@ var _candidate_cells: Array[Vector2i] = []
 var _candidate_sprites: Array[AnimatedSprite2D] = []
 var _is_valid_endpoint: Callable = Callable()
 
+# Reachability cache. Recomputed via Pathfinder.compute_reachable_set whenever
+# the player's current_cell shifts; lookups for hover are O(1) thereafter.
+# Avoids running a full A* per hover-cell change (the prior implementation),
+# which was visibly costly when sweeping the mouse over many tiles.
+var _reachable_set: Dictionary[Vector2i, bool] = {}
+var _reachable_anchor: Vector2i = Pathfinder.NO_CELL
+
 var _base_x_tween: Tween
 var _denied_tween: Tween
 
@@ -243,8 +250,20 @@ func _is_hovered_cell_reachable() -> bool:
 		return false
 	if hovered_cell == player.current_cell:
 		return false
-	# AStar returns a path including both endpoints; size < 2 means no route.
-	return pathfinder.find_path(player.current_cell, hovered_cell).size() >= 2
+	_refresh_reachable_set()
+	return _reachable_set.has(hovered_cell)
+
+
+# Lazily refresh the reachable set when the player's anchor cell moves.
+# Cheaper than a full A* per hover: one BFS per player-cell change, O(1)
+# lookup for every hover thereafter.
+func _refresh_reachable_set() -> void:
+	if pathfinder == null or player == null:
+		return
+	if player.current_cell == _reachable_anchor:
+		return
+	_reachable_anchor = player.current_cell
+	_reachable_set = pathfinder.compute_reachable_set(_reachable_anchor)
 
 
 # ---------------------------------------------------------------------------

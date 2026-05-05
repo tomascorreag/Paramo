@@ -1,0 +1,58 @@
+[gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://bs1o6ut6818eh"]
+
+[ext_resource type="Script" uid="uid://dpuugofoim7k8" path="res://scripts/data/terrain_biome_band.gd" id="1_q2kmd"]
+[ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="2_it088"]
+
+[sub_resource type="Resource" id="Resource_q2kmd"]
+script = ExtResource("1_q2kmd")
+weight = 4.0
+noise_strength = 1.0
+noise_frequency = 0.2
+
+[sub_resource type="Resource" id="Resource_it088"]
+script = ExtResource("1_q2kmd")
+biome = 1
+weight = 0.5
+noise_strength = 0.5
+noise_frequency = 0.15
+
+[sub_resource type="Resource" id="Resource_0vwww"]
+script = ExtResource("1_q2kmd")
+biome = 2
+
+[sub_resource type="Resource" id="Resource_mewcp"]
+script = ExtResource("1_q2kmd")
+biome = 3
+weight = 2.0
+
+[resource]
+script = ExtResource("2_it088")
+top_altitude = 32
+noise_frequency = 0.25
+noise_strength = 2.5
+weight_n = 0.75
+weight_ne = 0.4
+weight_nw = 0.4
+disc_radius_frac = 0.5
+disc_edge_frequency = 0.03
+disc_edge_jitter = 0.25
+biome_noise_frequency = 0.08
+biome_noise_amplitude = 5.0
+biome_bands = Array[ExtResource("1_q2kmd")]([SubResource("Resource_q2kmd"), SubResource("Resource_it088"), SubResource("Resource_0vwww"), SubResource("Resource_mewcp")])
+lake_radius = 4.5
+lake_jitter_strength = 1.0
+lake_aspect_min = 0.75
+lake_aspect_max = 1.5
+lake_apex_window_frac = 0.1
+lake_depth_hs = 6
+lake_apron_radius = 6
+lake_apron_falloff_hs = 4
+south_bias = 0.75
+max_drop_cubes = 6
+river_branch_chance = 0.25
+slope_swap_chance = 0.05
+silhouette_round_radius = 1
+silhouette_round_stickiness = 0.1
+altitude_round_radius = 3
+corner_round_passes = 3
+metadata/_custom_type_script = "uid://dtutbxcfcguw1"

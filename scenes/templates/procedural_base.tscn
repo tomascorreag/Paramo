@@ -1,0 +1,90 @@
+[gd_scene format=4 uid="uid://cw67jb5hj0job"]
+
+[ext_resource type="PackedScene" path="res://scenes/templates/gameplay_base.tscn" id="1_base"]
+[ext_resource type="TileSet" path="res://resources/tiles/base_tileset.tres" id="2_tileset"]
+[ext_resource type="Script" path="res://scripts/tools/procedural_world.gd" id="3_pw"]
+
+[node name="ProceduralBase" instance=ExtResource("1_base")]
+
+[node name="Ground7" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -112)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 112
+metadata/altitude = 14
+
+[node name="Ground8" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -128)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 128
+metadata/altitude = 16
+
+[node name="Ground9" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -144)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 144
+metadata/altitude = 18
+
+[node name="Ground10" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -160)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 160
+metadata/altitude = 20
+
+[node name="Ground11" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -176)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 176
+metadata/altitude = 22
+
+[node name="Ground12" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -192)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 192
+metadata/altitude = 24
+
+[node name="Ground13" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -208)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 208
+metadata/altitude = 26
+
+[node name="Ground14" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -224)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 224
+metadata/altitude = 28
+
+[node name="Ground15" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -240)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 240
+metadata/altitude = 30
+
+[node name="Ground16" type="TileMapLayer" parent="World"]
+y_sort_enabled = true
+position = Vector2(0, -256)
+tile_set = ExtResource("2_tileset")
+y_sort_origin = 256
+metadata/altitude = 32
+
+[node name="Pathfinder" parent="." node_paths=PackedStringArray("tile_map_layers")]
+tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6"), NodePath("../World/Ground7"), NodePath("../World/Ground8"), NodePath("../World/Ground9"), NodePath("../World/Ground10"), NodePath("../World/Ground11"), NodePath("../World/Ground12"), NodePath("../World/Ground13"), NodePath("../World/Ground14"), NodePath("../World/Ground15"), NodePath("../World/Ground16")]
+
+[node name="LayerConfigurator" parent="." node_paths=PackedStringArray("layers")]
+layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6"), NodePath("../World/Ground7"), NodePath("../World/Ground8"), NodePath("../World/Ground9"), NodePath("../World/Ground10"), NodePath("../World/Ground11"), NodePath("../World/Ground12"), NodePath("../World/Ground13"), NodePath("../World/Ground14"), NodePath("../World/Ground15"), NodePath("../World/Ground16")]
+altitudes = Array[int]([0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32])
+
+[node name="ProceduralWorld" type="Node" parent="." node_paths=PackedStringArray("ground_layers", "pathfinder", "player")]
+script = ExtResource("3_pw")
+ground_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6"), NodePath("../World/Ground7"), NodePath("../World/Ground8"), NodePath("../World/Ground9"), NodePath("../World/Ground10"), NodePath("../World/Ground11"), NodePath("../World/Ground12"), NodePath("../World/Ground13"), NodePath("../World/Ground14"), NodePath("../World/Ground15"), NodePath("../World/Ground16")]
+pathfinder = NodePath("../Pathfinder")
+player = NodePath("../World/Player")

@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://dtaxcdk7qsxnl"]
+
+[ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/data/terrain_biome_band.gd" id="1_7ieos"]
+
+[sub_resource type="Resource" id="Resource_7bfmk"]
+script = ExtResource("1_7ieos")
+weight = 4.0
+
+[sub_resource type="Resource" id="Resource_22lfa"]
+script = ExtResource("1_7ieos")
+biome = 1
+weight = 0.5
+
+[sub_resource type="Resource" id="Resource_c2ujl"]
+script = ExtResource("1_7ieos")
+biome = 2
+
+[sub_resource type="Resource" id="Resource_qgnfn"]
+script = ExtResource("1_7ieos")
+biome = 3
+weight = 1.5
+
+[resource]
+script = ExtResource("1")
+noise_strength = 0.6
+biome_bands = Array[ExtResource("1_7ieos")]([SubResource("Resource_7bfmk"), SubResource("Resource_22lfa"), SubResource("Resource_c2ujl"), SubResource("Resource_qgnfn")])

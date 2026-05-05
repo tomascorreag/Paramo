@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://b6tjikmfhpxro"]
+
+[ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+seed = 1
+weight_n = 0.5
+weight_ne = 2.0
+weight_nw = 2.0
+disc_radius_frac = 0.51
+disc_edge_frequency = 0.030000000000000002
+disc_edge_jitter = 0.25
+biome_noise_frequency = 0.049999999999999996
+max_drop_cubes = 5

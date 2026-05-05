@@ -1,3 +1,4 @@
+@tool
 class_name TileDebugOverlay
 extends Node2D
 
@@ -36,6 +37,22 @@ extends Node2D
 @export var debug_label: Label
 @export var enabled: bool = false
 
+# Editor-only previews. Driven by inspector toggles, independent of the runtime
+# Debug autoload (which doesn't run in @tool context). Drawn in _draw() when
+# Engine.is_editor_hint() is true. Reads tile_map_layers off `pathfinder` (its
+# exported array is readable without the script running, since @tool isn't
+# required to inspect another node's exported property).
+@export var editor_show_tile_indices: bool = false:
+	set(value):
+		editor_show_tile_indices = value
+		if Engine.is_editor_hint():
+			queue_redraw()
+@export var editor_show_tile_altitudes: bool = false:
+	set(value):
+		editor_show_tile_altitudes = value
+		if Engine.is_editor_hint():
+			queue_redraw()
+
 # Visual tweakables (kept as exports for quick calibration in the editor).
 @export var walkable_dot_radius: float = 1.5
 @export var walkable_dot_color: Color = Color(0.3, 1.0, 0.4, 0.9)
@@ -52,16 +69,18 @@ var _index_font: Font
 
 
 func _ready() -> void:
+	_index_font = ThemeDB.fallback_font
+	# Make sure we draw on top of tile layers.
+	z_index = 100
+	z_as_relative = false
+	if Engine.is_editor_hint():
+		return
 	if pathfinder == null:
 		pathfinder = get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if pathfinder == null:
 		push_error("TileDebugOverlay: no Pathfinder wired and none found in group '%s'." % Pathfinder.GROUP_NAME)
-	_index_font = ThemeDB.fallback_font
 	Debug.tile_indices_changed.connect(_on_tile_indices_changed)
 	Debug.tile_altitudes_changed.connect(_on_tile_indices_changed)
-	# Make sure we draw on top of tile layers.
-	z_index = 100
-	z_as_relative = false
 
 
 func _on_tile_indices_changed(_is_enabled: bool) -> void:
@@ -69,16 +88,19 @@ func _on_tile_indices_changed(_is_enabled: bool) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not enabled or pathfinder == null:
+	if Engine.is_editor_hint():
 		return
-
-	var mouse_global := get_global_mouse_position()
-	_hover_cell = pathfinder.resolve_click(mouse_global)
+	if enabled and pathfinder != null:
+		var mouse_global := get_global_mouse_position()
+		_hover_cell = pathfinder.resolve_click(mouse_global)
+		queue_redraw()
 	_update_label()
-	queue_redraw()
 
 
 func _draw() -> void:
+	if Engine.is_editor_hint():
+		_draw_editor_overlay()
+		return
 	if pathfinder == null:
 		return
 
@@ -143,6 +165,37 @@ func _draw_tile_altitudes() -> void:
 			draw_string(_index_font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, index_font_size, index_color)
 
 
+# Editor-only preview: walks every painted cell on every wired TileMapLayer
+# and labels it with "x,y" and/or its layer altitude. Bypasses Pathfinder/grid
+# (neither builds in @tool context) and the runtime Debug autoload (likewise).
+func _draw_editor_overlay() -> void:
+	if _index_font == null:
+		_index_font = ThemeDB.fallback_font
+	if pathfinder == null:
+		return
+	if not (editor_show_tile_indices or editor_show_tile_altitudes):
+		return
+	for layer in pathfinder.tile_map_layers:
+		if layer == null:
+			continue
+		var altitude: int = int(layer.get_meta(&"altitude", 0))
+		for cell in layer.get_used_cells():
+			var center := to_local(layer.to_global(layer.map_to_local(cell)))
+			var lines: Array[String] = []
+			if editor_show_tile_indices:
+				lines.append("%d,%d" % [cell.x, cell.y])
+			if editor_show_tile_altitudes:
+				lines.append("a%d" % altitude)
+			var line_h: float = float(index_font_size)
+			var total_h: float = line_h * lines.size()
+			for i in range(lines.size()):
+				var text: String = lines[i]
+				var size := _index_font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, index_font_size)
+				var pos := center - Vector2(size.x * 0.5, total_h * 0.5 - line_h * (i + 0.85))
+				draw_string(_index_font, pos + Vector2(0.7, 0.7), text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, index_font_size, index_shadow_color)
+				draw_string(_index_font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, index_font_size, index_color)
+
+
 # Same as _cell_visual_surface_global, but uses an explicit visual_top
 # (half-step units) instead of altitude_center, so non-walkable cells get
 # labeled at their actual visible top without consulting merged metadata.
@@ -173,15 +226,24 @@ func _cell_visual_surface_global(cell: Vector2i) -> Vector2:
 func _update_label() -> void:
 	if debug_label == null:
 		return
-	if _hover_cell == Pathfinder.NO_CELL:
-		debug_label.text = "cell: —    kind: —    alt: —"
+	if not Debug.enabled and not enabled:
+		debug_label.visible = false
+		return
+	debug_label.visible = true
+	var fps: int = int(Engine.get_frames_per_second())
+	var draws: int = int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	var nodes: int = int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))
+	var perf_str: String = "FPS: %d    draws: %d    nodes: %d" % [fps, draws, nodes]
+
+	if not enabled or pathfinder == null or _hover_cell == Pathfinder.NO_CELL:
+		debug_label.text = perf_str
 		return
 	var tile := pathfinder.get_tile(_hover_cell)
 	if tile == null:
-		debug_label.text = "cell: %s    kind: —    alt: —" % _hover_cell
+		debug_label.text = "%s\ncell: %s    kind: —    alt: —" % [perf_str, _hover_cell]
 		return
 	var top: float = pathfinder.highest_visible_top(_hover_cell)
 	var top_str: String = "—" if is_nan(top) else "%d" % int(top)
-	debug_label.text = "cell: %s    kind: %s    alt: %s    vt: %s" % [
-		_hover_cell, tile.tile_kind, tile.altitude_center, top_str
+	debug_label.text = "%s\ncell: %s    kind: %s    alt: %s    vt: %s" % [
+		perf_str, _hover_cell, tile.tile_kind, tile.altitude_center, top_str
 	]

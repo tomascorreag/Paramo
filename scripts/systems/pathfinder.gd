@@ -157,19 +157,17 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	var g_score: Dictionary[Vector3i, float] = { start_key: 0.0 }
 	var came_from: Dictionary[Vector3i, Array] = {}  # key -> [prev_key, cell]
 
-	# Open set entries: [f, tiebreak_counter, cell, dir, key]. Lower f first;
-	# ties broken by insertion order so we behave deterministically. A linear
-	# min-scan is fine at this map scale (hundreds of tiles).
-	var open: Array = [[_heuristic(from, to), 0, from, -1, start_key]]
+	# Open set entries: [f, tiebreak_counter, cell, dir, key]. Min-heap on
+	# (f, counter); the counter preserves the original FIFO order of equal-f
+	# entries so tie-breaking matches the prior linear-scan behavior. Stale
+	# entries (a key already settled at lower g) are filtered on pop via the
+	# g_score re-check, since the heap doesn't support cheap delete.
+	var open: Array = []
 	var counter: int = 0
+	_heap_push(open, [_heuristic(from, to), counter, from, -1, start_key])
 
 	while not open.is_empty():
-		var best_idx: int = 0
-		for i in range(1, open.size()):
-			if open[i][0] < open[best_idx][0]:
-				best_idx = i
-		var cur: Array = open[best_idx]
-		open.remove_at(best_idx)
+		var cur: Array = _heap_pop(open)
 
 		var cur_cell: Vector2i = cur[2]
 		var cur_dir: int = cur[3]
@@ -207,15 +205,97 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 			came_from[nb_key] = [cur_key, nb]
 			counter += 1
 			var f: float = tentative_g + _heuristic(nb, to)
-			open.append([f, counter, nb, dir_idx, nb_key])
+			_heap_push(open, [f, counter, nb, dir_idx, nb_key])
 
 	return []
+
+
+# ----------------------------------------------------------------------------
+# Min-heap helpers (used by find_path's open set)
+# ----------------------------------------------------------------------------
+#
+# Standard array-backed binary min-heap. Each item is `[f, counter, ...]`;
+# we order by (f, counter) so equal-f entries pop in FIFO insertion order,
+# matching the original linear-scan tiebreak. The heap doesn't support
+# cheap delete-by-key, so callers filter stale entries on pop instead.
+static func _heap_lt(a: Array, b: Array) -> bool:
+	if a[0] < b[0]:
+		return true
+	if a[0] > b[0]:
+		return false
+	return a[1] < b[1]
+
+
+static func _heap_push(heap: Array, item: Array) -> void:
+	heap.append(item)
+	var i: int = heap.size() - 1
+	while i > 0:
+		var parent: int = (i - 1) >> 1
+		if not _heap_lt(heap[i], heap[parent]):
+			break
+		var tmp: Array = heap[parent]
+		heap[parent] = heap[i]
+		heap[i] = tmp
+		i = parent
+
+
+static func _heap_pop(heap: Array) -> Array:
+	var top: Array = heap[0]
+	var last: Array = heap.pop_back()
+	if heap.is_empty():
+		return top
+	heap[0] = last
+	var i: int = 0
+	var n: int = heap.size()
+	while true:
+		var left: int = 2 * i + 1
+		var right: int = 2 * i + 2
+		var smallest: int = i
+		if left < n and _heap_lt(heap[left], heap[smallest]):
+			smallest = left
+		if right < n and _heap_lt(heap[right], heap[smallest]):
+			smallest = right
+		if smallest == i:
+			break
+		var tmp: Array = heap[i]
+		heap[i] = heap[smallest]
+		heap[smallest] = tmp
+		i = smallest
+	return top
 
 
 func is_walkable(cell: Vector2i) -> bool:
 	if _grid == null:
 		return false
 	return _grid.is_walkable(cell)
+
+
+# Flood-fill reachable set from `from` using the same traversal model as
+# find_path (4-neighbor + can_transition + traversal edges, ramp/penalty
+# rules ignored — reachability, not cost). O(N) once; callers should cache
+# and only recompute when their anchor cell moves. Used by UI that needs to
+# answer "is this cell reachable?" cheaply per hover (UXOverlay).
+func compute_reachable_set(from: Vector2i) -> Dictionary[Vector2i, bool]:
+	var reachable: Dictionary[Vector2i, bool] = {}
+	if _grid == null or not _grid.is_walkable(from):
+		return reachable
+	reachable[from] = true
+	var queue: Array[Vector2i] = [from]
+	var head: int = 0
+	while head < queue.size():
+		var cur: Vector2i = queue[head]
+		head += 1
+		for d in _NEIGHBOR_DIRS:
+			var nb: Vector2i = cur + d
+			if reachable.has(nb):
+				continue
+			if not _grid.is_walkable(nb):
+				continue
+			if not _grid.can_transition(cur, nb):
+				continue
+			reachable[nb] = true
+			queue.append(nb)
+	return reachable
 
 
 func altitude_center(cell: Vector2i) -> float:
@@ -295,7 +375,7 @@ func highest_visible_top(cell: Vector2i) -> float:
 		return NAN
 	var found := false
 	var best: float = -INF
-	for layer in _grid.layers():
+	for layer in _grid.layers_readonly():
 		if layer == null:
 			continue
 		var data := _grid.inspect_tile_at(layer, cell)

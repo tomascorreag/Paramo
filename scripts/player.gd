@@ -208,6 +208,13 @@ func is_moving() -> bool:
 	return _stepping or not _path.is_empty()
 
 
+# Current altitude in half-steps (matches `meta/altitude` on ground layers).
+# Continuously interpolated during stepping; readers polling this each frame
+# (e.g. AltitudeFogController) get a smooth signal across stairs and ladders.
+func current_altitude() -> float:
+	return _altitude
+
+
 # ----------------------------------------------------------------------------
 # Physics loop
 # ----------------------------------------------------------------------------
@@ -395,7 +402,12 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	# Shadow sorts 1px north of the player (always behind), visual feet
 	# offset is pushed into the vertex shader so sort Y stays decoupled.
 	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
-	_shadow.material.set_shader_parameter(&"visual_y_offset", _base_visual_y_offset + lift + 1.0)
+	# Match the defensive nullcheck pattern used in `_ready` and
+	# `_tick_shadow_cutoff` — a derived/test scene that wires a shadow without
+	# a ShaderMaterial would otherwise crash here per-frame.
+	var shadow_mat: ShaderMaterial = _shadow.material as ShaderMaterial
+	if shadow_mat != null:
+		shadow_mat.set_shader_parameter(&"visual_y_offset", _base_visual_y_offset + lift + 1.0)
 	# Always cache the local target Y so the opening-pan _process loop can
 	# read an up-to-date rest position even while we're not writing to the
 	# camera (pan owns the camera transform during top_level mode).
