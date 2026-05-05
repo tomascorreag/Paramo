@@ -177,6 +177,12 @@ extends Resource
 # Loaded .tres files overwrite this array during deserialization, so saved
 # customizations win; pre-existing .tres files (saved before biome_bands
 # existed) keep the new default since they have no saved value to restore.
+#
+# Verified against Godot 4.6's Resource deserialization order: `_init` runs
+# BEFORE the resource loader assigns saved properties, so a saved non-empty
+# biome_bands array overwrites the default we install here. Re-verify on any
+# engine-version bump — if a future Godot build flips the order, every
+# saved-empty .tres would silently re-acquire the default preset.
 func _init() -> void:
 	if biome_bands.is_empty():
 		biome_bands = _default_biome_bands()

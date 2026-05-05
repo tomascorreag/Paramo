@@ -43,6 +43,9 @@ extends Node
 @export_group("Runtime")
 ## When true, generates the map automatically on `_ready()` at game start.
 @export var auto_generate_on_ready: bool = true
+## Print a one-line "generated WxH, seed=N" summary on each regenerate.
+## Default off; flip on when iterating on the generator.
+@export var verbose_logs: bool = false
 
 @export_tool_button("Regenerate") var regenerate_action := regenerate
 @export_tool_button("Clear") var clear_action := clear
@@ -105,20 +108,25 @@ func regenerate() -> void:
 
 	_place_player_on_walkable(grid)
 
-	print(
-		"ProceduralWorld: generated %dx%d, top altitude %d, seed %d."
-		% [params.width, params.height, params.top_altitude, params.seed]
-	)
+	if verbose_logs:
+		print(
+			"ProceduralWorld: generated %dx%d, top altitude %d, seed %d."
+			% [params.width, params.height, params.top_altitude, params.seed]
+		)
 
 
 # Builds the effective TerrainGenerationParams for this regenerate call.
-# Resource is duplicated before override application so we never mutate the
-# shared `.tres`. If no resource is assigned, falls back to default values
+# Resource is deep-duplicated (subresources=true) before override application
+# so we never mutate the shared `.tres` — including the inner
+# `Array[TerrainBiomeBand]`, whose elements are sub-resources. A shallow
+# duplicate would leave the bands shared with the .tres and any future code
+# that mutates a band (e.g. weight tweak per pass) would silently mutate the
+# saved asset. If no resource is assigned, falls back to default values
 # (defined on TerrainGenerationParams) and warns.
 func _resolve_params() -> TerrainGenerationParams:
 	var p: TerrainGenerationParams
 	if generation_params != null:
-		p = generation_params.duplicate() as TerrainGenerationParams
+		p = generation_params.duplicate(true) as TerrainGenerationParams
 	else:
 		push_warning(
 			"ProceduralWorld: no generation_params assigned — using defaults. "

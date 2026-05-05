@@ -58,6 +58,14 @@ func _ready() -> void:
 	if player == null:
 		player = get_tree().get_first_node_in_group(&"player") as Player
 	if world != null:
+		# child_entered_tree / child_exiting_tree fire once per node mutation.
+		# `_queue_rescan` de-dupes within a single frame via `_rescan_queued`
+		# (the deferred `rescan()` call clears the flag when it actually
+		# runs), so a burst of N adds/removes in the same frame collapses to
+		# one rescan. Cross-frame topology changes intentionally trigger
+		# separate rescans because they reflect real layer-set changes the
+		# fog needs to react to (e.g. StructureLayerManager spawning a new
+		# preview layer mid-game).
 		world.child_entered_tree.connect(_on_world_child_entered)
 		world.child_exiting_tree.connect(_on_world_child_exiting)
 	# Defer the initial scan so sibling _ready calls (LayerConfigurator,

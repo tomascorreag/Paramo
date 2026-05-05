@@ -24,30 +24,32 @@ extends SceneTree
 # Use cases:
 #   - "Cell (X, Y) renders wrong" → dump it and confirm what the generator
 #     produced (kind, altitude, secondary face) before suspecting the painter
-#   - Verifying a generator change preserved (or restored) corner falls at a
-#     known fixture cell — eg level1 seed=19 (17,23)
-#   - Locating all corner falls in a seed before opening the scene
+#   - Spot-checking a fixture cell after a generator change — eg level1
+#     seed=22 (17,23) sits at the river/lakeshore boundary and exercises
+#     the WATER face-neighbor + multi-altitude window views
+#   - Locating all waterfalls (corner falls flagged) in a seed before
+#     opening the scene
 #
 # ----------------------------------------------------------------------------
 # Args
 # ----------------------------------------------------------------------------
 #
 #   <x> <y>     required — target cell grid coords
-#   <seed>      optional, default 16 (matches scenes/maps/level1.tscn's
+#   <seed>      optional, default 22 (matches scenes/maps/level1.tscn's
 #               seed_override). Pass any int to inspect a different seed.
 #   <window>    optional, default 4. The window view spans (2*window+1)
 #               cells per side centered on the target.
 #
 # Examples:
 #
-#   # Default: cell (17,23) at seed 16, window 4×4 → 9×9 grid view
+#   # Default: cell (17,23) at seed 22, window 4×4 → 9×9 grid view
 #   godot --headless --path . --script res://scripts/tools/dump_cells_around.gd -- 17 23
 #
 #   # Specific seed (eg the asymmetric corner fall fixture from seed 63)
 #   godot --headless --path . --script res://scripts/tools/dump_cells_around.gd -- 22 21 63
 #
 #   # Larger window for spatial context
-#   godot --headless --path . --script res://scripts/tools/dump_cells_around.gd -- 17 23 16 8
+#   godot --headless --path . --script res://scripts/tools/dump_cells_around.gd -- 17 23 22 8
 #
 # ----------------------------------------------------------------------------
 # Switching scenarios
@@ -79,12 +81,12 @@ const LEVEL1_OVERRIDES := {
 func _init() -> void:
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	if args.size() < 2:
-		print("usage: dump_cells_around <x> <y> [seed=19] [window=4]")
+		print("usage: dump_cells_around <x> <y> [seed=22] [window=4]")
 		quit(1)
 		return
 	var cx: int = int(args[0])
 	var cy: int = int(args[1])
-	var seed: int = int(args[2]) if args.size() >= 3 else 19
+	var seed: int = int(args[2]) if args.size() >= 3 else 22
 	var win: int = int(args[3]) if args.size() >= 4 else 4
 
 	var params := TerrainGenerationParams.new()

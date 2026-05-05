@@ -128,6 +128,12 @@ static func paint(
 	# paint output stays stable per seed.
 	var painted_pd_by_biome: Dictionary[int, Dictionary] = {}
 
+	# Tracks which altitudes we've already warned about during this paint pass
+	# to keep `_paint_cell` from spamming stderr once per cell when a generation
+	# run produces cells outside the layer ceiling. ProceduralWorld already
+	# validates `top_altitude` up front, so this is a defense-in-depth limiter.
+	var warned_altitudes: Dictionary = {}
+
 	# Clear all target layers first so re-runs don't leave stale tiles.
 	for alt_key in layers_by_altitude:
 		var l: TileMapLayer = layers_by_altitude[alt_key]
@@ -141,7 +147,8 @@ static func paint(
 				continue
 			_paint_cell(
 				grid, layers_by_altitude, indices, variants_by_source,
-				thresholds, seed, biome_noise, painted_pd_by_biome, x, y, c,
+				thresholds, seed, biome_noise, painted_pd_by_biome,
+				warned_altitudes, x, y, c,
 			)
 
 
@@ -158,16 +165,22 @@ static func _paint_cell(
 	seed: int,
 	biome_noise: Dictionary,
 	painted_pd_by_biome: Dictionary,
+	warned_altitudes: Dictionary,
 	x: int,
 	y: int,
 	c: TerrainCell,
 ) -> void:
 	var layer: TileMapLayer = layers_by_altitude.get(c.altitude, null)
 	if layer == null:
-		push_warning(
-			"TerrainPainter: no layer registered for altitude %d (cell %d,%d) — skipping."
-			% [c.altitude, x, y]
-		)
+		# One warning per missing altitude per paint pass — without this guard
+		# a misconfigured layer stack floods stderr with thousands of identical
+		# messages (one per cell at that altitude).
+		if not warned_altitudes.has(c.altitude):
+			warned_altitudes[c.altitude] = true
+			push_warning(
+				"TerrainPainter: no layer registered for altitude %d (first cell %d,%d) — skipping further cells at this altitude."
+				% [c.altitude, x, y]
+			)
 		return
 
 	var pos := Vector2i(x, y)

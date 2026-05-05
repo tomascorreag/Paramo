@@ -375,6 +375,15 @@ static func _swap_full_cubes_with_slopes(
 				continue
 			var pick: Array = eligible[rng.randi() % eligible.size()]
 			c.ground_shape = pick[0]
+			# Slope-swap invariants (load-bearing for downstream passes):
+			#   * Pre-swap c.altitude is even and >= 2 — the eligibility check
+			#     above (slope_alt < 0 guard) rejects any pick that would
+			#     drive altitude below 0.
+			#   * Post-swap c.altitude is the slope's LOW-end altitude. Any
+			#     later pass that reads c.altitude (`_assign_biomes`,
+			#     `_assign_shore_masks`, painter) must treat it as the low
+			#     end, not the original tier. Audit this site if you add a
+			#     pass that runs after slope-swap and reads altitude.
 			c.altitude -= int(pick[3])
 			claimed[pos] = true
 			claimed[pos + (pick[1] as Vector2i)] = true
@@ -518,7 +527,8 @@ static func _pick_apex(grid: TerrainGrid, params: TerrainGenerationParams, rng: 
 				continue
 			if c.altitude > best_alt:
 				best_alt = c.altitude
-				best_cells = [Vector2i(x, y)]
+				best_cells.clear()
+				best_cells.append(Vector2i(x, y))
 			elif c.altitude == best_alt:
 				best_cells.append(Vector2i(x, y))
 	if best_cells.is_empty():
@@ -959,10 +969,10 @@ static func _trace_simple_river(
 
 	if not branch_seeds.is_empty():
 		var dummy_branches: Array = []
-		for seed in branch_seeds:
-			var from_pos: Vector2i = seed[0]
-			var from_alt: int = seed[1]
-			var forced_dir: Vector2i = seed[2]
+		for bs in branch_seeds:
+			var from_pos: Vector2i = bs[0]
+			var from_alt: int = bs[1]
+			var forced_dir: Vector2i = bs[2]
 			dummy_branches.clear()
 			_walk_river(
 				grid, params, rng,
@@ -1096,10 +1106,25 @@ static func _walk_river(
 				cand_alts.append(basin_alt)
 
 		if cands.is_empty():
-			push_warning(
-				"TerrainGenerator: river walker boxed in at %s (alt %d); aborting."
-				% [pos, alt]
-			)
+			# Severity is keyed on `allow_branching`:
+			#   * MAIN walker (allow_branching=true) box-in leaves the river
+			#     unable to reach the south boundary — a real broken map that
+			#     would fail `_check_river_reaches_south`. Surface as an
+			#     error so the editor's debugger panel pops it.
+			#   * BRANCH walker (allow_branching=false) box-in just truncates
+			#     a side stream early; the main river still reaches south
+			#     and the map is fine. Keep as a warning so iteration on
+			#     extreme branch presets doesn't fill stderr with errors.
+			if allow_branching:
+				push_error(
+					"TerrainGenerator: main river walker boxed in at %s (alt %d); aborting."
+					% [pos, alt]
+				)
+			else:
+				push_warning(
+					"TerrainGenerator: branch walker boxed in at %s (alt %d); aborting."
+					% [pos, alt]
+				)
 			return
 
 		var pick_idx: int = -1
@@ -1335,6 +1360,20 @@ static func _emit_perpendicular_falls(grid: TerrainGrid, max_drop_hs: int) -> vo
 			# be GROUND/EMPTY/off-grid. Otherwise emitting a fall here would
 			# violate branch_merge_altitudes (the river graph would have a
 			# fall whose basin tier doesn't match the next cell's alt).
+			#
+			# Note — this guard is intentionally STRICTER than the harness
+			# `_check_branch_merge_altitudes` invariant in
+			# verify_terrain_invariants.gd. The harness also accepts a
+			# WATERFALL landing whose lip differs but whose basin matches
+			# (`landing.altitude - landing.drop_height == basin_alt`, the
+			# parallel-falls-into-shared-basin case). We choose to skip those
+			# rather than emit a parallel fall here, because the local fields
+			# we'd write (drop_height, fall_rise_dir, water_flow) would be
+			# correct for the basin but visually conflict with the landing's
+			# own fall geometry. Trade-off: rare seeds where a cliff edge sits
+			# next to such a basin render as plain WATER without a fall tile.
+			# Acceptable until we add an "emit corner-fall variant" path that
+			# can encode the merged geometry on a single cell.
 			var lp: Vector2i = Vector2i(x, y) + (-pre_primary_dir)
 			var land: TerrainCell = grid.at_or_null(lp.x, lp.y)
 			if (
