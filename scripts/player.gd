@@ -549,16 +549,26 @@ func _snap_to_starting_cell() -> void:
 	# the parent transform is ignored). The pan target is recomputed every
 	# frame in _process so the camera converges on wherever the player
 	# currently is — if they walk during the pan, the landing point follows.
-	const OPENING_PAN_PX := 120.0
-	const OPENING_PAN_DURATION := 10.0
-	var rest_world := _camera_pan_target_world()
-	_camera_panning = true
-	_pan_elapsed = 0.0
-	_pan_duration = OPENING_PAN_DURATION
-	_pan_eased_prev = 0.0
-	_camera.position_smoothing_enabled = false
-	_camera.top_level = true
-	_camera.position = Vector2(rest_world.x, rest_world.y - OPENING_PAN_PX)
+	#
+	# Pan parameters live on TitleIntro so designers tune them alongside the
+	# intro timing. The lookup relies on Godot's deferred ordering: TitleIntro
+	# adds itself to the group in _ready (sync) before any deferred free, and
+	# this method is itself deferred from Player._ready, so the group entry is
+	# always live when we read it. If TitleIntro is absent (test scenes), we
+	# skip the pan entirely rather than guess a duration that drifts from the
+	# intro's actual length.
+	var intro := get_tree().get_first_node_in_group(&"title_intro") as TitleIntro
+	if intro == null:
+		_camera_panning = false
+	else:
+		var rest_world := _camera_pan_target_world()
+		_camera_panning = true
+		_pan_elapsed = 0.0
+		_pan_duration = intro.get_pan_duration()
+		_pan_eased_prev = 0.0
+		_camera.position_smoothing_enabled = false
+		_camera.top_level = true
+		_camera.position = Vector2(rest_world.x, rest_world.y - intro.pan_offset_px)
 
 	if debug_logging:
 		print("Player: snapped to cell %s at altitude %s" % [current_cell, _altitude])

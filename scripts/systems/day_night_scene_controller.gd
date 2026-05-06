@@ -68,16 +68,31 @@ func _ready() -> void:
 		tree.node_added.connect(_on_scene_tree_changed)
 		tree.node_removed.connect(_on_scene_tree_changed)
 
+	# Drive grading from the time_changed signal instead of polling _process.
+	# This removes ordering coupling: any node that mutates time_of_day in its
+	# own _ready (e.g. TitleIntro forcing night before first paint) triggers an
+	# immediate re-grade, regardless of which controller's _ready ran first.
+	# TimeManager emits time_changed every _process tick anyway, so cadence is
+	# unchanged for the running clock.
+	_time_manager.time_changed.connect(_on_time_changed)
+	# Force one evaluation now for the initial paint. If a peer's _ready hasn't
+	# run yet we'll re-grade when they emit; the dedup gate in _apply_grading
+	# makes the redundant call free.
+	_apply_grading(_time_manager.time_of_day)
+
 
 func _on_scene_tree_changed(_n: Node) -> void:
 	_shadows_dirty = true
 
 
-func _process(_delta: float) -> void:
-	if _time_manager == null or profile == null:
+func _on_time_changed(t: float) -> void:
+	_apply_grading(t)
+
+
+func _apply_grading(t: float) -> void:
+	if profile == null:
 		return
 
-	var t: float = _time_manager.time_of_day
 	# Curves are functions of time-of-day only; if the clock hasn't moved,
 	# every uniform we'd write would be identical to last frame. Skip the
 	# whole pass — paused gameplay and frozen debug-slider states cost zero.
