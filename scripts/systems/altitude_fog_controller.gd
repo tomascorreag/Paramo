@@ -27,12 +27,17 @@ extends Node
 @export var player: Player
 
 @export_group("Darkening")
-## Brightness reduction per altitude unit (half-step) of distance from the
-## player. The default 0.025 means a 4-unit (2-cube) gap costs 0.10 brightness.
-@export_range(0.0, 0.25, 0.005) var darkness_per_unit: float = 0.025
-## Hard cap on brightness reduction. 0.5 = layers cap at 50% brightness no
-## matter how far they are from the player.
-@export_range(0.0, 1.0, 0.01) var max_darkness: float = 0.4
+## Asymptotic brightness reduction. Layers far from the player approach this
+## cap but never reach it. 0.4 = bottoms out near 60% brightness.
+@export_range(0.0, 1.0, 0.01) var max_darkness: float = 0.1
+## Per-unit falloff rate of the exponential taper. Higher = darkening
+## front-loads more aggressively onto the layers nearest the player, so the
+## brightness gap between adjacent close layers is large and the gap between
+## adjacent far layers is small. Curve is
+## `darkness = max_darkness * (1 - exp(-falloff * d))` where `d` is altitude
+## distance in half-steps; default 0.2 ≈ 0.13 brightness drop on the first
+## cube, ~0.04 on the third, near zero by the seventh.
+@export_range(0.01, 1.0, 0.01) var falloff: float = 0.2
 
 @export_group("Smoothing")
 ## Exponential approach rate for the brightness lerp. Higher = snappier.
@@ -161,5 +166,5 @@ func _on_world_child_exiting(_n: Node) -> void:
 
 func _target_brightness(player_alt: float, layer_alt: int) -> float:
 	var d: float = absf(player_alt - float(layer_alt))
-	var darkness: float = minf(max_darkness, d * darkness_per_unit)
+	var darkness: float = max_darkness * (1.0 - exp(-falloff * d))
 	return 1.0 - darkness

@@ -83,6 +83,8 @@ func _ready() -> void:
 		pathfinder = get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if pathfinder == null:
 		push_error("UXOverlay: no Pathfinder wired and none found in group '%s'." % Pathfinder.GROUP_NAME)
+	else:
+		pathfinder.graph_changed.connect(_on_graph_changed)
 	if tile_interaction_controller == null:
 		tile_interaction_controller = get_tree().get_first_node_in_group(
 			TileInteractionController.GROUP_NAME
@@ -264,6 +266,16 @@ func _refresh_reachable_set() -> void:
 		return
 	_reachable_anchor = player.current_cell
 	_reachable_set = pathfinder.compute_reachable_set(_reachable_anchor)
+
+
+# Pathfinder topology changed (rebuild, ladder/bridge add/remove, etc.).
+# Drop the cached anchor so the next reachability query rebuilds the BFS, and
+# refresh the in-flight hover circle so the user sees the change without
+# having to nudge the mouse.
+func _on_graph_changed() -> void:
+	_reachable_anchor = Pathfinder.NO_CELL
+	if _state == State.HOVER and hovered_cell != Pathfinder.NO_CELL:
+		_refresh_circle()
 
 
 # ---------------------------------------------------------------------------

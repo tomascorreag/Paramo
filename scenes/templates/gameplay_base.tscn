@@ -236,6 +236,8 @@ script = ExtResource("28_fcam")
 script = ExtResource("29_afog")
 world = NodePath("../World")
 player = NodePath("../World/Player")
+max_darkness = 0.15
+falloff = 0.09999999999999999
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)

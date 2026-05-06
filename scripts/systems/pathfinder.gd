@@ -76,6 +76,14 @@ const NO_CELL: Vector2i = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
 @export var debug_logging: bool = false
 
 
+# Emitted whenever the traversable graph changes shape: a fresh rebuild(), or
+# a traversal edge added/removed. Cost-only changes (set_cell_penalty) do NOT
+# emit — they don't alter reachability. Listeners that cache reachable sets
+# (UXOverlay) subscribe to invalidate; listeners that recompute paths on
+# demand (ClickToMoveController) can ignore it.
+signal graph_changed
+
+
 const _NEIGHBOR_DIRS: Array[Vector2i] = [
 	Vector2i( 1,  0),
 	Vector2i(-1,  0),
@@ -130,6 +138,8 @@ func rebuild() -> void:
 	if debug_logging:
 		var walk_count := _grid.walkable_cells().size()
 		print("Pathfinder: built grid with %d walkable cells." % walk_count)
+
+	graph_changed.emit()
 
 
 # ----------------------------------------------------------------------------
@@ -425,6 +435,7 @@ func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_traversal_edges[key] = [a, b]
 	if _grid != null:
 		_grid.add_traversal_edge(a, b)
+	graph_changed.emit()
 
 
 ## True iff a bidirectional traversal edge exists between `a` and `b`. Used by
@@ -438,9 +449,13 @@ func has_traversal_edge(a: Vector2i, b: Vector2i) -> bool:
 
 
 func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
-	_traversal_edges.erase(_traversal_key(a, b))
+	var key := _traversal_key(a, b)
+	if not _traversal_edges.has(key):
+		return
+	_traversal_edges.erase(key)
 	if _grid != null:
 		_grid.remove_traversal_edge(a, b)
+	graph_changed.emit()
 
 
 # Canonicalize a 2-cell pair to an order-independent StringName key so
