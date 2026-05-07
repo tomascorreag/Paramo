@@ -98,6 +98,14 @@ var drop_height: int = 2
 var fall_rise_dir_b: Vector2i = Vector2i.ZERO
 var drop_height_b: int = 0
 
+# Only meaningful when kind == WATERFALL. When true, the painter renders the
+# falling-water column but skips the basin pool (water + dirt floor + back
+# walls) at the bottom of the drop. Used for south-cliff exit waterfalls,
+# where the water cascades into the painted rock skirt rather than landing
+# in a real basin: no TerrainCell exists below the cliff lip to host a basin,
+# and a synthetic basin tile would float in front of the cliff face.
+var void_basin: bool = false
+
 # Width of the river segment passing through this cell, in cells. 0 means
 # "not a river cell" (lake interior or any non-river water). The river
 # starts at width 2 leaving the lake and may shrink at branches.

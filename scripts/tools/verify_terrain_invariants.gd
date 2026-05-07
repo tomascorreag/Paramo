@@ -91,6 +91,21 @@ const SCENARIOS: Array = [
 		"lake_radius": 6.0, "lake_depth_hs": 8,
 		"corner_round_passes": 3, "silhouette_round_radius": 3,
 	}},
+
+	# South-cliff skirt stress: maximum depth, full skirt width, steep top,
+	# heavy noise. Exercises _convert_to_south_cliff_waterfall and the
+	# void_basin tolerances in _check_waterfall_fields /
+	# _check_branch_merge_altitudes.
+	{"name": "cliff_max",         "overrides": {
+		"cliff_depth_steps": 8, "cliff_skirt_rows": 12,
+		"cliff_drop_per_row_top": 8, "cliff_drop_per_row_bottom": 2,
+		"cliff_noise_amplitude": 4.0,
+	}},
+	# Cliff disabled: regression baseline for code paths that should no-op
+	# when the feature is off (river falls back to legacy single-cube exit).
+	{"name": "cliff_off",         "overrides": {
+		"cliff_depth_steps": 0, "cliff_river_waterfall": false,
+	}},
 ]
 
 
@@ -111,6 +126,7 @@ var CHECKS: Array = [
 	{"name": "shore_mask_set_on_water", "fn": _check_shore_mask_on_water},
 	{"name": "no_islands", "fn": _check_no_islands},
 	{"name": "slope_endpoints_valid", "fn": _check_slope_endpoints_valid},
+	{"name": "cliff_waterfall_consistency", "fn": _check_cliff_waterfall_consistency},
 ]
 
 
@@ -156,6 +172,12 @@ static func _check_branch_merge_altitudes(grid: TerrainGrid, _params: TerrainGen
 			var c: TerrainCell = grid.at(x, y)
 			if c.kind != TerrainCell.Kind.WATERFALL:
 				continue
+			# South-cliff exit fall has no real downstream cell — its basin is
+			# in the painted skirt below the grid. Any cell that happens to
+			# sit at pos+step_dir is unrelated to its drop and would produce
+			# a spurious mismatch.
+			if c.void_basin:
+				continue
 			var step_dir: Vector2i = -c.fall_rise_dir
 			var lp: Vector2i = Vector2i(x, y) + step_dir
 			var l: TerrainCell = grid.at_or_null(lp.x, lp.y)
@@ -194,7 +216,13 @@ static func _check_waterfall_fields(grid: TerrainGrid, _params: TerrainGeneratio
 				fails.append("WF (%d,%d) flow %s != -rise %s" % [
 					x, y, str(c.water_flow), str(-c.fall_rise_dir),
 				])
-			if c.altitude - c.drop_height < 0:
+			# Basin must sit at altitude >= 0 EXCEPT for the south-cliff exit
+			# WATERFALL (void_basin == true): that fall cascades into the
+			# painted rock skirt below the playable floor and the basin
+			# altitude is intentionally negative (= -2 * cliff_depth_steps).
+			# `_check_cliff_waterfall_consistency` validates the negative
+			# basin invariants separately.
+			if not c.void_basin and c.altitude - c.drop_height < 0:
 				fails.append("WF (%d,%d) basin alt=%d < 0" % [
 					x, y, c.altitude - c.drop_height,
 				])
@@ -430,6 +458,81 @@ static func _check_slope_endpoints_valid(grid: TerrainGrid, _params: TerrainGene
 					x, y, lo_alt, c.altitude,
 				])
 	return fails
+
+
+# When the south-cliff feature is on, exactly one WATERFALL with
+# `void_basin == true` must exist and it must sit on the south boundary, drop
+# precisely to -2 * cliff_depth_steps, and have a single-face NE/NW rise.
+# When the feature is off, no cell should have void_basin set.
+static func _check_cliff_waterfall_consistency(
+	grid: TerrainGrid, params: TerrainGenerationParams,
+) -> Array:
+	var fails: Array = []
+	var feature_on: bool = (
+		params.cliff_river_waterfall and params.cliff_depth_steps > 0
+	)
+	var void_falls: Array[Vector2i] = []
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind != TerrainCell.Kind.WATERFALL:
+				continue
+			if not c.void_basin:
+				continue
+			void_falls.append(Vector2i(x, y))
+			if not feature_on:
+				fails.append("WF (%d,%d) has void_basin but cliff feature is disabled" % [x, y])
+				continue
+			if not _is_at_south_boundary(grid, x, y):
+				fails.append("WF (%d,%d) void_basin but not on south boundary" % [x, y])
+			var expected_basin: int = -2 * params.cliff_depth_steps
+			var basin: int = c.altitude - c.drop_height
+			if basin != expected_basin:
+				fails.append("WF (%d,%d) void basin alt=%d, expected %d" % [
+					x, y, basin, expected_basin,
+				])
+			# A void-basin fall MAY be corner-upgraded after the converter
+			# fires (a branch walker landing on the perpendicular face
+			# attaches its rise as fall_rise_dir_b). The invariant is that
+			# both faces share the void basin altitude, which means
+			# drop_height_b must equal drop_height when the secondary face
+			# is set. Painter handles this correctly via FALL_NENW; visually
+			# both river forks cascade together through the cliff column.
+			if c.fall_rise_dir_b != Vector2i.ZERO:
+				if c.drop_height_b != c.drop_height:
+					fails.append(
+						"WF (%d,%d) void_basin corner: drop_height_b=%d != drop_height=%d"
+						% [x, y, c.drop_height_b, c.drop_height]
+					)
+			if c.fall_rise_dir != DiamondCompass.DIR_NE \
+					and c.fall_rise_dir != DiamondCompass.DIR_NW:
+				fails.append("WF (%d,%d) void_basin rise=%s not NE/NW" % [
+					x, y, str(c.fall_rise_dir),
+				])
+	# When the feature is on AND the river reaches south, the converter should
+	# have produced exactly one void-basin fall. The walker can box in early
+	# and never reach south on pathological seeds — `_check_river_reaches_south`
+	# would already flag that, so we don't double-report here. Tolerate "zero"
+	# void falls quietly.
+	if feature_on and void_falls.size() > 1:
+		fails.append("expected at most one void-basin fall, got %d at %s" % [
+			void_falls.size(), str(void_falls),
+		])
+	return fails
+
+
+# Mirror of TerrainGenerator._is_south_boundary for harness use (the generator's
+# helper is private). Keep this in sync if the generator changes its definition.
+static func _is_at_south_boundary(grid: TerrainGrid, x: int, y: int) -> bool:
+	if y >= grid.height - 1 or x >= grid.width - 1:
+		return true
+	var sw: TerrainCell = grid.at_or_null(x + DiamondCompass.DIR_SW.x, y + DiamondCompass.DIR_SW.y)
+	if sw == null or sw.kind == TerrainCell.Kind.EMPTY:
+		return true
+	var se: TerrainCell = grid.at_or_null(x + DiamondCompass.DIR_SE.x, y + DiamondCompass.DIR_SE.y)
+	if se == null or se.kind == TerrainCell.Kind.EMPTY:
+		return true
+	return false
 
 
 # ----------------------------------------------------------------------------

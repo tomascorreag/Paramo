@@ -1003,6 +1003,11 @@ static func _walk_river(
 	var alt: int = start_alt
 	var steps: int = 0
 	var force_first: bool = first_step_dir != Vector2i.ZERO
+	# Tracks the step direction that brought the walker to the CURRENT pos.
+	# Stays ZERO on iter 1 (we haven't moved yet); set at the bottom of every
+	# successful step. The south-cliff converter reads this to choose the
+	# fall's rise direction when the river terminates at the south boundary.
+	var last_step_dir: Vector2i = Vector2i.ZERO
 
 	while steps < _MAX_RIVER_STEPS:
 		steps += 1
@@ -1048,6 +1053,14 @@ static func _walk_river(
 				ncell.drop_height_b = ncell.drop_height
 
 		if _is_south_boundary(grid, pos.x, pos.y):
+			# Optionally extend the terminal cell into a tall waterfall
+			# cascading down the painted south-cliff skirt. Only the main
+			# walker triggers this; branches die as plain WATER at the edge.
+			# `_is_south_boundary` covers both literal grid edges and
+			# disc-carved interior silhouette cells — the painter emits a
+			# skirt at both, so the converter must also fire at both.
+			if allow_branching:
+				_convert_to_south_cliff_waterfall(here, params, last_step_dir)
 			return
 
 		# Walker is strictly south-going: only DIR_SE and DIR_SW are considered.
@@ -1278,10 +1291,12 @@ static func _walk_river(
 				# null/EMPTY at top of loop and returns).
 				pos = landing_pos
 				alt = next_alt
+				last_step_dir = step_dir
 				continue
 
 		pos = next_pos
 		alt = next_alt
+		last_step_dir = step_dir
 
 
 # CORNER FALL UPGRADE (reverse-order): a fall has just been placed fresh at
@@ -1321,6 +1336,52 @@ static func _try_corner_upgrade_perpendicular(
 		return
 	fall.fall_rise_dir_b = perp_dir
 	fall.drop_height_b = fall.drop_height
+
+
+# Converts the river's south-terminal WATER cell into a tall WATERFALL whose
+# basin sits below the painted cliff floor (-2 * cliff_depth_steps). Marked
+# `void_basin` so the painter cascades the water column without rendering a
+# basin pool — the river falls into the rock skirt and visually disappears
+# off the lip of the world. No-op when the feature is disabled or the step
+# direction is missing (degenerate single-iter walker landing on an outlet
+# that's already at the south boundary).
+static func _convert_to_south_cliff_waterfall(
+	cell: TerrainCell,
+	params: TerrainGenerationParams,
+	last_step_dir: Vector2i,
+) -> void:
+	if not params.cliff_river_waterfall:
+		return
+	if params.cliff_depth_steps <= 0:
+		return
+	# Skip cells that are already corner waterfalls. Adopting cliff geometry
+	# on top of an existing two-face fall would require recomputing both
+	# faces' drop heights, which the painter isn't set up for. Accept that
+	# the rare river-converges-at-south-boundary case keeps its single-cube
+	# legacy fall; not visually catastrophic since the cliff skirt still
+	# paints behind it.
+	if cell.kind == TerrainCell.Kind.WATERFALL and cell.fall_rise_dir_b != Vector2i.ZERO:
+		return
+	# The walker takes only DIR_SE / DIR_SW steps; nothing else should appear
+	# here. Map the inbound step to the matching cliff rise direction (the
+	# painter's FALL_NE_*/FALL_NW_* tiles depict the cliff face on the
+	# upstream side of the spill).
+	var rise: Vector2i
+	if last_step_dir == DIR_SE:
+		rise = DIR_NW
+	elif last_step_dir == DIR_SW:
+		rise = DIR_NE
+	else:
+		return
+	var cliff_floor: int = -2 * params.cliff_depth_steps
+	var drop: int = cell.altitude - cliff_floor
+	if drop < 2:
+		return
+	cell.kind = TerrainCell.Kind.WATERFALL
+	cell.fall_rise_dir = rise
+	cell.drop_height = drop
+	cell.water_flow = last_step_dir
+	cell.void_basin = true
 
 
 # Post-walker pass: detect WATER cells whose NE and/or NW face neighbor is

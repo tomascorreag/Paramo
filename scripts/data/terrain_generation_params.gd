@@ -413,3 +413,55 @@ func grass_band_top() -> float:
 ## 2-3 = progressively stronger; multi-cell promontories shrink layer by
 ## layer and structural corners round more deeply.
 @export_range(0, 3, 1) var corner_round_passes: int = 1
+
+
+# --- South cliff skirt ------------------------------------------------------
+#
+# Paint-only rock cliff stacked below the south boundary of the playable
+# grid. The skirt is NOT part of TerrainGrid — no TerrainCells are created
+# for it, no walkability, no pathfinding. It exists only as tiles painted
+# into negative-altitude TileMapLayers (CliffN2, CliffN4, ...) that the
+# painter receives via `layers_by_altitude` but the pathfinder/LayerConfigurator
+# never see. Read the painter's `_paint_south_cliff_skirt` for the rendering
+# pass.
+
+## Number of half-step layers below the playable grid the cliff occupies.
+## 0 = feature disabled. Each step uses one TileMapLayer at altitude -2,
+## -4, ... -cliff_depth_steps*2. The scene's TileMapLayer stack must have
+## CliffN<N> layers covering these altitudes; missing layers warn-skip just
+## like the existing layers_by_altitude path.
+@export_range(0, 8, 1) var cliff_depth_steps: int = 4
+
+## Number of synthetic rows extending south past the playable boundary
+## (y in [height, height + cliff_skirt_rows - 1]) that participate in the
+## cliff skirt. Wider rows produce a longer descending ramp before bottoming
+## out; narrow rows produce a sheer cliff. 0 disables the feature regardless
+## of `cliff_depth_steps`.
+@export_range(0, 12, 1) var cliff_skirt_rows: int = 6
+
+## Drop in half-steps per skirt row at the playable edge (skirt row 0).
+## Higher = steeper cliff just past the lip. 4 = 2 cubes per row drop.
+## Must be even.
+@export_range(2, 8, 2) var cliff_drop_per_row_top: int = 4
+
+## Drop in half-steps per skirt row at the bottom of the skirt (row
+## cliff_skirt_rows - 1). Lower than top → cliff tapers (gentler descent
+## further south, ramp flattens). Equal to top → uniform descent. Must be
+## even.
+@export_range(0, 8, 2) var cliff_drop_per_row_bottom: int = 0
+
+## Per-cell noise added to cliff altitude in half-steps. 0 = clean stair-step
+## descent; higher = jagged cliff face with irregular ledges. Snapped to even
+## half-steps internally.
+@export_range(0.0, 4.0, 0.5) var cliff_noise_amplitude: float = 2.0
+
+## Spatial frequency of the cliff noise. Lower = larger smooth runs of
+## same-altitude cells along the edge; higher = per-cell jitter.
+@export_range(0.01, 0.5, 0.01) var cliff_noise_frequency: float = 0.15
+
+## When true, the river's south-exit cell is converted into a tall WATERFALL
+## with drop_height extended down through the cliff floor (and `void_basin`
+## set so the painter skips the basin pool). When false, the river terminates
+## as today — a single-cube fall at the boundary. No effect when
+## cliff_depth_steps == 0.
+@export var cliff_river_waterfall: bool = true

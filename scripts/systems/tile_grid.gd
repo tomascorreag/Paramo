@@ -165,7 +165,13 @@ var _custom_layer_ids: Dictionary[TileSet, Dictionary] = {}
 # Build
 # ----------------------------------------------------------------------------
 
-func build(layers: Array[TileMapLayer]) -> void:
+func build(layers: Array[TileMapLayer], clip_rect: Rect2i = Rect2i()) -> void:
+	# `clip_rect` (optional): when its size is non-empty, the working bounds
+	# are intersected with it before allocation. Used by procedural maps to
+	# bound the walkable grid to the playable disc area, so visual-only cells
+	# painted outside (e.g., south-cliff skirts at synthetic coords) don't
+	# expand pathfinder bounds and don't get ingested as walkable terrain.
+	# Default Rect2i() = no clipping, full union of layer used_rects.
 	_layers.clear()
 	_layer_altitudes.clear()
 	_altitudes_desc.clear()
@@ -220,6 +226,8 @@ func build(layers: Array[TileMapLayer]) -> void:
 	# Compute bounds as the union of every layer's used_rect. Empty bounds
 	# stays as (0,0,0,0) — queries return null / false.
 	_bounds = _compute_bounds_union(valid_layers)
+	if clip_rect.size.x > 0 and clip_rect.size.y > 0:
+		_bounds = _bounds.intersection(clip_rect)
 	if _bounds.size.x > 0 and _bounds.size.y > 0:
 		_allocate_tiles(_bounds.size)
 
@@ -269,6 +277,12 @@ func _ingest_layer(layer: TileMapLayer) -> void:
 	var altitude_low: int = _layer_altitudes.get(layer, 0)
 
 	for cell in layer.get_used_cells():
+		# Cells outside the build's effective bounds (e.g., visual-only south
+		# cliff skirt cells past the playable disc) are silently skipped —
+		# expected when `clip_rect` is set, otherwise no-op since
+		# `_compute_bounds_union` already covers every used cell.
+		if not _bounds.has_point(cell):
+			continue
 		var data := layer.get_cell_tile_data(cell)
 		if data == null:
 			continue

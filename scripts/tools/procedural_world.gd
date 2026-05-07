@@ -32,6 +32,12 @@ extends Node
 ## Ground TileMapLayers indexed by altitude. Drag the layers in low-to-high.
 ## Their `metadata/altitude` is used to bind cells to the correct layer.
 @export var ground_layers: Array[TileMapLayer] = []
+## Paint-only TileMapLayers used by the south-cliff skirt pass. Each layer's
+## `metadata/altitude` is read the same way as `ground_layers`. These layers
+## MUST NOT be wired into Pathfinder.tile_map_layers or LayerConfigurator.layers
+## — keeping them out is what makes the cliff non-walkable. Typical setup:
+## CliffN2..CliffN8 at altitudes -2, -4, -6, -8.
+@export var cliff_layers: Array[TileMapLayer] = []
 ## Optional Pathfinder to rebuild after painting. Wire it on the procedural
 ## scene template; gameplay relies on it for click-to-move.
 @export var pathfinder: Pathfinder
@@ -104,6 +110,11 @@ func regenerate() -> void:
 	# method on a placeholder instance". Skip rebuild during editor edits;
 	# at runtime _ready() runs in non-editor mode and pathfinder is real.
 	if pathfinder != null and not Engine.is_editor_hint():
+		# Clip the walkable grid to the playable disc area so the south-cliff
+		# skirt — painted at synthetic coords past the disc edge into the
+		# same Ground TileMapLayers — doesn't expand pathfinder bounds.
+		# Visuals are unaffected; only the walkability graph is bounded.
+		pathfinder.bounds_clip = Rect2i(0, 0, params.width, params.height)
 		pathfinder.rebuild()
 
 	_place_player_on_walkable(grid)
@@ -143,6 +154,9 @@ func clear() -> void:
 	for l in ground_layers:
 		if l != null:
 			l.clear()
+	for l in cliff_layers:
+		if l != null:
+			l.clear()
 
 
 # ----------------------------------------------------------------------------
@@ -151,18 +165,32 @@ func clear() -> void:
 
 func _build_layer_map() -> Dictionary:
 	var out: Dictionary = {}
+	# Ground layers AND cliff layers feed the painter's `layers_by_altitude`
+	# dict. Pathfinder/LayerConfigurator only see ground_layers; the cliff
+	# subset is paint-only by virtue of being absent from those wirings.
 	for l in ground_layers:
-		if l == null:
-			continue
-		if not l.has_meta("altitude"):
-			push_warning(
-				"ProceduralWorld: layer '%s' has no metadata/altitude — skipping in layer map."
-				% l.name
-			)
-			continue
-		var alt: int = int(l.get_meta("altitude"))
-		out[alt] = l
+		_register_layer(out, l)
+	for l in cliff_layers:
+		_register_layer(out, l)
 	return out
+
+
+func _register_layer(out: Dictionary, l: TileMapLayer) -> void:
+	if l == null:
+		return
+	if not l.has_meta("altitude"):
+		push_warning(
+			"ProceduralWorld: layer '%s' has no metadata/altitude — skipping in layer map."
+			% l.name
+		)
+		return
+	var alt: int = int(l.get_meta("altitude"))
+	if out.has(alt):
+		push_warning(
+			"ProceduralWorld: two layers claim altitude %d ('%s' and '%s'); the second wins."
+			% [alt, (out[alt] as TileMapLayer).name, l.name]
+		)
+	out[alt] = l
 
 
 func _ensure_even(v: int) -> int:

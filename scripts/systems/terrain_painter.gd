@@ -29,6 +29,13 @@ const SOURCE_WATER: int = 3
 const SOURCE_SNOW: int = 4
 const SOURCE_ROCK: int = 5
 
+# Custom-data layer name carrying per-tile walkability. Read at runtime by
+# `_resolve_rock_block_tile` so the south-cliff skirt always paints whatever
+# (coord, alternative) the artist marked walkable=false on the rock source —
+# no hardcoded coord or alt id.
+const _WALKABLE_LAYER: String = "walkable"
+const _TILE_KIND_LAYER: String = "tile_kind"
+
 
 # Variant selection. Any kind on any ground biome source (grass / dirt / rock /
 # snow) with 2+ painted variants is randomized via `_pick_variant_coord`. Today
@@ -151,6 +158,16 @@ static func paint(
 				warned_altitudes, x, y, c,
 			)
 
+	# After the playable grid is fully painted, drop the south-edge cliff
+	# skirt. The skirt lives at synthetic coordinates beyond the grid (y >=
+	# grid.height for the SW edge, x >= grid.width for the SE edge) and
+	# paints into whichever altitudes the caller registered with
+	# `layers_by_altitude`. Pathfinder-bound layers MUST NOT be in that dict
+	# (or the cliff cubes would pollute the walkability grid). The default
+	# wiring in procedural_base.tscn provides dedicated CliffN<N> layers at
+	# negative altitudes only.
+	_paint_south_cliff_skirt(grid, layers_by_altitude, tile_set, params)
+
 
 # ----------------------------------------------------------------------------
 # Per-cell paint
@@ -215,17 +232,24 @@ static func _paint_cell(
 			# floor of the drop) sits one tier below the bottommost fall tile,
 			# i.e. at c.altitude - drop_height, and would render as void if
 			# left unpainted.
-			var basin_alt: int = c.altitude - c.drop_height
-			var lower_layer: TileMapLayer = layers_by_altitude.get(basin_alt, null)
-			if lower_layer != null:
-				_paint_under_waterfall(grid, lower_layer, indices, pos, c)
-				# Underwater fill UNDER the basin water (basin_alt - 2 floor +
-				# NE/NW back walls). The wall stack already handles arbitrary
-				# bank heights, so this works for any drop_height.
-				var basin_mask: int = _basin_shore_mask(grid, pos, basin_alt)
-				_paint_underwater_fill(
-					grid, layers_by_altitude, indices, pos, basin_alt, basin_mask
-				)
+			#
+			# `void_basin` (set by the south-cliff exit converter) opts out:
+			# the river falls into the painted rock skirt past the south
+			# boundary, where no real basin exists. Painting a basin pool +
+			# dirt floor + back walls there would float water tiles in front
+			# of the cliff face. Skip both helpers entirely.
+			if not c.void_basin:
+				var basin_alt: int = c.altitude - c.drop_height
+				var lower_layer: TileMapLayer = layers_by_altitude.get(basin_alt, null)
+				if lower_layer != null:
+					_paint_under_waterfall(grid, lower_layer, indices, pos, c)
+					# Underwater fill UNDER the basin water (basin_alt - 2 floor +
+					# NE/NW back walls). The wall stack already handles arbitrary
+					# bank heights, so this works for any drop_height.
+					var basin_mask: int = _basin_shore_mask(grid, pos, basin_alt)
+					_paint_underwater_fill(
+						grid, layers_by_altitude, indices, pos, basin_alt, basin_mask
+					)
 		_:
 			pass
 
@@ -278,6 +302,257 @@ static func _paint_ground(
 		biome_noise, pd_for_biome,
 	)
 	layer.set_cell(pos, src, coord, 0)
+
+
+# ----------------------------------------------------------------------------
+# South cliff skirt
+# ----------------------------------------------------------------------------
+
+# Paints a paint-only rock cliff at the disc-carved south silhouette. For
+# every non-EMPTY cell whose SW or SE face neighbor is EMPTY (or off-grid),
+# the painter emits two passes:
+#
+#   1. Vertical cliff face DOWN at the lip cell's own coord, stacking rock
+#      FULL_CUBEs at altitudes [c.altitude - 2 .. cliff_floor]. This sits on
+#      the same (x, y) as the playable lip cell and writes into in-grid
+#      coordinates of layers in `layers_by_altitude`. Walkability stays
+#      correct: positive-altitude paints overwrite cliff_back's biome-tier
+#      cubes with rock at an existing in-grid coord (no new positions added,
+#      the lip's own walkable cube above is unaffected); negative-altitude
+#      paints land in cliff layers, which ProceduralWorld keeps out of
+#      Pathfinder/LayerConfigurator wirings.
+#
+#   2. Skirt extending in the carved direction (DIR_SW or DIR_SE) into the
+#      EMPTY area beyond the silhouette. Each skirt cell stacks rock cubes
+#      from its top altitude down to cliff_floor — both positive and
+#      negative altitudes. Pathfinder pollution from synth-coord paints
+#      into positive Ground layers is prevented at the TileGrid level:
+#      ProceduralWorld sets `pathfinder.bounds_clip = Rect2i(0, 0, w, h)`
+#      so cells outside the playable disc stay out of the walkability graph
+#      regardless of how far Ground layers' used_rects extend. Per-row
+#      cumulative drop + FastNoiseLite jitter shape the descent; rows
+#      further from the lip drop less per step (when bottom < top),
+#      producing a tapered ramp.
+#
+# Why iterate the disc-carved silhouette instead of literal grid edges:
+# procedural maps almost never reach the literal y=height-1 / x=width-1 rows
+# — the disc carves them away. The visual "south edge" of the playable area
+# is the silhouette boundary inside the grid. Anchoring there (and emitting
+# skirts INTO the EMPTY interior coords beyond) is what actually paints
+# cliffs the player sees.
+#
+# Walkability invariant: non-walkability of the cliff is achieved structurally
+# (cliff layers absent from Pathfinder/LayerConfigurator wirings), not via
+# per-tile walkable=false. The rock FULL_CUBE atlas entry stays walkable
+# everywhere it's used in the playable region.
+static func _paint_south_cliff_skirt(
+	grid: TerrainGrid,
+	layers_by_altitude: Dictionary,
+	tile_set: TileSet,
+	params: TerrainGenerationParams,
+) -> void:
+	if params.cliff_depth_steps <= 0 or params.cliff_skirt_rows <= 0:
+		return
+	# Resolve every (atlas_coord, alternative) on the rock source whose
+	# walkable=false AND tile_kind=FULL_CUBE. Per-cube selection then picks
+	# from this list deterministically (hash by position+altitude+seed) so
+	# adding a 2nd/3rd non-walkable variant in the atlas automatically gives
+	# the cliff visual variety with no code change. Today there's typically
+	# one entry, in which case selection collapses to that single tile.
+	var blocks: Array = _resolve_rock_block_tiles(tile_set)
+	if blocks.is_empty():
+		push_warning(
+			"TerrainPainter: no rock FULL_CUBE with walkable=false found in tile_set — "
+			+ "skipping south cliff skirt. Mark a rock-source FULL_CUBE tile non-walkable."
+		)
+		return
+
+	var noise := FastNoiseLite.new()
+	# Decorrelated stream — different patterns per seed without lock-stepping
+	# any other generator/painter noise field.
+	noise.seed = params.seed ^ 0x5C111F1F
+	noise.frequency = params.cliff_noise_frequency
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+
+	var cliff_floor: int = -2 * params.cliff_depth_steps
+	var rows: int = params.cliff_skirt_rows
+
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind == TerrainCell.Kind.EMPTY:
+				continue
+			# A cell can have its SW carved, its SE carved, or both (south
+			# corner of the disc). Treat each independently — both directions
+			# get their own skirt ray + lip face fill at the same lip coord
+			# (the lip-face fill is idempotent rock cubes; double-writing is
+			# harmless).
+			for d in [DiamondCompass.DIR_SW, DiamondCompass.DIR_SE]:
+				if not _is_carved_neighbor(grid, x, y, d):
+					continue
+				_stack_rock_at_coord(
+					layers_by_altitude, blocks, params.seed,
+					Vector2i(x, y), c.altitude - 2, cliff_floor,
+				)
+				_paint_skirt_ray(
+					layers_by_altitude, blocks, params.seed, noise, params,
+					Vector2i(x, y), d, c.altitude, cliff_floor, rows,
+				)
+
+
+# Scans the rock source for every (atlas_coord, alternative) pair whose
+# `walkable` custom_data is false AND whose `tile_kind` is FULL_CUBE. Returns
+# an Array of {"coord": Vector2i, "alt": int} entries, in atlas scan order.
+# Empty when the artist hasn't marked any rock cube non-walkable.
+#
+# Why scan: the painter previously assumed the non-walkable variant lived at
+# `coord(FULL_CUBE)` with alt id 1. `TileKindIndex.coord(FULL_CUBE)` returns
+# the first FULL_CUBE coord in atlas scan order, which is not necessarily
+# (0,0). When it returned a different coord (0:2, 1:4, 1:6 — all walkable
+# variants with no alt 1), the painter wrote a non-existent (coord, alt) pair
+# and the editor rendered `!` placeholders.
+#
+# FULL_CUBE filter: keeps a designer from accidentally steering the cliff
+# onto a non-walkable slope/wall and producing geometry-incoherent stacks.
+# If the tile_kind layer is missing entirely, we fall back to "any
+# non-walkable rock tile" rather than refusing.
+static func _resolve_rock_block_tiles(tile_set: TileSet) -> Array:
+	var out: Array = []
+	var src: TileSetAtlasSource = tile_set.get_source(SOURCE_ROCK) as TileSetAtlasSource
+	if src == null:
+		return out
+	var walk_layer_id: int = -1
+	var kind_layer_id: int = -1
+	for i in tile_set.get_custom_data_layers_count():
+		match tile_set.get_custom_data_layer_name(i):
+			_WALKABLE_LAYER: walk_layer_id = i
+			_TILE_KIND_LAYER: kind_layer_id = i
+	if walk_layer_id < 0:
+		return out
+	for i in src.get_tiles_count():
+		var coord: Vector2i = src.get_tile_id(i)
+		for j in src.get_alternative_tiles_count(coord):
+			var alt: int = src.get_alternative_tile_id(coord, j)
+			var data: TileData = src.get_tile_data(coord, alt)
+			if data == null:
+				continue
+			var w: Variant = data.get_custom_data_by_layer_id(walk_layer_id)
+			if not (w is bool) or w:
+				continue
+			if kind_layer_id >= 0:
+				var k: Variant = data.get_custom_data_by_layer_id(kind_layer_id)
+				if k != "FULL_CUBE":
+					continue
+			out.append({"coord": coord, "alt": alt})
+	return out
+
+
+# Picks one of the discovered non-walkable rock variants by hashing the
+# painted cell's (x, y, altitude, seed). Deterministic per (seed, position),
+# so the same map always renders the same way — and a stable seed reproduces
+# the exact cliff art across runs. Single-entry input (today's case) collapses
+# to a no-op.
+static func _pick_rock_block(blocks: Array, pos: Vector2i, alt: int, seed: int) -> Dictionary:
+	if blocks.size() == 1:
+		return blocks[0]
+	var h: int = hash([pos.x, pos.y, alt, seed, 0x52434B5F]) & 0x7FFFFFFF
+	return blocks[h % blocks.size()]
+
+
+# True iff the face neighbor at `(x, y) + d` is off-grid OR EMPTY (i.e., the
+# disc was carved on that side). The painter uses this to find south-facing
+# silhouette cells regardless of where the disc sits in the grid.
+static func _is_carved_neighbor(grid: TerrainGrid, x: int, y: int, d: Vector2i) -> bool:
+	var n: TerrainCell = grid.at_or_null(x + d.x, y + d.y)
+	return n == null or n.kind == TerrainCell.Kind.EMPTY
+
+
+# Stacks rock FULL_CUBEs at `pos` from `top_alt` down to `floor_alt` (inclusive
+# of both ends), stepping by -2. Each cube independently picks one of the
+# non-walkable rock variants in `blocks` (deterministic hash on pos+alt+seed),
+# so a 2-row vertical stack with two variants in the atlas naturally shows
+# two different rock textures. With a single variant in the atlas (today's
+# case) every cube collapses to that same tile. Cubes never enter the
+# walkability graph because every block in `blocks` has walkable=false; the
+# lip's TOP cube is still painted by the regular ground pass on the layer
+# above and stays walkable via "tallest wins" merge. Altitudes whose layer
+# is absent from `layers_by_altitude` are silently skipped.
+static func _stack_rock_at_coord(
+	layers_by_altitude: Dictionary,
+	blocks: Array,
+	seed: int,
+	pos: Vector2i,
+	top_alt: int,
+	floor_alt: int,
+) -> void:
+	var alt: int = top_alt
+	while alt >= floor_alt:
+		var layer: TileMapLayer = layers_by_altitude.get(alt, null)
+		if layer != null:
+			var pick: Dictionary = _pick_rock_block(blocks, pos, alt, seed)
+			layer.set_cell(pos, SOURCE_ROCK, pick["coord"], pick["alt"])
+		alt -= 2
+
+
+# Skirt ray extends in `direction` for `rows` steps. Per-row cumulative drop is
+# linearly interpolated from `cliff_drop_per_row_top` (near the lip) to
+# `cliff_drop_per_row_bottom` (far edge); per-cell altitude jittered by noise.
+# Each skirt cell stacks rock FULL_CUBEs from its top altitude down to
+# `cliff_floor`, painting at both positive and negative altitudes — the
+# Pathfinder bounds_clip set by ProceduralWorld keeps the synth coords out
+# of the walkability graph despite landing in Ground layers' used_rects.
+static func _paint_skirt_ray(
+	layers_by_altitude: Dictionary,
+	blocks: Array,
+	seed: int,
+	noise: FastNoiseLite,
+	params: TerrainGenerationParams,
+	anchor_pos: Vector2i,
+	direction: Vector2i,
+	edge_alt: int,
+	cliff_floor: int,
+	rows: int,
+) -> void:
+	var top: float = float(params.cliff_drop_per_row_top)
+	var bottom: float = float(params.cliff_drop_per_row_bottom)
+	var cumulative: float = 0.0
+	for step in range(1, rows + 1):
+		var t: float = 0.0
+		if rows > 1:
+			t = float(step - 1) / float(rows - 1)
+		cumulative += lerpf(top, bottom, t)
+		var synth_pos: Vector2i = anchor_pos + direction * step
+		var noise_sample: float = noise.get_noise_2d(float(synth_pos.x), float(synth_pos.y))
+		var jitter: float = noise_sample * params.cliff_noise_amplitude
+		var cell_top_f: float = float(edge_alt) - cumulative + jitter
+		var cell_top: int = _snap_even_int(cell_top_f)
+		# Cap top strictly below the lip altitude (otherwise the skirt cell
+		# would visually rise above the playable lip and break the silhouette)
+		# and at-or-above the floor (cubes below cliff_floor have no layer).
+		var hi: int = edge_alt - 2
+		if cell_top > hi:
+			cell_top = hi
+		if cell_top < cliff_floor:
+			cell_top = cliff_floor
+		_stack_rock_at_coord(
+			layers_by_altitude, blocks, seed,
+			synth_pos, cell_top, cliff_floor,
+		)
+
+
+# Rounds `f` to the nearest even integer (half-step quantization). The
+# generator uses the same convention; matching it here keeps cliff altitudes
+# consistent with grid altitudes for any future system that compares them.
+static func _snap_even_int(f: float) -> int:
+	var r: int = int(roundf(f))
+	if (r & 1) != 0:
+		# Round half-toward-zero on ties. Direction doesn't matter for noise
+		# jitter — picking a consistent rule just keeps output reproducible.
+		if f >= 0.0:
+			r -= 1
+		else:
+			r += 1
+	return r
 
 
 # Stacks biome-matched FULL_CUBE tiles at `pos` from `c.altitude - 2` down to

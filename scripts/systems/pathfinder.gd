@@ -75,6 +75,13 @@ const NO_CELL: Vector2i = Vector2i(0x7FFFFFFF, 0x7FFFFFFF)
 @export var tile_map_layers: Array[TileMapLayer] = []
 @export var debug_logging: bool = false
 
+# Optional clip rect applied to the walkable grid. When non-empty, the build
+# pass intersects the union of layer used_rects with this rect. Procedural
+# maps set this to the grid dimensions before rebuild so that visual-only
+# cells painted outside the playable disc (e.g., south-cliff skirts) don't
+# expand walkability bounds. Empty (default) = no clipping, original behavior.
+var bounds_clip: Rect2i = Rect2i()
+
 
 # Emitted whenever the traversable graph changes shape: a fresh rebuild(), or
 # a traversal edge added/removed. Cost-only changes (set_cell_penalty) do NOT
@@ -129,7 +136,7 @@ func rebuild() -> void:
 		return
 
 	_grid = TileGrid.new()
-	_grid.build(tile_map_layers)
+	_grid.build(tile_map_layers, bounds_clip)
 
 	# Re-apply traversal edges that survived the rebuild (ladders, etc.).
 	for pair in _traversal_edges.values():
