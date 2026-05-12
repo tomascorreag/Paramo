@@ -22,6 +22,41 @@ Y que la destrucción no viene solo de villanos — viene de personas con necesi
 
 ---
 
+## Retórica Procedural
+
+Páramo está diseñado como retórica procedural en el sentido que Ian Bogost define en *Persuasive Games*: sus argumentos los hace el **comportamiento de sus sistemas bajo el input del jugador**, no su arte, su narrativa o el texto de la HUD. Si se le quitara la prosa y el jugador igual llegara a la proposición jugando, el argumento es procedural. El trabajo del diseño es asegurar que las reglas mismas carguen el reclamo.
+
+### El reclamo general
+
+> **Páramo argumenta, a través de sus reglas, que la conservación es un compromiso lento, asimétrico y parcialmente perdido en el que el tempo del sistema (tiempo geológico vs. industrial), su topología (causas río arriba, consecuencias visibles río abajo) y su marco político (extracción permitida) están apilados contra la reparación — y que dentro de esas restricciones, la alianza con las comunidades vence a su exclusión, la prevención vence a la reacción, y ninguna cantidad de competencia convierte al jugador en salvador.**
+
+### Sub-argumentos y las reglas que los cargan
+
+1. **Destruir es barato; reparar es caro.** Un frailejón tarda 3–4 estaciones en madurar y segundos en arder. Los tiles cicatrizados tienen un techo de salud permanentemente reducido. La economía de la acción hace que la asimetría se sienta, no que se diga.
+2. **El daño tiene latencia larga; hay que actuar río arriba antes de poder verlo.** La pureza de la laguna se degrada de forma invisible; cuando la contaminación es visible en la laguna, la cascada ya está corriendo. El jugador debe comprometer recursos a consecuencias que aún no puede percibir.
+3. **La conservación fortaleza fracasa sola.** El apoyo comunitario es un multiplicador del spawn de amenazas, la efectividad de los rangers y las probabilidades legales. Encerrar sin programas → el apoyo se hunde → las amenazas se multiplican. El sistema castiga la exclusión estructuralmente.
+4. **La destrucción permitida es la peor amenaza.** La minería legal no se puede resistir físicamente; solo existe la vía legal probabilística, y se puede perder. El juego modela la complicidad del marco legal, no solo a los malos actores.
+5. **No puedes salvarlo todo; la conservación es triaje.** La niebla de guerra, los niveles de interacción y la tensión estación-vs-campo garantizan que algo quede desatendido. Cada elección deja otra cosa sin atender.
+6. **El clima es un techo, no un enemigo.** No tiene contramedida, solo adaptación. Una presión que existe para vivirse debajo, no para vencerse.
+7. **El mapa recuerda.** Los tiles cicatrizados no se recuperan del todo; la vista final muestra qué hubo y qué quedó. El daño es parcialmente irreversible.
+
+### Lineamientos de diseño que se desprenden de la retórica
+
+Son *heurísticas de diseño*, no reglas duras. Orientan decisiones sobre contenido, balance y nuevas mecánicas hacia el argumento procedural que el juego está haciendo.
+
+- **Mantener los tradeoffs presentes y tangibles.** Cada sistema que le otorgue algo al jugador debería plausiblemente costar algo en otra parte: redirigir el agua seca otra ruta, monitorear gana visión pero puede erosionar la sensación local de ser vigilado, más rangers cuestan más fondos aun cuando están ociosos. Los tradeoffs raramente deberían ser "decisiones libres con una respuesta obviamente correcta". Es una orientación de diseño, no una cuota — la meta es que el jugador sienta el costo de actuar, no que cada estación contenga un dilema forzado.
+- **Darle a la vigilancia y a la evidencia un costo procedural.** Las estaciones de monitoreo y los científicos hoy están planteados como multiplicadores sin contrapartida. La retórica es más afilada si las redes densas de monitoreo erosionan el apoyo comunitario a alta densidad, o si las decisiones "basadas en evidencia" a veces sobrepesan lo que muestran los datos y subestiman lo que las comunidades saben. La idea no es que el monitoreo sea malo — es no endosar sin examen la gestión tecnocrática basada solo en evidencia formal.
+- **Volver "comunidades río abajo con acceso al agua" un input del sistema, no un display.** Si el número solo cuenta, es pathos. Si el bajo acceso río abajo retroalimenta al sistema político — más permisos otorgados, más minería legal, casos legales más difíciles — se vuelve procedural. El número tiene que hacer trabajo dentro de las reglas, no solo en la HUD.
+- **Ser honestos sobre desde qué perspectiva codifican las reglas.** La perspectiva procedural en Páramo es institucional: un coordinador de campo de una ONG. La montaña es algo a lo que una organización llega y administra. La presencia indígena está, por decisión deliberada, representada de forma *narrativa y atmosférica*, no procedural. Por lo tanto el juego no puede hacer afirmaciones sobre la administración indígena del territorio a través de sus reglas — solo adyacentes a ellas. Cualquier cambio futuro acá tiene que ser un cambio en las reglas, no en el flavor.
+- **Resistir la pantalla de victoria limpia.** El estado binario sobrevivir/perder y el desglose de puntaje pueden contradecir silenciosamente la tesis de "no hay victoria triunfal" si premian la optimización. La vista de fin de partida debería poner al frente *lo que no se salvó*: qué comunidades río abajo perdieron agua, cuál campo de frailejones que estaba en la Estación 1 ya no está, qué estaciones de crecimiento se borraron. La pérdida debe nombrarse, no agregarse en un puntaje.
+- **Mantener el techo climático sin contramedida.** Todos los demás sistemas le dan al jugador algún tipo de agencia. El cambio climático, por diseño retórico intencional, no. Nada de "programa de carbono" o "investigación climática" que ablande esto. La presión estructural irresoluble está haciendo trabajo retórico serio.
+
+### Qué significa esto en la práctica
+
+Al evaluar cualquier mecánica nueva, preguntarse: **¿qué argumenta este sistema?** Una mecánica de "patrulla con drones" que extiende la visión sin fricción argumenta que la vigilancia resuelve el problema de conciencia situacional. Un mini-juego de "pitch a donantes" que convierte esfuerzo en fondos confiables argumenta que el cuello de botella de financiamiento es un problema de habilidad. Las mecánicas que contradicen el reclamo general no son adiciones neutras — erosionan el argumento procedural que el resto del juego está haciendo. La retórica es el producto. Las mecánicas que no la cargan se cortan o se replantean hasta que lo hagan.
+
+---
+
 ## Concepto
 
 Eres el coordinador de campo de una ONG que protege un páramo andino colombiano — un ecosistema tropical de alta montaña único en el mundo. El páramo es una "fábrica de agua": sus frailejones capturan niebla, sus musgos retienen humedad, su laguna glaciar alimenta ríos que abastecen a millones.

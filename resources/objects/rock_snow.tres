@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="WorldObjectData" format=3 uid="uid://cunthm4ae5sb8"]
+
+[ext_resource type="Script" uid="uid://cvdt6bi4buv42" path="res://scripts/data/world_object_data.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/rock_snow_0.tres" id="3"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/rock_snow_1.tres" id="4"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/rock_snow_2.tres" id="5"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/rock_snow_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+id = &"rock_snow"
+blocks_movement = true
+density_by_biome = {
+0: 0.0,
+1: 0.0,
+2: 0.0,
+3: 0.1
+}
+preferred_altitude = 26
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

@@ -111,6 +111,14 @@ var void_basin: bool = false
 # starts at width 2 leaving the lake and may shrink at branches.
 var river_width: int = 0
 
+# Procedurally-assigned object kind to spawn at this cell during scene build.
+# &"" = no object. Filled by TerrainGenerator's _assign_objects pass and read
+# by ObjectPainter. ObjectPainter looks up the kind in WorldObjectData
+# resources to find the scene to instantiate. Decoupled from the terrain
+# tile painter: objects are Node2D instances with their own sprites/shadows,
+# not tiles painted into Ground/Structures layers.
+var object_kind: StringName = &""
+
 
 static func make_empty() -> TerrainCell:
 	var c := TerrainCell.new()

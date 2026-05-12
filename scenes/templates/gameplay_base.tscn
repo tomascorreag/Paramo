@@ -175,6 +175,7 @@ z_as_relative = false
 script = ExtResource("5_tdovl")
 pathfinder = NodePath("../Pathfinder")
 debug_label = NodePath("../UILayer/DebugLabel")
+editor_show_tile_altitudes = true
 
 [node name="UXOverlay" type="Node2D" parent="." unique_id=749867415 node_paths=PackedStringArray("pathfinder", "tile_interaction_controller")]
 z_index = 1

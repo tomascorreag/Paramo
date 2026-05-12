@@ -56,6 +56,17 @@ var health: float = 1.0
 var moisture: float = 0.0
 var biodiversity: float = 0.0
 
+# --- Occupancy --------------------------------------------------------------
+# Object that claims this cell (frailejon, rock, bridge_deck, ladder, ...).
+# Multi-cell occupants (bridges) register the same node reference at every
+# cell they cover. One occupant per cell — set_occupant rejects double-claim
+# with a warning. Cleared when the occupant is freed (occupant calls
+# clear_occupant in its _exit_tree). Pathfinder reads occupant.blocks_movement()
+# in is_walkable and occupant.walk_penalty() in step cost. Lifetime is tied
+# to the scene tree, not the grid: a fresh build() leaves this null and
+# occupants re-register from a graph_changed handler.
+var occupant: Node2D = null
+
 
 static func make_walkable(
 	cell_layer: TileMapLayer,

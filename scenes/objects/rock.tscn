@@ -1,0 +1,34 @@
+[gd_scene format=3 uid="uid://b2tk0wm4r5n8q"]
+
+[ext_resource type="Script" uid="uid://bam0624o7ui31" path="res://scripts/objects/rock.gd" id="2"]
+[ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
+[ext_resource type="Resource" uid="uid://dxr5vk7qaq3wm" path="res://resources/objects/rock.tres" id="4"]
+[ext_resource type="Texture2D" uid="uid://cy83lfhbk6ujd" path="res://resources/objects/variants/rock_0.tres" id="4_xnkle"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_shadow"]
+resource_local_to_scene = true
+shader = ExtResource("3")
+shader_parameter/shadow_color = Color(0, 0, 0.05, 0.5)
+shader_parameter/shadow_length = 8.0
+shader_parameter/max_height = 3.0
+shader_parameter/taper = 0.6
+shader_parameter/cap_width = 8.0
+shader_parameter/visual_y_offset = 4.0
+shader_parameter/shadow_opacity = 0.5
+shader_parameter/sprite_offset = Vector2(0, -8)
+shader_parameter/roughness = 0.0
+shader_parameter/noise_cell_px = 2.0
+shader_parameter/noise_world_follow = 0.5
+shader_parameter/cutoff_x = 1000.0
+shader_parameter/tile_size_px = Vector2(32, 16)
+
+[node name="Rock" type="Node2D" unique_id=1681902112]
+script = ExtResource("2")
+data = ExtResource("4")
+
+[node name="Shadow" type="Sprite2D" parent="." unique_id=868631582]
+material = SubResource("ShaderMaterial_shadow")
+offset = Vector2(0, -8)
+
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=1084677158]
+texture = ExtResource("4_xnkle")

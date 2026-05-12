@@ -20,10 +20,11 @@ func is_available(ctx: ActionContext) -> bool:
 	# Origin must be a flat — ladders can't anchor on a ramp (parity with bridge).
 	if ctx.tile.altitude_low != ctx.tile.altitude_high:
 		return false
-	if ctx.tile_interaction != null and ctx.tile_interaction.planted_cells().has(ctx.cell):
-		return false
-	if ctx.traversal.find_traversal_at(ctx.cell) != null:
-		return false
+	# Single registry query — same pattern as the bridge action.
+	if ctx.pathfinder != null:
+		var grid := ctx.pathfinder.grid()
+		if grid != null and grid.occupant_at(ctx.cell) != null:
+			return false
 	return true
 
 

@@ -25,6 +25,7 @@ const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/ac
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
 const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/action_build_ladder.gd")
 const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
+const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
 
 # Visuals for submenu group nodes — rendered as parent items on the wheel
 # whose submenu children are the individual TileActions in that group.
@@ -41,7 +42,6 @@ const _CENTER_ICON: Texture2D = preload("res://assets/sprites/UX/icons/center.tr
 @export var world: Node2D
 @export var traversal_placement_controller: TraversalPlacementController
 
-var _planted: Dictionary = {}  # Vector2i -> Node2D
 var _pending_cell: Vector2i
 var _menu: Control  # RadialMenu instance
 var _menu_layer: CanvasLayer
@@ -87,6 +87,7 @@ func _ready() -> void:
 	_registry.register(_ACTION_BUILD_LADDER.new())
 	_registry.register(_ACTION_REMOVE_BRIDGE.new())
 	_registry.register(_ACTION_REMOVE_LADDER.new())
+	_registry.register(_ACTION_REMOVE_ROCK.new())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -128,25 +129,57 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## Read-only view of the cells currently occupied by planted objects (key set
-## is what callers need; values are the Node2D instances). Used by other
-## systems (e.g. bridge placement) to avoid building over plants.
+## Read-only view of the cells currently occupied by planted frailejones,
+## keyed by cell (values are the Node2D instances). Backed by the unified
+## occupant registry on TileGrid — frailejones self-register in _ready and
+## clear in _exit_tree, so this method is a thin facade kept for backwards
+## compatibility with callers that ask "what cells have plants?".
 func planted_cells() -> Dictionary:
-	return _planted
+	if pathfinder == null:
+		return {}
+	var grid := pathfinder.grid()
+	if grid == null:
+		return {}
+	return grid.occupants_of_kind(&"frailejon")
 
 
 ## True iff `cell` is a right-clickable tile from the player's current position:
-## resolved, walkable, and Chebyshev-adjacent to the player. Planted/bridge
-## cells stay interactable — the registry picks what (if anything) applies.
+## resolved, Chebyshev-adjacent, and either walkable or made unwalkable solely
+## by a removable blocking occupant (a Rock today). The latter exception keeps
+## rock cells reachable for the pickaxe action — without it, is_walkable would
+## reject them up-front and the menu would never open.
+##
+## Planted/bridge/ladder cells stay interactable via the walkable branch — the
+## registry picks what (if anything) applies via per-action is_available.
 func is_interactable(cell: Vector2i) -> bool:
 	if cell == Pathfinder.NO_CELL:
 		return false
 	if pathfinder == null or player == null:
 		return false
-	if not pathfinder.is_walkable(cell):
+	if not pathfinder.is_walkable(cell) and not _has_removable_blocker(cell):
 		return false
 	var diff := cell - player.current_cell
 	return maxi(abs(diff.x), abs(diff.y)) == 1
+
+
+# True iff the cell carries an occupant that flips it unwalkable (rocks today)
+# AND the underlying tile is itself walkable terrain. This is the gate that
+# lets right-click reach a rock cell so ActionRemoveRock can run.
+func _has_removable_blocker(cell: Vector2i) -> bool:
+	if pathfinder == null:
+		return false
+	var grid := pathfinder.grid()
+	if grid == null:
+		return false
+	var t := pathfinder.get_tile(cell)
+	if t == null or not t.walkable:
+		return false
+	var occ := grid.occupant_at(cell)
+	if occ == null:
+		return false
+	if not occ.has_method(&"blocks_movement"):
+		return false
+	return occ.blocks_movement()
 
 
 ## True iff right-clicking `cell` would offer at least one non-debug action
@@ -275,23 +308,46 @@ func plant_frailejon(cell: Vector2i) -> void:
 
 	# Place the Node2D at the altitude-0 world point for the cell. The plant
 	# itself lifts its sprite visually in _ready() so the sort key stays
-	# altitude-independent (same pattern as Player).
+	# altitude-independent (same pattern as Player). Frailejone registers
+	# itself as TileGrid occupant in _ready — Pathfinder reads its
+	# walk_penalty() during step-cost calc, so no explicit set_cell_penalty
+	# call is needed here.
 	world.add_child(frailejon)
 	frailejon.global_position = pathfinder.cell_to_world(cell)
-	_planted[cell] = frailejon
-	if pathfinder and frailejon.pathfinding_penalty != 0.0:
-		pathfinder.set_cell_penalty(cell, frailejon.pathfinding_penalty)
 
 
 func remove_frailejon(cell: Vector2i) -> void:
-	var node := _planted.get(cell) as Frailejon
+	if pathfinder == null:
+		return
+	var grid := pathfinder.grid()
+	if grid == null:
+		return
+	var node := grid.occupant_at(cell) as Frailejon
 	if node == null:
 		return
-	_planted.erase(cell)
-	if pathfinder:
-		pathfinder.clear_cell_penalty(cell)
-	if is_instance_valid(node):
-		node.queue_free()
+	# Frailejone clears its occupant claim in _exit_tree.
+	node.queue_free()
+
+
+## Free the rock at `cell` and rebuild pathfinding. Walkability flips back
+## (rock.blocks_movement = true → cell was unwalkable; clearing the occupant
+## reveals the underlying walkable tile), so reachability caches must be
+## refreshed — same pattern as TraversalPlacementController.remove_traversal.
+func remove_rock(cell: Vector2i) -> void:
+	if pathfinder == null:
+		return
+	var grid := pathfinder.grid()
+	if grid == null:
+		return
+	var node := grid.occupant_at(cell) as Rock
+	if node == null:
+		return
+	# Rock clears its occupant claim in _exit_tree. queue_free defers to end
+	# of frame — rebuild() now would still see the stale occupant. Clear the
+	# claim eagerly so the rebuild reads the post-removal world.
+	grid.clear_occupant(cell, node)
+	node.queue_free()
+	pathfinder.rebuild()
 
 
 func begin_traversal(origin: Vector2i, kind: StringName) -> void:

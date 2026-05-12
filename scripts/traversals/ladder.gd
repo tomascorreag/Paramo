@@ -121,6 +121,12 @@ func build() -> bool:
 	# TileGrid.add_traversal_edge on the current grid). The painted LADDER_*
 	# tiles are decorative (skipped by TileGrid ingest), so no rebuild needed.
 	_pathfinder.add_traversal_edge(origin_cell, top_cell)
+	# Register as occupant on origin and top (both cells the ladder claims —
+	# see occupied_cells override). No pathfinder rebuild here, so we register
+	# on the existing grid; graph_changed (which add_traversal_edge emits)
+	# would also re-register us via the base handler — but only if connected
+	# first, so do an explicit registration.
+	_register_with_grid()
 
 	# Anchor at origin's altitude-lifted world pos (parity with Bridge).
 	var base_world := _pathfinder.cell_to_world(origin_cell)
@@ -129,7 +135,8 @@ func build() -> bool:
 
 
 # Erase painted tiles AND unregister the traversal edge. Overrides the base
-# despawn so we clear both sides of the ladder's footprint.
+# despawn so we clear both sides of the ladder's footprint. Occupant clears
+# happen inside super.despawn().
 func despawn(placer: StructurePlacer) -> void:
 	if _pathfinder != null:
 		_pathfinder.remove_traversal_edge(origin_cell, top_cell)
@@ -142,6 +149,19 @@ func despawn(placer: StructurePlacer) -> void:
 # still "on" the ladder for the purposes of remove-stranding checks.
 func occupies_cell(cell: Vector2i) -> bool:
 	return cell == origin_cell or cell == top_cell
+
+
+# Cells the ladder claims on the occupant registry. Includes top_cell even
+# though no tile is painted there: a player or other structure must see the
+# top as occupied so a second ladder/structure can't root on the same landing.
+func occupied_cells() -> Array[Vector2i]:
+	return [origin_cell, top_cell]
+
+
+# Identifies the ladder in the unified occupant registry. Other systems query
+# `tile_grid.occupants_of_kind(&"ladder")` to find every ladder cell.
+func occupant_kind() -> StringName:
+	return &"ladder"
 
 
 # Returns the (cell, kind, altitude) entries a ladder would paint between
@@ -196,6 +216,8 @@ static func _step_direction(from: Vector2i, to: Vector2i) -> Vector2i:
 	if d == Vector2i.ZERO:
 		return Vector2i.ZERO
 	if d.x != 0 and d.y != 0:
+		return Vector2i.ZERO
+	if absi(d.x) + absi(d.y) != 1:
 		return Vector2i.ZERO
 	return Vector2i(signi(d.x), signi(d.y))
 

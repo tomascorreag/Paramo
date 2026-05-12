@@ -1,6 +1,23 @@
 [gd_resource type="Resource" script_class="TerrainGenerationParams" format=3 uid="uid://b6tjikmfhpxro"]
 
 [ext_resource type="Script" uid="uid://dtutbxcfcguw1" path="res://scripts/data/terrain_generation_params.gd" id="1"]
+[ext_resource type="Script" uid="uid://dpuugofoim7k8" path="res://scripts/data/terrain_biome_band.gd" id="1_lqpm8"]
+
+[sub_resource type="Resource" id="Resource_r5nh7"]
+script = ExtResource("1_lqpm8")
+weight = 3.0
+
+[sub_resource type="Resource" id="Resource_qfrgi"]
+script = ExtResource("1_lqpm8")
+biome = 1
+
+[sub_resource type="Resource" id="Resource_36b4n"]
+script = ExtResource("1_lqpm8")
+biome = 2
+
+[sub_resource type="Resource" id="Resource_lbphl"]
+script = ExtResource("1_lqpm8")
+biome = 3
 
 [resource]
 script = ExtResource("1")
@@ -9,7 +26,8 @@ weight_n = 0.5
 weight_ne = 2.0
 weight_nw = 2.0
 disc_radius_frac = 0.51
-disc_edge_frequency = 0.030000000000000002
+disc_edge_frequency = 0.03
 disc_edge_jitter = 0.25
-biome_noise_frequency = 0.049999999999999996
+biome_noise_frequency = 0.04999999999999999
+biome_bands = Array[ExtResource("1_lqpm8")]([SubResource("Resource_r5nh7"), SubResource("Resource_qfrgi"), SubResource("Resource_36b4n"), SubResource("Resource_lbphl")])
 max_drop_cubes = 5

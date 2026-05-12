@@ -20,11 +20,12 @@ func is_available(ctx: ActionContext) -> bool:
 	# enforces this too, but suppressing the option keeps the menu honest).
 	if ctx.tile.altitude_low != ctx.tile.altitude_high:
 		return false
-	# Don't offer bridge on occupied cells.
-	if ctx.tile_interaction != null and ctx.tile_interaction.planted_cells().has(ctx.cell):
-		return false
-	if ctx.traversal.find_traversal_at(ctx.cell) != null:
-		return false
+	# Don't offer bridge on cells already claimed by any occupant. Single
+	# registry query covers frailejones, traversals, rocks.
+	if ctx.pathfinder != null:
+		var grid := ctx.pathfinder.grid()
+		if grid != null and grid.occupant_at(ctx.cell) != null:
+			return false
 	return true
 
 

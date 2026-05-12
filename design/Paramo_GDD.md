@@ -18,6 +18,41 @@ Conservation is not a battle you win. It's a commitment you maintain.
 
 ---
 
+## Procedural Rhetoric
+
+Páramo is designed as procedural rhetoric in the sense Ian Bogost defines in *Persuasive Games*: its arguments are made by the **behavior of its systems under player input**, not by its art, story, or HUD copy. If the prose were stripped and the player still arrived at the proposition through play, the argument is procedural. The design's job is to make sure the rules themselves carry the claim.
+
+### The umbrella claim
+
+> **Páramo argues, through its rules, that conservation is a slow, asymmetric, partially-losing commitment in which the system's tempo (geological vs. industrial), topology (upstream causes, downstream visibility), and political frame (permitted extraction) are stacked against repair — and that within those constraints, partnership with people beats exclusion of them, prevention beats reaction, and no amount of competence makes the player a savior.**
+
+### Sub-arguments and the rules that carry them
+
+1. **Destruction is cheap; repair is dear.** Frailejones take 3–4 seasons to mature and seconds to burn. Scarred tiles cap below Healthy permanently. The action economy makes the asymmetry felt, not stated.
+2. **Harm has long latency; act upstream before you can see it.** Laguna purity degrades invisibly; visible contamination at the lake means the cascade is already running. The player must commit resources to consequences they cannot yet perceive.
+3. **Fortress conservation is self-defeating.** Community support is a multiplier on threat spawn rate, ranger effectiveness, and legal odds. Fencing without programs → support craters → threats multiply. The system punishes exclusion structurally.
+4. **Permitted destruction is the worst threat.** Legal mining cannot be physically resisted; only the probabilistic legal-team path exists, and it can lose. The game models complicity of the legal frame, not just bad actors.
+5. **You cannot save everything; conservation is triage.** Fog-of-war, interaction tiers, and station-vs-field tension guarantee neglect. Every choice somewhere is unattended.
+6. **Climate is a ceiling, not an enemy.** No counter, only adaptation. A pressure that exists to be lived under, not defeated.
+7. **The map remembers.** Scarred tiles never fully recover; the end-game view shows what was and what is. Damage is partially irreversible.
+
+### Design guidelines that follow from the rhetoric
+
+These are *design heuristics*, not hard rules. They orient decisions about content, balance, and feature additions toward the procedural argument the game is making.
+
+- **Keep tradeoffs present and tactile.** Every system that grants the player something should plausibly cost something elsewhere: water redirection starves another path, monitoring builds vision but may erode the local sense of being watched, more rangers cost more funding even when idle. Tradeoffs should rarely be "free choices with one obviously correct answer." This is a design orientation, not a quota — the goal is that the player feels the cost of acting, not that every season must contain a forced dilemma.
+- **Give surveillance and evidence a procedural cost.** Monitoring stations and scientists are currently framed as force multipliers with no downside. The rhetoric is sharper if dense monitoring networks erode community support at high density, or if "evidence-led" decisions occasionally overweight what the data shows and underweight what locals know. The point is not to make monitoring bad — it is to refuse the unexamined endorsement of technocratic, evidence-based management.
+- **Make "downstream communities with water access" a system input, not a display.** If the number only counts, it is pathos. If low downstream access feeds into the political system — more permits issued, more legal mining, harder legal cases — it becomes procedurally rhetorical. The number must do work in the rules, not only on the HUD.
+- **Be honest about whose perspective the rules encode.** The procedural perspective in Páramo is institutional: an NGO field coordinator. The mountain is something an organization arrives at and manages. Indigenous presence is, by deliberate design, represented *narratively and atmospherically*, not procedurally. The game therefore cannot make claims about indigenous stewardship through its rules — only adjacent to them. Any future shift here must be a rules change, not a flavor change.
+- **Resist the clean win-screen.** The binary survive/lose state and the score breakdown can quietly contradict the "no triumphant win" thesis if they reward optimization. The end-of-run view should foreground *what was not saved*: which downstream communities lost water, which frailejon field that was on the map in Season 1 isn't anymore, which seasons of growth were erased. Loss should be named, not aggregated into a score.
+- **Keep the climate ceiling un-counterable.** Every other system in the game grants the player some agency. Climate shift, by intentional rhetorical design, does not. No "carbon program" or "climate research" that softens this. The unresolvable structural pressure is doing serious rhetorical work.
+
+### What this means in practice
+
+When evaluating any new mechanic, ask: **what does this system argue?** A "drone patrol" feature that frictionlessly extends vision argues that surveillance solves the awareness problem. A "donor pitch" mini-game that converts effort into reliable funding argues that the funding bottleneck is a skill issue. Features that contradict the umbrella claim are not neutral additions — they erode the procedural argument the rest of the game is making. The rhetoric is the product. Mechanics that don't carry it should be cut or reframed until they do.
+
+---
+
 ## Concept
 
 The player is a field coordinator for a conservation NGO protecting a paramo mountain — a high-altitude tropical ecosystem unique to the Andes. The paramo is a "water factory": its frailejones capture fog, its mosses retain moisture, its glacial lake feeds rivers that supply millions downstream.

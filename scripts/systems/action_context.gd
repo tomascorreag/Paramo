@@ -10,10 +10,11 @@ extends RefCounted
 # discarded when the menu closes.
 #
 # Keep this minimal: `cell` + `tile` cover the availability checks the core
-# actions need. The service refs are a temporary convenience so the initial
-# port of plant/build/remove actions can still reach the controller-owned
-# registries (_planted dict, traversal registry). Once occupancy moves into
-# CellData or a dedicated occupancy service, the service refs can be dropped.
+# actions need. The service refs let actions reach behavior on the
+# controllers (begin_traversal, plant_frailejon, remove_traversal_at) and
+# query the unified occupant registry through `pathfinder.grid()`. Cell-level
+# state (what's at this cell) lives in CellData.occupant — actions don't need
+# any of the legacy controller-side dicts to answer "is this cell free".
 #
 # ============================================================================
 

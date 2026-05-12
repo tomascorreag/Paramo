@@ -127,6 +127,9 @@ var CHECKS: Array = [
 	{"name": "no_islands", "fn": _check_no_islands},
 	{"name": "slope_endpoints_valid", "fn": _check_slope_endpoints_valid},
 	{"name": "cliff_waterfall_consistency", "fn": _check_cliff_waterfall_consistency},
+	{"name": "objects_on_ground", "fn": _check_objects_on_ground},
+	{"name": "objects_on_full_cube_or_flat", "fn": _check_objects_on_full_cube_or_flat},
+	{"name": "object_kind_known", "fn": _check_object_kind_known},
 ]
 
 
@@ -143,17 +146,26 @@ static func _check_grid_dimensions(grid: TerrainGrid, params: TerrainGenerationP
 # Every grid must have at least one WATER/WATERFALL cell on the south
 # boundary (literal grid edge or adjacent to EMPTY).
 static func _check_river_reaches_south(grid: TerrainGrid, _params: TerrainGenerationParams) -> Array:
+	# The river chain terminates at a rock GROUND cube installed by
+	# `_walk_river` at the south boundary (replaces the old WATERFALL cliff
+	# cascade). So the last WATER cell sits one step UPSTREAM of the boundary.
+	# Accept any water/waterfall whose SE or SW neighbor is itself at the
+	# south boundary (off-grid, EMPTY, or a south-boundary cell of any kind),
+	# OR which is on the south boundary itself.
 	for y in grid.height:
 		for x in grid.width:
 			var c: TerrainCell = grid.at(x, y)
 			if c.kind != TerrainCell.Kind.WATER and c.kind != TerrainCell.Kind.WATERFALL:
 				continue
-			if y >= grid.height - 1 or x >= grid.width - 1:
+			if _is_at_south_boundary(grid, x, y):
 				return []
-			var sw: TerrainCell = grid.at(x, y + 1)
-			var se: TerrainCell = grid.at(x + 1, y)
-			if sw.kind == TerrainCell.Kind.EMPTY or se.kind == TerrainCell.Kind.EMPTY:
-				return []
+			for d in [DiamondCompass.DIR_SE, DiamondCompass.DIR_SW]:
+				var nx: int = x + d.x
+				var ny: int = y + d.y
+				if nx >= grid.width or ny >= grid.height:
+					return []
+				if _is_at_south_boundary(grid, nx, ny):
+					return []
 	return ["no river cell touches the south boundary"]
 
 
@@ -535,6 +547,67 @@ static func _is_at_south_boundary(grid: TerrainGrid, x: int, y: int) -> bool:
 	return false
 
 
+# Every cell flagged with an object_kind must sit on a GROUND cell. EMPTY,
+# WATER, WATERFALL with a kind set indicates a generator bug — the assigner
+# should have skipped non-GROUND cells.
+static func _check_objects_on_ground(grid: TerrainGrid, _params: TerrainGenerationParams) -> Array:
+	var fails: Array = []
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.object_kind == &"":
+				continue
+			if c.kind != TerrainCell.Kind.GROUND:
+				fails.append(
+					"(%d, %d) has object_kind=%s on non-GROUND cell (kind=%d)"
+					% [x, y, c.object_kind, c.kind]
+				)
+	return fails
+
+
+# Object cells must be FULL_CUBE or FLAT — slopes and stairs can't host a
+# rock sprite cleanly (the visual lift would be skewed). The assigner skips
+# them; this guard surfaces any future regression.
+static func _check_objects_on_full_cube_or_flat(
+	grid: TerrainGrid, _params: TerrainGenerationParams
+) -> Array:
+	var fails: Array = []
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.object_kind == &"":
+				continue
+			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
+					and c.ground_shape != TerrainCell.GroundShape.FLAT:
+				fails.append(
+					"(%d, %d) object_kind=%s on ground_shape=%d (must be FULL_CUBE or FLAT)"
+					% [x, y, c.object_kind, c.ground_shape]
+				)
+	return fails
+
+
+# Every non-empty object_kind must be one ObjectPainter knows how to spawn.
+# An unknown kind would make ObjectPainter warn and skip — this check fails
+# fast at generation time so we don't ship a generator that flags kinds the
+# painter can't realize.
+const _KNOWN_OBJECT_KINDS: Array[StringName] = [&"rock", &"rock_snow", &"rock_moss", &"frailejon"]
+
+static func _check_object_kind_known(
+	grid: TerrainGrid, _params: TerrainGenerationParams
+) -> Array:
+	var fails: Array = []
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.object_kind == &"":
+				continue
+			if not _KNOWN_OBJECT_KINDS.has(c.object_kind):
+				fails.append(
+					"(%d, %d) unknown object_kind=%s" % [x, y, c.object_kind]
+				)
+	return fails
+
+
 # ----------------------------------------------------------------------------
 # Harness
 # ----------------------------------------------------------------------------
@@ -579,6 +652,14 @@ func _init() -> void:
 			var params := _make_params(overrides)
 			params.seed = s
 			var grid: TerrainGrid = TerrainGenerator.generate(params)
+			# Object placement now lives on ObjectPainter (per-kind densities
+			# on WorldObjectData.tres), no longer in the generator. Run a
+			# seeded placement pass so the object_kind invariants below still
+			# exercise real flagged cells. Seeded RNG keeps this reproducible
+			# across harness runs even though runtime placement is randomized.
+			var obj_rng := RandomNumberGenerator.new()
+			obj_rng.seed = s ^ 0xC8FAB0CC
+			ObjectPainter.assign_object_kinds(grid, obj_rng)
 			grand_total_grids += 1
 			for c in CHECKS:
 				var fails: Array = (c["fn"] as Callable).call(grid, params)

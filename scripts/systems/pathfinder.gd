@@ -18,10 +18,13 @@ extends Node
 #     ramp (SLOPE_*, STAIR_*, HALF_*) adds _RAMP_PENALTY_PER_STEP. Sub-step
 #     so ramps remain traversable — they only lose to flat routes of equal
 #     or near-equal length.
-#   - OBJECT PENALTY: a per-cell float registry (_cell_penalties) that
-#     placers write into via set_cell_penalty/clear_cell_penalty. Unbounded:
-#     a small value nudges, a value above ~1.0 forces detours. Pathfinder
-#     stays agnostic of what the penalty represents (plant, boulder, sign).
+#   - OBJECT PENALTY: contributed by two sources, summed. (a) The legacy
+#     `_cell_penalties` dict — set_cell_penalty/clear_cell_penalty — which
+#     external systems write into. (b) The occupant registered on the
+#     CellData (set_occupant on TileGrid): if it exposes `walk_penalty()`
+#     the value is folded in. Frailejones use the occupant path; rocks
+#     don't use either (they block via blocks_movement(), not penalty).
+#     Unbounded; a small value nudges, a value above ~1.0 forces detours.
 #
 # Setup in the editor:
 #   1. Add a Pathfinder node as a child of the scene root.
@@ -491,7 +494,10 @@ func grid() -> TileGrid:
 # Iterates layer altitudes descending (highest first) so that a plateau
 # visually covering a ground cell beneath it wins the click.
 #
-# Returns NO_CELL if nothing walkable is under the cursor.
+# Returns NO_CELL if no walkable terrain is under the cursor. Cells with
+# blocking occupants (rocks) DO resolve — UI layers gate their own actions
+# (TileInteractionController whitelists rock cells; find_path rejects them
+# for movement). Only the underlying terrain's walkable flag is consulted.
 func resolve_click(global_pos: Vector2) -> Vector2i:
 	if _grid == null:
 		return NO_CELL
@@ -514,7 +520,10 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 			var net_shift := float(alt) * HALF_STEP_PX + layer.position.y
 			var shifted := local + Vector2(0.0, net_shift) - VISUAL_SURFACE_OFFSET
 			var cell := layer.local_to_map(shifted)
-			if not _grid.is_walkable(cell):
+			# Terrain-walkable, not is_walkable: a rock-occupied cell must
+			# still resolve so right-click can offer remove-rock. Movement
+			# rejection happens later in find_path.
+			if not _grid.is_terrain_walkable(cell):
 				continue
 			if _grid.layer_of(cell) != layer:
 				continue
@@ -577,7 +586,16 @@ func world_to_cell(global_pos: Vector2) -> Vector2i:
 
 func _cell_enter_cost(cell: Vector2i) -> float:
 	var elevation_cost: float = float(_grid.ramp_size(cell)) * _RAMP_PENALTY_PER_STEP
-	return elevation_cost + _cell_penalties.get(cell, 0.0)
+	var penalty: float = _cell_penalties.get(cell, 0.0)
+	# Occupant-based penalty (frailejones, future signage). Migrated occupants
+	# expose walk_penalty() instead of writing into _cell_penalties — keeps
+	# placement and removal a single set_occupant/clear_occupant call without a
+	# parallel penalty registration. _cell_penalties is preserved for any
+	# callers that haven't migrated.
+	var occ: Node2D = _grid.occupant_at(cell)
+	if occ != null and occ.has_method(&"walk_penalty"):
+		penalty += float(occ.call(&"walk_penalty"))
+	return elevation_cost + penalty
 
 
 static func _heuristic(a: Vector2i, b: Vector2i) -> float:

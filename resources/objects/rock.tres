@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="WorldObjectData" format=3 uid="uid://dxr5vk7qaq3wm"]
+
+[ext_resource type="Script" uid="uid://cvdt6bi4buv42" path="res://scripts/data/world_object_data.gd" id="1"]
+[ext_resource type="Texture2D" uid="uid://cy83lfhbk6ujd" path="res://resources/objects/variants/rock_0.tres" id="3"]
+[ext_resource type="Texture2D" uid="uid://clnuy12yon4k2" path="res://resources/objects/variants/rock_1.tres" id="4"]
+[ext_resource type="Texture2D" uid="uid://5ungwbgg8ces" path="res://resources/objects/variants/rock_2.tres" id="5"]
+[ext_resource type="Texture2D" uid="uid://d1vr8xd35ckaf" path="res://resources/objects/variants/rock_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+id = &"rock"
+blocks_movement = true
+density_by_biome = {
+0: 0.0,
+1: 0.05,
+2: 0.15,
+3: 0.05
+}
+preferred_altitude = 20
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

@@ -1,7 +1,11 @@
 class_name Frailejon
 extends Node2D
 
-const MAX_GROWTH_STAGE: int = 3
+# Frailejones are Node2D-rendered occupants of TileGrid. They expose the
+# WorldOccupant duck-typed interface (occupant_kind/blocks_movement/walk_penalty)
+# but don't extend WorldOccupant directly — keeping the existing inheritance
+# chain (Node2D) avoids touching the scene file's root type. The three methods
+# live at the bottom of this script.
 
 # Player sprite dimensions (baseline for shadow proportions).
 # Player: cap_width=6, max_height=4, ~16px wide, ~25px tall.
@@ -10,8 +14,11 @@ const REF_HEIGHT: float = 25.0
 const REF_CAP_WIDTH: float = 6.0
 const REF_MAX_HEIGHT: float = 4.0
 
-## Chance to grow each in-game hour. 1.0 = always, 0.5 = 50%.
-@export var growth_chance: float = 0.6
+## Source-of-truth metadata. The scene wires this to
+## res://resources/objects/frailejon.tres. `data.variants` defines the growth
+## sequence (0 = newly planted, last = mature); `data.growth_chance` tunes
+## the per-hour advance probability.
+@export var data: PlantObjectData
 
 ## Extra pathfinding cost charged to agents stepping onto this cell. Values
 ## below 1.0 nudge (paths prefer a clear tie-equivalent); higher values force
@@ -30,10 +37,13 @@ var _last_hour: int = -1
 
 
 func _ready() -> void:
-	_sprite.flip_h = randf() < 0.5
+	# Apply stage-0 texture before measuring shadow params (the shadow shader
+	# needs the actual sprite texture to extrude its silhouette).
+	_apply_variant_texture(growth_stage)
+
+	_sprite.flip_h = (data != null and data.randomize_flip_h and randf() < 0.5)
 	_sprite.position = Vector2(randi_range(-4, 4), randi_range(-4, 0))
 
-	_shadow.frame = _sprite.frame
 	_update_shadow_params()
 	_push_shadow_cell_state()
 
@@ -70,29 +80,88 @@ func _ready() -> void:
 	if _time_manager:
 		_last_hour = int(_time_manager.time_of_day * 24.0) % 24
 
+	# Register as occupant on TileGrid. Pathfinder pulls walk_penalty() from
+	# this node during step-cost calc, so the controller doesn't need to
+	# write into _cell_penalties separately. Subscribe to graph_changed so
+	# any future Pathfinder.rebuild() (e.g., a bridge built after planting)
+	# re-registers us on the fresh grid.
+	if pf != null:
+		var grid := pf.grid()
+		if grid != null:
+			grid.set_occupant(cell, self)
+		if not pf.graph_changed.is_connected(_on_graph_changed):
+			pf.graph_changed.connect(_on_graph_changed)
+
 
 func _exit_tree() -> void:
 	if is_instance_valid(_shadow):
 		_shadow.queue_free()
+	# Clear occupant claim. The Pathfinder.graph_changed signal auto-disconnects
+	# when we free, so no manual disconnect is needed.
+	var pf := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
+	if pf != null:
+		var grid := pf.grid()
+		if grid != null:
+			grid.clear_occupant(cell, self)
+
+
+func _on_graph_changed() -> void:
+	if not is_inside_tree():
+		return
+	var pf := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
+	if pf == null:
+		return
+	var grid := pf.grid()
+	if grid != null:
+		grid.set_occupant(cell, self)
+
+
+# --- Occupant interface (TileGrid / Pathfinder duck-typed) -----------------
+
+func occupant_kind() -> StringName:
+	return &"frailejon"
+
+
+# Frailejones can be stepped over by player and threats; they're stepped-on
+# obstacles (penalty), not walls.
+func blocks_movement() -> bool:
+	return false
+
+
+func walk_penalty() -> float:
+	return pathfinding_penalty
 
 
 func _process(_delta: float) -> void:
-	if growth_stage >= MAX_GROWTH_STAGE or _time_manager == null:
+	if data == null or _time_manager == null:
+		return
+	var max_stage: int = data.variants.size() - 1
+	if growth_stage >= max_stage:
 		return
 	var hour: int = int(_time_manager.time_of_day * 24.0) % 24
 	if hour != _last_hour:
 		_last_hour = hour
-		if randf() <= growth_chance:
+		if randf() <= data.growth_chance:
 			set_growth_stage(growth_stage + 1)
 
 
 func set_growth_stage(stage: int) -> void:
-	growth_stage = clampi(stage, 0, MAX_GROWTH_STAGE)
-	if _sprite:
-		_sprite.frame = growth_stage
+	var max_stage: int = (data.variants.size() - 1) if data != null else 0
+	growth_stage = clampi(stage, 0, max_stage)
+	_apply_variant_texture(growth_stage)
 	if is_instance_valid(_shadow):
-		_shadow.frame = growth_stage
 		_update_shadow_params()
+
+
+func _apply_variant_texture(stage: int) -> void:
+	if data == null or data.variants.is_empty():
+		return
+	var idx: int = clampi(stage, 0, data.variants.size() - 1)
+	var tex: Texture2D = data.variants[idx]
+	if _sprite:
+		_sprite.texture = tex
+	if is_instance_valid(_shadow):
+		_shadow.texture = tex
 
 
 func _update_shadow_params() -> void:
@@ -142,15 +211,34 @@ func _push_shadow_cell_state() -> void:
 
 
 func _measure_frame_dimensions() -> Vector2:
-	var img: Image = _sprite.texture.get_image()
-	if img == null:
+	# Returns the visible (non-transparent) bbox of the current variant in
+	# pixels. Used to scale the shadow shader's cap_width / max_height.
+	# Works for AtlasTexture (sample inside its region) and plain Texture2D
+	# (sample the whole image).
+	var tex: Texture2D = _sprite.texture if _sprite != null else null
+	if tex == null:
 		return Vector2(REF_WIDTH, REF_HEIGHT)
-	var fw: int = img.get_width() / _sprite.hframes
-	var fh: int = img.get_height() / _sprite.vframes
-	var col: int = _sprite.frame % _sprite.hframes
-	var row: int = _sprite.frame / _sprite.hframes
-	var ox: int = col * fw
-	var oy: int = row * fh
+
+	var img: Image
+	var ox: int = 0
+	var oy: int = 0
+	var fw: int = 0
+	var fh: int = 0
+	if tex is AtlasTexture:
+		var atlas: AtlasTexture = tex
+		if atlas.atlas == null:
+			return Vector2(REF_WIDTH, REF_HEIGHT)
+		img = atlas.atlas.get_image()
+		ox = int(atlas.region.position.x)
+		oy = int(atlas.region.position.y)
+		fw = int(atlas.region.size.x)
+		fh = int(atlas.region.size.y)
+	else:
+		img = tex.get_image()
+		fw = int(tex.get_size().x)
+		fh = int(tex.get_size().y)
+	if img == null or fw <= 0 or fh <= 0:
+		return Vector2(REF_WIDTH, REF_HEIGHT)
 
 	var top: int = fh
 	var bottom: int = 0

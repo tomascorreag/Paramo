@@ -421,6 +421,25 @@ func _get_raw(cell: Vector2i) -> CellData:
 
 func is_walkable(cell: Vector2i) -> bool:
 	var t := _get_raw(cell)
+	if t == null or not t.walkable:
+		return false
+	# Occupant blocking: rocks (and future blockers) flip a walkable terrain
+	# cell to unwalkable without painting a new tile. Duck-typed so any Node2D
+	# exposing blocks_movement() participates — Frailejone, Rock, Bridge,
+	# Ladder all do, and they answer differently (rock=true, the rest=false).
+	if t.occupant != null and t.occupant.has_method(&"blocks_movement"):
+		if t.occupant.blocks_movement():
+			return false
+	return true
+
+
+# Terrain-only walkability — ignores occupant blocking. Used by click
+# resolution (resolve_click) so a rock-on-walkable-ground still resolves to
+# its cell and TileInteractionController can offer the remove-rock action;
+# without this, is_walkable would filter the rock cell out before any UI
+# code saw it.
+func is_terrain_walkable(cell: Vector2i) -> bool:
+	var t := _get_raw(cell)
 	return t != null and t.walkable
 
 
@@ -703,6 +722,92 @@ func _edge_altitudes(cell: Vector2i, dir: Vector2i) -> Array[int]:
 	if _HALF_RAMPS.has(t.tile_kind):
 		return [t.altitude_low, t.altitude_high]
 	return []
+
+
+# ----------------------------------------------------------------------------
+# Occupant registry (frailejones, rocks, bridge decks, ladders, ...)
+# ----------------------------------------------------------------------------
+#
+# One occupant per cell. Multi-cell occupants (a bridge spanning N cells)
+# register the same Node2D reference on every cell they cover; the registry
+# treats those entries as independent claims. set_occupant rejects a second
+# occupant on a cell that's already claimed by a DIFFERENT node (warns and
+# returns false).
+#
+# `_occupants_by_kind` indexes by occupant_kind() so callers can ask "where
+# are all the frailejones?" or "is there any rock at this cell?" without
+# scanning every cell. Kept in sync with set_occupant / clear_occupant; do
+# not mutate from outside.
+#
+# Occupants don't survive a fresh build(): _allocate_tiles fills _tiles with
+# null. Listeners (frailejone, rock, traversal) re-register from a
+# Pathfinder.graph_changed handler.
+
+var _occupants_by_kind: Dictionary[StringName, Dictionary] = {}
+# kind -> Dictionary[Vector2i, Node2D]
+
+
+# Register `node` as the occupant of `cell`. Returns true on success, false
+# when the cell is out of bounds, has no painted terrain, or already holds a
+# different occupant (warned). Calling with the same node again is a no-op.
+func set_occupant(cell: Vector2i, node: Node2D) -> bool:
+	if node == null:
+		return false
+	var t := _get_raw(cell)
+	if t == null:
+		# No terrain at this cell. Procgen-driven occupants land here when the
+		# generator placed a kind on an EMPTY cell — silently refuse rather
+		# than crash.
+		return false
+	if t.occupant != null and t.occupant != node:
+		push_warning(
+			"TileGrid.set_occupant: cell %s already occupied by %s; refusing to overwrite with %s."
+			% [cell, t.occupant, node]
+		)
+		return false
+	t.occupant = node
+	var kind: StringName = _occupant_kind_of(node)
+	if kind != &"":
+		var by_cell: Dictionary = _occupants_by_kind.get_or_add(kind, {})
+		by_cell[cell] = node
+	return true
+
+
+# Clear the occupant from `cell`. When `node` is non-null, only clears if the
+# stored occupant matches (so a dead node freeing late doesn't yank a fresh
+# replacement). Always safe to call on an out-of-bounds / unpainted cell.
+func clear_occupant(cell: Vector2i, node: Node2D = null) -> void:
+	var t := _get_raw(cell)
+	if t == null or t.occupant == null:
+		return
+	if node != null and t.occupant != node:
+		return
+	var kind: StringName = _occupant_kind_of(t.occupant)
+	t.occupant = null
+	if kind != &"" and _occupants_by_kind.has(kind):
+		var by_cell: Dictionary = _occupants_by_kind[kind]
+		by_cell.erase(cell)
+		if by_cell.is_empty():
+			_occupants_by_kind.erase(kind)
+
+
+func occupant_at(cell: Vector2i) -> Node2D:
+	var t := _get_raw(cell)
+	if t == null:
+		return null
+	return t.occupant
+
+
+# Read-only view of every occupant of `kind` indexed by cell. Returns the
+# live dict — do NOT mutate. Empty dict when no occupants of that kind exist.
+func occupants_of_kind(kind: StringName) -> Dictionary:
+	return _occupants_by_kind.get(kind, {})
+
+
+static func _occupant_kind_of(node: Node2D) -> StringName:
+	if node != null and node.has_method(&"occupant_kind"):
+		return node.call(&"occupant_kind")
+	return &""
 
 
 # ----------------------------------------------------------------------------

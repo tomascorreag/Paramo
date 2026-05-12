@@ -13,13 +13,15 @@ func _init() -> void:
 func is_available(ctx: ActionContext) -> bool:
 	if ctx.tile == null or not ctx.tile.walkable:
 		return false
-	# No stacking — occupied cells only offer removal.
 	if ctx.tile_interaction == null:
 		return false
-	if ctx.tile_interaction.planted_cells().has(ctx.cell):
-		return false
-	if ctx.traversal != null and ctx.traversal.find_traversal_at(ctx.cell) != null:
-		return false
+	# No stacking — any registered occupant (frailejon, bridge_deck, ladder,
+	# rock) blocks planting. Single registry query instead of separate
+	# planted_cells / find_traversal_at calls.
+	if ctx.pathfinder != null:
+		var grid := ctx.pathfinder.grid()
+		if grid != null and grid.occupant_at(ctx.cell) != null:
+			return false
 	return true
 
 

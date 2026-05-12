@@ -45,9 +45,14 @@ var _preview_cells: Array[Dictionary] = []
 var _preview_hover_cell: Vector2i = Pathfinder.NO_CELL
 var _preview_valid: bool = false
 var _blocked_cells: Dictionary = {}
-var _traversals: Array[Traversal] = []
 var _tile_interaction: TileInteractionController
 var _player: Player
+
+# Kinds that count as "occupied" for new placement validation. Order doesn't
+# matter — _gather_blocked_cells unions them all into the blocked dict.
+const _BLOCKING_KINDS: Array[StringName] = [
+	&"frailejon", &"bridge_deck", &"ladder", &"rock"
+]
 
 
 func _enter_tree() -> void:
@@ -129,9 +134,15 @@ func _require_grid() -> TileGrid:
 	return g
 
 
-# Snapshot the cells occupied by planted objects and existing traversals.
-# Snapshot is fine because input is gated during placement: the player can't
-# start a new movement and can't plant during a build.
+# Snapshot the cells claimed by all known occupant kinds. Snapshot is fine
+# because input is gated during placement: the player can't start a new
+# movement and can't plant during a build.
+#
+# Reads from the unified occupant registry on TileGrid: frailejones,
+# bridges, ladders, and rocks all register their cells, so a single pass
+# over `occupants_of_kind` per blocking kind covers every claim. This is
+# broader than is_walkable's check (frailejones don't block movement but DO
+# block placement of new structures on their cell).
 #
 # The player's own cell is NOT included here — build validators treat the
 # player's cell separately via `player_cell`, which blocks INTERIOR-only
@@ -140,18 +151,12 @@ func _require_grid() -> TileGrid:
 # on without stranding themselves.
 func _gather_blocked_cells() -> Dictionary:
 	var blocked: Dictionary = {}
-	if _tile_interaction != null:
-		for cell in _tile_interaction.planted_cells().keys():
+	var grid := _require_grid()
+	if grid == null:
+		return blocked
+	for kind in _BLOCKING_KINDS:
+		for cell in grid.occupants_of_kind(kind).keys():
 			blocked[cell] = true
-	# Every cell already covered by an existing traversal (bridge decks,
-	# ladder origin/top columns) must block new placements — a bridge rooted
-	# on another bridge's deck or a ladder rooted inside a deck would
-	# otherwise validate OK on the underlying TileGrid.
-	for t in _traversals:
-		if not is_instance_valid(t):
-			continue
-		for entry in t.painted_cells():
-			blocked[entry["cell"]] = true
 	return blocked
 
 
@@ -391,11 +396,11 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	var inst: Bridge = bridge_scene.instantiate()
 	world.add_child(inst)
 	Bridge.configure(inst, _origin_cell, far_cell, base_alt, _placer, pathfinder)
-	if inst.build():
-		_traversals.append(inst)
-	else:
+	if not inst.build():
 		# build() rolls back its own paint state and leaves no traversal edge;
-		# just drop the node so we don't accumulate orphans.
+		# just drop the node so we don't accumulate orphans. Successful builds
+		# self-register on the occupant registry — no controller-side tracking
+		# needed.
 		inst.queue_free()
 
 	cancel()
@@ -436,9 +441,8 @@ func _place_ladder(target_cell: Vector2i) -> void:
 	var inst: Ladder = ladder_scene.instantiate()
 	world.add_child(inst)
 	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
-	if inst.build():
-		_traversals.append(inst)
-	else:
+	if not inst.build():
+		# Successful builds self-register; only failures need cleanup.
 		inst.queue_free()
 
 	cancel()
@@ -448,25 +452,27 @@ func _place_ladder(target_cell: Vector2i) -> void:
 # Removal
 # ----------------------------------------------------------------------------
 
-## Returns the Traversal whose painted cells cover `cell`, or null.
+## Returns the Traversal whose claimed cells cover `cell`, or null. Single
+## dict lookup against the unified occupant registry — Bridge claims every
+## painted cell, Ladder claims origin and top.
 func find_traversal_at(cell: Vector2i) -> Traversal:
-	for t in _traversals:
-		if not is_instance_valid(t):
-			continue
-		for entry in t.painted_cells():
-			if entry["cell"] == cell:
-				return t
+	var grid := _require_grid()
+	if grid == null:
+		return null
+	var occ := grid.occupant_at(cell)
+	if occ is Traversal:
+		return occ as Traversal
 	return null
 
 
 ## Erase a traversal's tiles, free its node, and rebuild pathfinding.
+## Traversal.despawn clears its own occupant claims before freeing.
 func remove_traversal(t: Traversal) -> void:
 	if t == null or not is_instance_valid(t):
 		return
 	if _placer == null:
 		_placer = StructurePlacer.new(structure_layer_manager)
 	t.despawn(_placer)
-	_traversals.erase(t)
 	if pathfinder:
 		pathfinder.rebuild()
 

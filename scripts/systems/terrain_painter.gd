@@ -1006,7 +1006,8 @@ static func _build_variants_by_kind(idx: TileKindIndex) -> Dictionary[StringName
 #     When <= 0, the candidate gets no clumping factor AND when painted as a
 #     neighbor it doesn't contribute to other cells' pull.
 #   - sw (selection_weight): per-variant frequency multiplier. When > 0, used
-#     as-is. When <= 0, dropped from the score (treated as 1.0).
+#     as-is. When == 0, dropped from the score (treated as 1.0). When < 0, the
+#     variant is excluded entirely — never sampled, regardless of other terms.
 static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
 	var out: Array = []
 	if idx == null:
@@ -1036,6 +1037,9 @@ static func _build_variant_table(idx: TileKindIndex, kind: StringName) -> Array:
 #   pa_term    = exp(-(cell_alt - v.pa)^2 / (2σ^2))   if v.pa > 0, else 1.0
 #   sw_term    = v.sw                                  if v.sw > 0, else 1.0
 #   clump_term = 1 + _CLUMP_GAIN * pull * v.pd         if v.pd > 0, else 1.0
+#
+# Variants with v.sw < 0 are excluded from the candidate set up front and
+# never contribute weight, so they cannot be sampled.
 #
 # `pull` is the sum of pd values across the cell's already-painted face
 # neighbors, with neighbors whose pd <= 0 excluded. Range [0, 4]. Empty
@@ -1078,14 +1082,17 @@ static func _pick_variant_coord(
 					pull += n_pd
 
 	var weights: Array[float] = []
+	var candidates: Array = []
 	var total: float = 0.0
 	for v in variants:
+		var sw: float = float(v["sw"])
+		if sw < 0.0:
+			continue
 		var w: float = 1.0
 		var pa: float = float(v["pa"])
 		if pa > 0.0:
 			var ad: float = float(altitude_half_steps) - pa
 			w *= exp(- (ad * ad) / (2.0 * _SIGMA_ALT * _SIGMA_ALT))
-		var sw: float = float(v["sw"])
 		if sw > 0.0:
 			w *= sw
 		var pd: float = float(v["pd"])
@@ -1093,7 +1100,11 @@ static func _pick_variant_coord(
 			w *= 1.0 + _CLUMP_GAIN * pull * pd
 		w += _EPSILON
 		weights.append(w)
+		candidates.append(v)
 		total += w
+	if candidates.is_empty():
+		out["pd"] = 0.0
+		return fallback
 	# hash() on a typed array is stable in Godot 4.6.
 	var h: int = hash([x, y, layer_alt, seed]) & 0x7FFFFFFF
 	var u01: float = float(h) / float(0x7FFFFFFF)
@@ -1108,10 +1119,10 @@ static func _pick_variant_coord(
 	for i in weights.size():
 		acc += weights[i]
 		if roll <= acc:
-			out["pd"] = float(variants[i]["pd"])
-			return variants[i]["coord"]
-	out["pd"] = float(variants.back()["pd"])
-	return variants.back()["coord"]
+			out["pd"] = float(candidates[i]["pd"])
+			return candidates[i]["coord"]
+	out["pd"] = float(candidates.back()["pd"])
+	return candidates.back()["coord"]
 
 
 # Builds the per-biome variant-selection noise lookup. Returns a dict keyed by

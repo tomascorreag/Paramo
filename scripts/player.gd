@@ -603,6 +603,17 @@ func _process(delta: float) -> void:
 	_pan_eased_prev = eased
 
 
+# Snap the opening pan to its endpoint and hand the camera back to player
+# follow. Called by TitleIntro when the player skips the title card so the
+# pan doesn't keep drifting after the curtain clears. No-op if the pan is
+# not active (already finished or never started).
+func finish_opening_pan_now() -> void:
+	if not _camera_panning:
+		return
+	_camera.position = _camera_pan_target_world()
+	_finish_opening_pan()
+
+
 # Hand the camera back to the player-follow path after the opening pan.
 # Order matters: re-enable smoothing and call reset_smoothing() while the
 # camera is still at its world-space pan endpoint so the smoothed view is

@@ -95,12 +95,22 @@ func build() -> bool:
 		return false
 
 	_pathfinder.rebuild()
+	# Rebuild produced a fresh TileGrid with no occupants; register ours on
+	# the new grid and subscribe to graph_changed so future rebuilds (other
+	# placements, removals) re-register automatically.
+	_register_with_grid()
 
 	# Anchor position at the origin cell's altitude-lifted world pos. Useful
 	# later for attaching animations, SFX, or per-bridge decoration.
 	var base_world := _pathfinder.cell_to_world(origin_cell)
 	global_position = base_world + Vector2(0.0, -base_altitude * Pathfinder.HALF_STEP_PX)
 	return true
+
+
+# Identifies the bridge in the unified occupant registry. Other systems query
+# `tile_grid.occupants_of_kind(&"bridge_deck")` to find every bridge cell.
+func occupant_kind() -> StringName:
+	return &"bridge_deck"
 
 
 # Returns the (cell, kind, altitude) entries a bridge would paint between

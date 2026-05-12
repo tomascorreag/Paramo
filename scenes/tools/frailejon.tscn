@@ -1,8 +1,8 @@
-[gd_scene format=3 uid="uid://j1qr8tqv5f2o"]
+[gd_scene load_steps=4 format=3 uid="uid://j1qr8tqv5f2o"]
 
-[ext_resource type="Texture2D" uid="uid://cmtf3axij6tps" path="res://assets/sprites/objects/ISO_Plants.png" id="1"]
 [ext_resource type="Script" uid="uid://cb1dpudg3qej4" path="res://scripts/tools/frailejon.gd" id="2"]
 [ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
+[ext_resource type="Resource" uid="uid://c4w9j3pq8m1nx" path="res://resources/objects/frailejon.tres" id="4"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_shadow"]
 resource_local_to_scene = true
@@ -18,17 +18,11 @@ shader_parameter/sprite_offset = Vector2(0, -8)
 
 [node name="Frailejon" type="Node2D" unique_id=449271788]
 script = ExtResource("2")
-growth_chance = 0.1
+data = ExtResource("4")
 
 [node name="Shadow" type="Sprite2D" parent="." unique_id=1447054399]
 material = SubResource("ShaderMaterial_shadow")
-texture = ExtResource("1")
 offset = Vector2(0, -8)
-hframes = 4
-vframes = 8
 
 [node name="Sprite2D" type="Sprite2D" parent="." unique_id=977112557]
-texture = ExtResource("1")
 offset = Vector2(0, -8)
-hframes = 4
-vframes = 8

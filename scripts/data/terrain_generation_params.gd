@@ -173,6 +173,12 @@ extends Resource
 @export var biome_bands: Array[TerrainBiomeBand] = []
 
 
+# Procedural object placement (rocks etc.) was previously configured here via
+# `object_density_by_biome`. It now lives on each `WorldObjectData.tres`
+# (`density_by_biome`) so each kind owns its own spawn rates. ObjectPainter
+# does the placement pass.
+
+
 # Populate biome_bands with the default 4-band preset on a fresh resource.
 # Loaded .tres files overwrite this array during deserialization, so saved
 # customizations win; pre-existing .tres files (saved before biome_bands

@@ -22,7 +22,9 @@ extends CanvasLayer
 # and is still in motion long after the title clears.
 #
 # Skippable: any input fast-forwards to a quick fade-out and frees the node.
-# The camera pan is intentionally NOT skipped — only the title card.
+# Skipping also snaps the opening camera pan to its endpoint (via
+# Player.finish_opening_pan_now) so the camera doesn't keep drifting after
+# the curtain clears.
 #
 # Sits on a high CanvasLayer (layer = 200) so it draws above the post-process
 # layer (layer = 100). Otherwise vignette/tint would bleed into the title.
@@ -472,6 +474,12 @@ func _input(event: InputEvent) -> void:
 	if _active_tween != null and _active_tween.is_valid():
 		_active_tween.kill()
 	_active_tween = null
+	# Snap the opening camera pan to its rest target. The pan is owned by
+	# Player (top_level camera, independent _process loop), so we ask it to
+	# finish — no-op if the pan already completed.
+	var player := get_tree().get_first_node_in_group(&"player")
+	if player != null and player.has_method(&"finish_opening_pan_now"):
+		player.finish_opening_pan_now()
 	_run_skip_fade(_cancel_token)
 
 

@@ -11,9 +11,12 @@ func _init() -> void:
 
 
 func is_available(ctx: ActionContext) -> bool:
-	if ctx.tile_interaction == null:
+	if ctx.tile_interaction == null or ctx.pathfinder == null:
 		return false
-	return ctx.tile_interaction.planted_cells().has(ctx.cell)
+	var grid := ctx.pathfinder.grid()
+	if grid == null:
+		return false
+	return grid.occupant_at(ctx.cell) is Frailejon
 
 
 func execute(ctx: ActionContext) -> void:

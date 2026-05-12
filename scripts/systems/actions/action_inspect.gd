@@ -11,7 +11,7 @@ const _DISPLAY_DURATION: float = 2.5
 
 func _init() -> void:
 	id = &"inspect"
-	icon = preload("res://assets/sprites/UX/icons/inspect.tres")
+	icon = preload("res://assets/sprites/UX/icons/magnifying_glass.tres")
 	group = &""
 
 

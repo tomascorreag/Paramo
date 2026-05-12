@@ -2,6 +2,14 @@
 class_name ProceduralWorld
 extends Node
 
+# Preloaded so the @tool script doesn't depend on the global class_name cache
+# being refreshed (which lags new files until the editor reimports). The
+# const is intentionally untyped so static method calls (`_OBJECT_PAINTER.paint`)
+# resolve against the actual ObjectPainter class — a `: GDScript` annotation
+# would constrain calls to base GDScript members and lose access to static
+# methods declared in the script.
+const _OBJECT_PAINTER = preload("res://scripts/systems/object_painter.gd")
+
 # ============================================================================
 # ProceduralWorld
 # ============================================================================
@@ -45,10 +53,20 @@ extends Node
 ## Without this, the player's authored position can land on a non-walkable
 ## or empty cell since terrain shape is random per seed.
 @export var player: Node2D
+## Optional World Node2D that ObjectPainter parents procedurally-spawned
+## objects (rocks, future signage) under. When null, ObjectPainter is
+## skipped at runtime and procedural objects don't appear. Editor-time
+## regenerate also skips ObjectPainter (would need a Pathfinder, which is
+## a placeholder in @tool mode).
+@export var world: Node2D
 
 @export_group("Runtime")
 ## When true, generates the map automatically on `_ready()` at game start.
 @export var auto_generate_on_ready: bool = true
+## When true, picks a fresh random seed at `_ready()` (before auto-generation),
+## overwriting `seed_override` for this run so each launch produces a new map.
+## Editor-time Regenerate is unaffected.
+@export var randomize_seed_on_ready: bool = false
 ## Print a one-line "generated WxH, seed=N" summary on each regenerate.
 ## Default off; flip on when iterating on the generator.
 @export var verbose_logs: bool = false
@@ -64,6 +82,10 @@ extends Node
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
+	if randomize_seed_on_ready:
+		# randi() is non-negative (0..2^32-1 mod int range), so it satisfies
+		# the `seed_override >= 0` sentinel in _resolve_params.
+		seed_override = randi()
 	if auto_generate_on_ready:
 		regenerate()
 
@@ -116,6 +138,13 @@ func regenerate() -> void:
 		# Visuals are unaffected; only the walkability graph is bounded.
 		pathfinder.bounds_clip = Rect2i(0, 0, params.width, params.height)
 		pathfinder.rebuild()
+
+		# Spawn procedurally-flagged objects (rocks). Must run AFTER rebuild
+		# so the fresh TileGrid exists for occupant registration. Skipped in
+		# editor mode (Pathfinder is a placeholder) and when `world` is
+		# unwired (defensive — emits a single error).
+		if world != null:
+			_OBJECT_PAINTER.paint(grid, world, pathfinder)
 
 	_place_player_on_walkable(grid)
 
@@ -238,6 +267,10 @@ func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
 				continue
 			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
 					and c.ground_shape != TerrainCell.GroundShape.FLAT:
+				continue
+			# Skip cells that will spawn a blocking object (rock). The player
+			# would otherwise land on a cell flagged unwalkable post-spawn.
+			if c.object_kind != &"":
 				continue
 			var cell := Vector2i(x, y)
 			var d := Vector2(x, y) - center

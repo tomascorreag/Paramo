@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="PlantObjectData" format=3 uid="uid://c4xaj3pq8m1nx"]
+
+[ext_resource type="Script" uid="uid://rpdc15ywvr5x" path="res://scripts/data/plant_object_data.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_0.tres" id="3"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_1.tres" id="4"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_2.tres" id="5"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+water_affinity = 0.02
+id = &"frailejon"
+density_by_biome = {
+0: 1.0,
+1: 0.8,
+2: 0.0,
+3: 0.0
+}
+preferred_altitude = 18
+walk_penalty = 0.4
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

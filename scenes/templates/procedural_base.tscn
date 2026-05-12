@@ -104,9 +104,10 @@ tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), N
 layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6"), NodePath("../World/Ground7"), NodePath("../World/Ground8"), NodePath("../World/Ground9"), NodePath("../World/Ground10"), NodePath("../World/Ground11"), NodePath("../World/Ground12"), NodePath("../World/Ground13"), NodePath("../World/Ground14"), NodePath("../World/Ground15"), NodePath("../World/Ground16")]
 altitudes = Array[int]([0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32])
 
-[node name="ProceduralWorld" type="Node" parent="." node_paths=PackedStringArray("ground_layers", "cliff_layers", "pathfinder", "player")]
+[node name="ProceduralWorld" type="Node" parent="." node_paths=PackedStringArray("ground_layers", "cliff_layers", "pathfinder", "player", "world")]
 script = ExtResource("3_pw")
 ground_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6"), NodePath("../World/Ground7"), NodePath("../World/Ground8"), NodePath("../World/Ground9"), NodePath("../World/Ground10"), NodePath("../World/Ground11"), NodePath("../World/Ground12"), NodePath("../World/Ground13"), NodePath("../World/Ground14"), NodePath("../World/Ground15"), NodePath("../World/Ground16")]
 cliff_layers = [NodePath("../World/Ground_n1"), NodePath("../World/CliffN4"), NodePath("../World/CliffN6"), NodePath("../World/CliffN8")]
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
+world = NodePath("../World")
