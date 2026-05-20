@@ -1,0 +1,124 @@
+// Paramo — Ambient Soundscape (Strudel)
+//
+// Paste into https://strudel.cc/ and press Ctrl+Enter (Cmd+Enter on mac) to play.
+// Ctrl+. to stop. Edit while playing — re-evaluate to morph.
+//
+// Setting: high-altitude Colombian moor. Cold mist, frailejones, wind, slow
+// water. The piece is combat-neutral (no drums, no pulse) so it can sit under
+// gameplay without telegraphing tension.
+//
+// Tonality: A aeolian, pentatonic flute fragments (A C D E G), no leading tone.
+// Tempo: very slow; harmony moves on ~30 s timescales.
+//
+// All instruments are VCSL acoustic samples (loaded by default in strudel.cc).
+// Gains are intentionally low — nudge UP if too quiet rather than the inverse.
+
+setcpm(30)  // 30 cycles / minute → 1 cycle = 2 s
+
+// ---------------------------------------------------------------------------
+// DRONE — the mountain. Quiet pipe organ at mid-low register, lpf'd.
+// Kept above sub-bass range so it does not blow speakers / muddy the mix.
+// ---------------------------------------------------------------------------
+const drone = note("<a2 a2 d3 a2 a2 g2 a2 a2>")
+  .slow(16)                                  // one note every ~32 s
+  .s("pipeorgan_quiet")
+  .lpf(sine.range(400, 1100).slow(24))
+  .attack(3).release(6)
+  .room(0.85).roomsize(8)
+  .gain(0.12)
+
+// ---------------------------------------------------------------------------
+// PAD — the mist. Folk harp arpeggiating slowly through A-minor chord tones.
+// Long delay + room turns plucks into a shimmer-pad without losing the wood.
+// ---------------------------------------------------------------------------
+const pad = note("<a3 c4 e4 ~ d4 c4 a3 ~ g3 a3 c4 d4 e4 ~ ~ ~>")
+    .superimpose(
+      x => x.slow(2).add(note(12)),      // octave-up voice, half-speed shimmer
+      x => x.sub(note(5))                 // parallel fourth below — Andean idiom
+    )
+    .fast(4)
+    .s("ocarina")
+    .attack(0.1).release(1.4)
+    .room(0.88).roomsize(9)
+    .delay(0.2).delaytime("3:8").delayfeedback(0.55)
+    .pan(sine.range(0.35, 0.65).slow(11))
+    .drop(0.05)
+    .gain(-0)
+
+// ---------------------------------------------------------------------------
+// FLUTE — solitary ocarina fragment. Pentatonic, sparse, slowly panned.
+// degradeBy drops a chunk of notes each cycle so phrases never repeat exactly.
+// ---------------------------------------------------------------------------
+const flute = note("<a4 ~ c5 ~ e5 d5 ~ ~ a4 ~ ~ c5 e5 ~ d5 ~>")
+  .slow(8)
+  .s("ocarina_vib")
+  .attack(0.4).release(2)
+  .room(0.92).roomsize(10)
+  .delay(0.5).delaytime("3:8").delayfeedback(0.55)
+  .pan(sine.range(0.3, 0.7).slow(13))
+  .gain(0)
+  .degradeBy(0.33)
+
+// ---------------------------------------------------------------------------
+// WIND — filtered pink noise that breathes. Always present, never foreground.
+// ---------------------------------------------------------------------------
+const wind = s("pink")
+  .hpf(220)
+  .lpf(sine.range(500, 1500).slow(11))
+  .pan(sine.range(0.2, 0.8).slow(9))
+  .gain(sine.range(0.02, 0.06).slow(7))
+  .room(0.8).roomsize(8)
+
+// ---------------------------------------------------------------------------
+// DROPS — water. Wineglass pings act as bell-like droplets.
+// Random gain + speed + heavy degrade = irregular, "natural" rain.
+// ---------------------------------------------------------------------------
+const drops = note("e6 g6 a6 e6 c6 d6 g6 a6".segment(8))
+  .add(note(-12))
+  .s("wineglass")
+  .gain(rand.range(-0.2, -0.1))
+  .pan(rand.range(0, 1))
+  .lpf(perlin.range(2500, 5500))
+  .room(0.95).roomsize(10)
+  .delay(0.4).delaytime("3:8").delayfeedback(0.5)
+  .degradeBy(0.82)
+
+// ---------------------------------------------------------------------------
+// MIX — master gain low. Raise to 0.7 if your system runs hot.
+// ---------------------------------------------------------------------------
+stack(
+  drone,
+  pad,
+  flute,
+  wind,
+  drops
+).gain(0.25)
+
+
+// ---------------------------------------------------------------------------
+// Variations to try (uncomment one block, comment the stack above):
+// ---------------------------------------------------------------------------
+
+// // Night / starlight — drop the flute, organ down an octave, slower pad.
+// stack(
+//   drone.note("<a1 a1 d2 a1 a1 g1 a1 a1>").lpf(700).gain(0.10),
+//   pad.slow(2).gain(0.10),
+//   wind,
+//   drops.degradeBy(0.92).gain(0.5)
+// ).gain(0.45)
+
+// // Storm rising — pad pushes up, wind louder, more drops.
+// stack(
+//   drone,
+//   pad.note("<[a3 c4 e4 g4] [a3 d4 f4 a4] [g3 bb3 d4 g4] [a3 c4 f4 a4]>").gain(0.16),
+//   wind.gain(sine.range(0.05, 0.12).slow(5)),
+//   drops.degradeBy(0.55).fast(2)
+// ).gain(0.5)
+
+// // Sunrise — bring out the flute, brighten the harp.
+// stack(
+//   drone.note("<a2 a2 e3 a2>").slow(12).gain(0.10),
+//   pad.lpf(3500).gain(0.16),
+//   flute.degradeBy(0.25).gain(0.14),
+//   wind.gain(0.03)
+// ).gain(0.5)

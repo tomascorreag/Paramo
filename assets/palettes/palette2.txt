@@ -1,0 +1,41 @@
+# Paramo project palette
+# Source: palette2.aseprite (extracted via the Aseprite chunk 0x2019).
+# 33 entries (index 32 duplicates index 0). All UI / HUD / shader RGB values
+# in the project MUST come from this list. Alpha is free; RGB is locked.
+#
+# Re-export this .txt whenever palette2.aseprite changes.
+# Format: <index>: <hex RRGGBB>
+
+00: 636663
+01: 87857C
+02: BCAD9F
+03: F2B888
+04: EB9661
+05: B55945
+06: 734C44
+07: 3D3333
+08: 593E47
+09: 7A5859
+10: A57855
+11: DE9F47
+12: FDD179
+13: FEE1B8
+14: D4C692
+15: A6B04F
+16: 819447
+17: 44702D
+18: 2F4D2F
+19: 546756
+20: 89A477
+21: A4C5AF
+22: CAE6D9
+23: F1F6F0
+24: D5D6DB
+25: BBC3D0
+26: 96A9C1
+27: 6C81A1
+28: 405273
+29: 303843
+30: 14233A
+31: 414446
+32: 636663

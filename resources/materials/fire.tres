@@ -1,0 +1,18 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://we3wcu412qth"]
+
+[ext_resource type="Shader" uid="uid://v870fr5c7kdg" path="res://assets/shaders/fire.gdshader" id="1_fire"]
+
+[resource]
+shader = ExtResource("1_fire")
+shader_parameter/seed_offset = Vector2(0, 0)
+shader_parameter/disp_scale = Vector2(0.1, 0.1)
+shader_parameter/disp_scroll = Vector2(0.5, 1)
+shader_parameter/disp_strength = 1.0
+shader_parameter/color_scale = Vector2(0.2, 0.2)
+shader_parameter/color_scroll = Vector2(0, 3)
+shader_parameter/color_intensity = 0.50000002375
+shader_parameter/lo_threshold = -0.17399996076500002
+shader_parameter/hi_threshold = 0.09400005196499994
+shader_parameter/col_hi = Color(0.99215686, 0.81960785, 0.4745098, 1)
+shader_parameter/col_mid = Color(0.92156863, 0.5882353, 0.38039216, 1)
+shader_parameter/col_lo = Color(0.70980394, 0.34901962, 0.27058825, 1)

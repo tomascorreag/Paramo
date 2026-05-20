@@ -10,6 +10,11 @@ extends Node
 # methods declared in the script.
 const _OBJECT_PAINTER = preload("res://scripts/systems/object_painter.gd")
 
+# Minimum size (in cells) of a same-altitude grass plateau to qualify as a
+# spawn target. Below this we fall back to the legacy "any flat ground" pick
+# so degenerate seeds still produce a usable spawn.
+const MIN_PLATEAU_SIZE: int = 8
+
 # ============================================================================
 # ProceduralWorld
 # ============================================================================
@@ -244,19 +249,26 @@ func _place_player_on_walkable(grid: TerrainGrid) -> void:
 	player.global_position = world_pos
 
 
-# Scans the abstract grid for GROUND cells with FLAT/FULL_CUBE shape AND at
-# least one walkable face neighbor (so the player isn't stranded on an
-# isolated 1x1 island), picks the one with the lowest altitude (ties broken
-# by distance to map center). Slopes are excluded as a starting pose because
-# the player anchor looks odd half-way up a tapered tile.
+# Preferred spawn: the interior of the largest contiguous same-altitude grass
+# plateau (FLAT/FULL_CUBE GROUND, biome == GRASS, no blocking object). Falls
+# back to the legacy "any flat ground" pick when no plateau meets
+# MIN_PLATEAU_SIZE — keeps degenerate seeds (rocky / dry) playable.
 func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
+	var plateau: Dictionary = _find_largest_grass_plateau(grid)
+	if not plateau.is_empty():
+		return _pick_interior_cell(grid, plateau["cells"], plateau["altitude"])
+	return _find_starting_cell_fallback(grid)
+
+
+# Legacy scoring loop kept verbatim as a safety net: lowest-altitude
+# FLAT/FULL_CUBE GROUND with a walkable face neighbor (or, failing that, an
+# isolated flat cell with a warning). Slopes are excluded because the player
+# anchor looks odd half-way up a tapered tile.
+func _find_starting_cell_fallback(grid: TerrainGrid) -> Vector2i:
 	var center := Vector2(grid.width * 0.5, grid.height * 0.5)
 	var best := Vector2i(-1, -1)
 	var best_alt: int = 0x7FFFFFFF
 	var best_dist_sq: float = INF
-	# Fallback: best cell ignoring the neighbor-walkability requirement, in
-	# case generation produces a degenerate seed where every flat cell is
-	# isolated. Prefer a real spawn over a warning, but still warn.
 	var fallback := Vector2i(-1, -1)
 	var fallback_alt: int = 0x7FFFFFFF
 	var fallback_dist_sq: float = INF
@@ -268,8 +280,6 @@ func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
 			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
 					and c.ground_shape != TerrainCell.GroundShape.FLAT:
 				continue
-			# Skip cells that will spawn a blocking object (rock). The player
-			# would otherwise land on a cell flagged unwalkable post-spawn.
 			if c.object_kind != &"":
 				continue
 			var cell := Vector2i(x, y)
@@ -294,6 +304,153 @@ func _find_starting_cell(grid: TerrainGrid) -> Vector2i:
 		)
 		return fallback
 	return best
+
+
+# 4-connected BFS over face neighbors. A "plateau cell" is GROUND + FLAT/FULL_CUBE
+# + GRASS + no object; an edge between two cells requires equal altitude (so a
+# component never spans tiers). Returns the largest qualifying component as
+# `{cells: PackedInt32Array, altitude: int}` (cells encoded `y*width + x`), or
+# `{}` if no component reaches MIN_PLATEAU_SIZE. Tiebreaks larger components
+# first, then lower altitude, then closer to map center.
+func _find_largest_grass_plateau(grid: TerrainGrid) -> Dictionary:
+	var w: int = grid.width
+	var h: int = grid.height
+	var visited := PackedByteArray()
+	visited.resize(w * h)
+	var dirs: Array[Vector2i] = [
+		TerrainCell.DIR_NE,
+		TerrainCell.DIR_NW,
+		TerrainCell.DIR_SE,
+		TerrainCell.DIR_SW,
+	]
+	var center := Vector2(w * 0.5, h * 0.5)
+	var best_cells := PackedInt32Array()
+	var best_size: int = 0
+	var best_alt: int = 0x7FFFFFFF
+	var best_dist_sq: float = INF
+	var frontier := PackedInt32Array()
+	for y in h:
+		for x in w:
+			var idx: int = y * w + x
+			if visited[idx] != 0:
+				continue
+			var seed_cell: TerrainCell = grid.at(x, y)
+			if not _is_plateau_cell(seed_cell):
+				continue
+			var alt: int = seed_cell.altitude
+			# Flood fill this component, gated on equal-altitude edges.
+			frontier.clear()
+			frontier.append(idx)
+			visited[idx] = 1
+			var component := PackedInt32Array()
+			component.append(idx)
+			var sum_x: int = x
+			var sum_y: int = y
+			var head: int = 0
+			while head < frontier.size():
+				var cur: int = frontier[head]
+				head += 1
+				var cx: int = cur % w
+				var cy: int = cur / w
+				for d in dirs:
+					var nx: int = cx + d.x
+					var ny: int = cy + d.y
+					if nx < 0 or ny < 0 or nx >= w or ny >= h:
+						continue
+					var nidx: int = ny * w + nx
+					if visited[nidx] != 0:
+						continue
+					var nc: TerrainCell = grid.at(nx, ny)
+					if nc.altitude != alt:
+						continue
+					if not _is_plateau_cell(nc):
+						continue
+					visited[nidx] = 1
+					frontier.append(nidx)
+					component.append(nidx)
+					sum_x += nx
+					sum_y += ny
+			var size: int = component.size()
+			if size < MIN_PLATEAU_SIZE:
+				continue
+			var centroid := Vector2(float(sum_x) / size, float(sum_y) / size)
+			var dv := centroid - center
+			var dist_sq: float = dv.x * dv.x + dv.y * dv.y
+			var take: bool = false
+			if size > best_size:
+				take = true
+			elif size == best_size:
+				if alt < best_alt:
+					take = true
+				elif alt == best_alt and dist_sq < best_dist_sq:
+					take = true
+			if take:
+				best_cells = component
+				best_size = size
+				best_alt = alt
+				best_dist_sq = dist_sq
+	if best_size == 0:
+		return {}
+	return {"cells": best_cells, "altitude": best_alt}
+
+
+# Inside the chosen component, prefer a fully-interior cell (4 in-component
+# face neighbors). Tiebreak by smaller squared distance to the component
+# centroid, so the player lands near the middle of the patch rather than its
+# edge.
+func _pick_interior_cell(grid: TerrainGrid, cells: PackedInt32Array, altitude: int) -> Vector2i:
+	var w: int = grid.width
+	var member := {}
+	var sum_x: int = 0
+	var sum_y: int = 0
+	for idx in cells:
+		member[idx] = true
+		sum_x += idx % w
+		sum_y += idx / w
+	var n: int = cells.size()
+	var centroid := Vector2(float(sum_x) / n, float(sum_y) / n)
+	var dirs: Array[Vector2i] = [
+		TerrainCell.DIR_NE,
+		TerrainCell.DIR_NW,
+		TerrainCell.DIR_SE,
+		TerrainCell.DIR_SW,
+	]
+	var best := Vector2i(-1, -1)
+	var best_neighbors: int = -1
+	var best_dist_sq: float = INF
+	for idx in cells:
+		var x: int = idx % w
+		var y: int = idx / w
+		var neighbors: int = 0
+		for d in dirs:
+			var nidx: int = (y + d.y) * w + (x + d.x)
+			if member.has(nidx):
+				neighbors += 1
+		var dv := Vector2(x, y) - centroid
+		var dist_sq: float = dv.x * dv.x + dv.y * dv.y
+		var take: bool = false
+		if neighbors > best_neighbors:
+			take = true
+		elif neighbors == best_neighbors and dist_sq < best_dist_sq:
+			take = true
+		if take:
+			best = Vector2i(x, y)
+			best_neighbors = neighbors
+			best_dist_sq = dist_sq
+	return best
+
+
+func _is_plateau_cell(c: TerrainCell) -> bool:
+	if c.kind != TerrainCell.Kind.GROUND:
+		return false
+	if c.biome != TerrainCell.Biome.GRASS:
+		return false
+	if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
+			and c.ground_shape != TerrainCell.GroundShape.FLAT:
+		return false
+	if c.object_kind != &"":
+		return false
+	return true
 
 
 # A face neighbor is "walkable" if it's GROUND at the same altitude and

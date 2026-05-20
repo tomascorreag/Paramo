@@ -1,0 +1,60 @@
+[gd_resource type="SpriteFrames" format=3 uid="uid://btkfhoxk3od"]
+
+[ext_resource type="Texture2D" uid="uid://c6p0hlt3ygnw5" path="res://assets/sprites/VFX/Fire.png" id="1_atlas"]
+
+[sub_resource type="AtlasTexture" id="AT_0"]
+atlas = ExtResource("1_atlas")
+region = Rect2(0, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_1"]
+atlas = ExtResource("1_atlas")
+region = Rect2(32, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_2"]
+atlas = ExtResource("1_atlas")
+region = Rect2(64, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_3"]
+atlas = ExtResource("1_atlas")
+region = Rect2(96, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_4"]
+atlas = ExtResource("1_atlas")
+region = Rect2(128, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_5"]
+atlas = ExtResource("1_atlas")
+region = Rect2(160, 0, 32, 64)
+
+[sub_resource type="AtlasTexture" id="AT_6"]
+atlas = ExtResource("1_atlas")
+region = Rect2(192, 0, 32, 64)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AT_0")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_1")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_2")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_3")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_4")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_5")
+}, {
+"duration": 1.0,
+"texture": SubResource("AT_6")
+}],
+"loop": true,
+"name": &"default",
+"speed": 12.0
+}]

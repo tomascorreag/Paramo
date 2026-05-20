@@ -1,0 +1,44 @@
+[gd_scene format=3 uid="uid://b0r4inv1xpara"]
+
+[ext_resource type="Shader" uid="uid://wij7cytm730t" path="res://assets/shaders/rain.gdshader" id="1_shader"]
+[ext_resource type="Script" uid="uid://bus2f5fie72d1" path="res://scripts/vfx/rain.gd" id="2_rainscript"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_rain"]
+shader = ExtResource("1_shader")
+shader_parameter/rain_color = Color(0.7505, 0.820325, 0.95, 0.78431374)
+shader_parameter/tint_color = Color(1, 1, 1, 1)
+shader_parameter/tint_intensity = 0.50000002375
+shader_parameter/additive_boost = 0.15
+shader_parameter/rain_amount = 0.5
+shader_parameter/column_spacing = 1.0
+shader_parameter/cell_height = 270.0
+shader_parameter/fall_speed = 220.00001045
+shader_parameter/streak_length = 16.0000007125
+shader_parameter/streak_angle = -0.34600001177686
+shader_parameter/splash_min_y = 0.050000002375
+shader_parameter/splash_dwell = 0.250000011875
+shader_parameter/splash_size = 2.000000095
+shader_parameter/splash_probability = 1.0
+shader_parameter/streak_alpha_variation = 1.0
+shader_parameter/viewport_size = Vector2(480, 270)
+shader_parameter/camera_offset = Vector2(0, 0)
+shader_parameter/lantern_pos_view = Vector2(-9999, -9999)
+shader_parameter/lantern_radius_px = Vector2(256, 128)
+shader_parameter/lantern_energy = 0.0
+shader_parameter/lantern_color = Color(1, 0.725, 0.45, 1)
+shader_parameter/lantern_color_mix = 0.6
+shader_parameter/lantern_lift_gain = 1.5
+
+[node name="RainLayer" type="CanvasLayer" unique_id=1946980731]
+layer = 50
+script = ExtResource("2_rainscript")
+
+[node name="RainRect" type="ColorRect" parent="." unique_id=2094271543]
+material = SubResource("ShaderMaterial_rain")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0)

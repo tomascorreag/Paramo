@@ -4,6 +4,13 @@ extends PointLight2D
 ## Player lantern visuals. Handles range, falloff texture, and animated
 ## energy transitions driven by activate() / deactivate().
 
+const GROUP: StringName = &"player_lantern"
+
+# Half-extent (in source-texture pixels) of the radial gradient before
+# texture_scale is applied. The baked GradientTexture2D is 128 px square
+# with FILL_RADIAL from center, so its visual radius is 64 px.
+const _BASE_RADIUS_PX: float = 64.0
+
 @export var light_range: float = 4.0
 @export var falloff: Curve
 
@@ -22,6 +29,7 @@ var _target_active: bool = false
 
 
 func _ready() -> void:
+	add_to_group(GROUP)
 	energy = 0.0
 	enabled = false
 	texture_scale = light_range
@@ -44,9 +52,13 @@ func deactivate() -> void:
 
 
 func _process(delta: float) -> void:
+	if not _target_active and not enabled:
+		return
+
 	if transition_duration <= 0.0:
-		# Instant mode — no animation.
 		_transition_t = 1.0 if _target_active else 0.0
+		if not _target_active:
+			enabled = false
 	elif _target_active:
 		_transition_t = minf(_transition_t + delta / transition_duration, 1.0)
 	else:
@@ -57,6 +69,19 @@ func _process(delta: float) -> void:
 	if enabled:
 		var curve_val: float = energy_curve.sample(_transition_t) if energy_curve else _transition_t
 		energy = curve_val * max_energy
+
+
+## Visible radius of the gradient texture in world pixels, before the node's
+## own `scale` is applied. Multiply by `global_scale.{x,y}` for the elliptical
+## extent (lantern uses scale.y = 0.5 for isometric squash).
+func get_effective_radius_px() -> float:
+	return _BASE_RADIUS_PX * texture_scale
+
+
+## Current (already-lerped) energy. Useful for external systems that want to
+## react to the activate/deactivate fade without duplicating the curve sample.
+func get_current_energy() -> float:
+	return energy
 
 
 func _create_default_falloff() -> void:

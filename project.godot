@@ -20,6 +20,7 @@ config/icon="uid://cqg4ew8b5y73e"
 DisplayManager="*res://scripts/systems/display_manager.gd"
 TimeManager="*res://scripts/systems/time_manager.gd"
 Debug="*res://scripts/systems/debug.gd"
+FireManager="*res://scripts/systems/fire_manager.gd"
 
 [display]
 

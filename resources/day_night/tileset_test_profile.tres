@@ -13,6 +13,10 @@ _limits = [0.0, 2.0, 0.0, 1.0]
 _data = [Vector2(0.05, 0.8), 0.0, 0.0, 0, 0, Vector2(0.32681566, 1.060241), 0.0, 0.0, 0, 0, Vector2(0.4, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6, 1.05), 0.0, 0.0, 0, 0, Vector2(0.6955307, 1.1171961), 0.0, 0.0, 0, 0, Vector2(0.95, 0.8), 0.0, 0.0, 0, 0]
 point_count = 6
 
+[sub_resource type="Curve" id="Curve_rain"]
+_data = [Vector2(0, 0.2), 0.0, 0.0, 0, 0, Vector2(0.25, 0.6), 0.0, 0.0, 0, 0, Vector2(0.5, 0.3), 0.0, 0.0, 0, 0, Vector2(0.75, 0.7), 0.0, 0.0, 0, 0, Vector2(1, 0.2), 0.0, 0.0, 0, 0]
+point_count = 5
+
 [sub_resource type="Curve" id="Curve_shadow_length"]
 _limits = [-42.0, 42.0, 0.0, 1.0]
 _data = [Vector2(0.15, 0), 0.0, 0.0, 0, 0, Vector2(0.32960892, 39.607887), -500.0, -500.0, 0, 0, Vector2(0.49162006, 0.47191238), 0.0, 0.0, 0, 0, Vector2(0.65, -42), -500.0, -500.0, 0, 0, Vector2(0.85, 0), 0.0, 0.0, 0, 0]
@@ -50,3 +54,6 @@ wind_intensity_curve = SubResource("Curve_wind")
 water_intensity_curve = SubResource("Curve_water")
 shadow_opacity_curve = SubResource("Curve_shadow_opacity")
 shadow_length_curve = SubResource("Curve_shadow_length")
+rain_probability_curve = SubResource("Curve_rain")
+rain_ramp_up_seconds = 4.0
+rain_ramp_down_seconds = 8.0

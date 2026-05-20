@@ -1,0 +1,94 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/frailejon.tres" id="2_icon"]
+
+; Frames are built in code (see hud.gd::_frame_stylebox). Marker fills below
+; use palette2.aseprite index 12 (#FDD179). Alpha stays 1 here.
+
+[node name="HUD" type="CanvasLayer"]
+layer = 50
+script = ExtResource("1_hud")
+
+[node name="Minimap" type="Panel" parent="."]
+unique_name_in_owner = true
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -40.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = 40.0
+grow_horizontal = 0
+mouse_filter = 1
+
+[node name="MinimapInner" type="Panel" parent="Minimap"]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 2.0
+offset_top = 2.0
+offset_right = -2.0
+offset_bottom = -2.0
+mouse_filter = 2
+
+[node name="PlayerMarker" type="ColorRect" parent="Minimap/MinimapInner"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -1.0
+offset_top = -1.0
+offset_right = 1.0
+offset_bottom = 1.0
+mouse_filter = 2
+color = Color(0.9922, 0.8196, 0.4745, 1)
+
+[node name="CornerTL" type="ColorRect" parent="Minimap/MinimapInner"]
+offset_right = 2.0
+offset_bottom = 1.0
+mouse_filter = 2
+color = Color(0.9922, 0.8196, 0.4745, 1)
+
+[node name="CornerTL2" type="ColorRect" parent="Minimap/MinimapInner"]
+offset_right = 1.0
+offset_bottom = 2.0
+mouse_filter = 2
+color = Color(0.9922, 0.8196, 0.4745, 1)
+
+[node name="EquippedSlot" type="Button" parent="."]
+unique_name_in_owner = true
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = -36.0
+offset_right = 36.0
+offset_bottom = -4.0
+grow_vertical = 0
+focus_mode = 0
+
+[node name="EquippedIcon" type="TextureRect" parent="EquippedSlot"]
+unique_name_in_owner = true
+texture_filter = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_icon")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ItemMenu" type="Control" parent="."]
+unique_name_in_owner = true
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = -86.0
+offset_right = 36.0
+offset_bottom = -38.0
+grow_vertical = 0
+mouse_filter = 1

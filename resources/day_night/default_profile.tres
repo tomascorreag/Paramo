@@ -16,6 +16,10 @@ _limits = [-1.0, 2.0, 0.0, 1.0]
 _data = [Vector2(0, 0.9), 0.0, 0.0, 0, 0, Vector2(0.3, 1), 0.0, 0.0, 0, 0, Vector2(0.5, 1.05), 0.0, 0.0, 0, 0, Vector2(0.75, 1), 0.0, 0.0, 0, 0, Vector2(1, 0.9), 0.0, 0.0, 0, 0]
 point_count = 5
 
+[sub_resource type="Curve" id="Curve_rain1"]
+_data = [Vector2(0, 0.15), 0.0, 0.0, 0, 0, Vector2(0.25, 0.55), 0.0, 0.0, 0, 0, Vector2(0.5, 0.25), 0.0, 0.0, 0, 0, Vector2(0.75, 0.7), 0.0, 0.0, 0, 0, Vector2(1, 0.15), 0.0, 0.0, 0, 0]
+point_count = 5
+
 [sub_resource type="Curve" id="Curve_jn74y"]
 _limits = [-1.0, 2.0, 0.0, 1.0]
 _data = [Vector2(0, 0.7), 0.0, 0.0, 0, 0, Vector2(0.28, 0.9), 0.0, 0.0, 0, 0, Vector2(0.5, 1), 0.0, 0.0, 0, 0, Vector2(0.75, 0.95), 0.0, 0.0, 0, 0, Vector2(1, 0.7), 0.0, 0.0, 0, 0]
@@ -67,3 +71,4 @@ tint_strength_curve = SubResource("Curve_hrghg")
 wind_intensity_curve = SubResource("Curve_wind1")
 shadow_opacity_curve = SubResource("Curve_kvn67")
 shadow_length_curve = SubResource("Curve_r0inv")
+rain_probability_curve = SubResource("Curve_rain1")

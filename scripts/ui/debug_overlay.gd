@@ -15,9 +15,18 @@ const _SLIDER_MAX: float = 0.999
 @onready var _indices_toggle: CheckButton = %IndicesToggle
 @onready var _altitudes_toggle: CheckButton = %AltitudesToggle
 @onready var _free_move_toggle: CheckButton = %FreeMoveToggle
+@onready var _rain_slider: HSlider = %RainSlider
+@onready var _rain_label: Label = %RainLabel
 
 var _dragging: bool = false
 var _prev_paused: bool = false
+
+# Rain slider mirrors the controller's current intensity while idle; grabs
+# control via set_rain_override during a drag, then releases on drag_ended.
+# When no controller is in the scene (e.g. tileset_test) the slider falls back
+# to writing rain_amount on the RainLayer directly.
+var _rain_dragging: bool = false
+var _controller: DayNightSceneController
 
 
 func _ready() -> void:
@@ -37,6 +46,12 @@ func _ready() -> void:
 	_indices_toggle.toggled.connect(_on_indices_toggled)
 	_altitudes_toggle.toggled.connect(_on_altitudes_toggled)
 	_free_move_toggle.toggled.connect(_on_free_move_toggled)
+	_rain_slider.drag_started.connect(_on_rain_drag_started)
+	_rain_slider.drag_ended.connect(_on_rain_drag_ended)
+	_rain_slider.value_changed.connect(_on_rain_slider_changed)
+	# Deferred so RainLayer._ready and DayNightSceneController._ready (which
+	# both add themselves to groups) have run.
+	call_deferred(&"_resolve_rain_refs")
 	TimeManager.time_changed.connect(_on_time_changed)
 
 
@@ -65,6 +80,58 @@ func _on_altitudes_toggled(button_pressed: bool) -> void:
 
 func _on_free_move_toggled(button_pressed: bool) -> void:
 	Debug.free_movement = button_pressed
+
+
+func _on_rain_drag_started() -> void:
+	_rain_dragging = true
+	if _controller != null:
+		_controller.set_rain_override(_rain_slider.value)
+
+
+func _on_rain_drag_ended(_value_changed: bool) -> void:
+	_rain_dragging = false
+	if _controller != null:
+		_controller.clear_rain_override()
+
+
+func _on_rain_slider_changed(v: float) -> void:
+	if _rain_dragging:
+		if _controller != null:
+			_controller.set_rain_override(v)
+		else:
+			# No controller in this scene — slider drives the shader directly.
+			var rain := get_tree().get_first_node_in_group(&"rain_layer") as RainLayer
+			if rain != null:
+				rain.set_amount(v)
+	_rain_label.text = "%.2f" % v
+
+
+func _resolve_rain_refs() -> void:
+	_controller = get_tree().get_first_node_in_group(&"day_night_controller") as DayNightSceneController
+	# Initial slider value: prefer the controller's current intensity if it
+	# exists, otherwise fall back to whatever the shader is showing.
+	if _controller != null:
+		var v: float = _controller.get_rain_current_intensity()
+		_rain_slider.set_value_no_signal(v)
+		_rain_label.text = "%.2f" % v
+		return
+	var rain := get_tree().get_first_node_in_group(&"rain_layer") as RainLayer
+	if rain == null:
+		return
+	var amount: float = rain.get_amount()
+	_rain_slider.set_value_no_signal(amount)
+	_rain_label.text = "%.2f" % amount
+
+
+# While the overlay is visible and the user isn't actively dragging the rain
+# slider, mirror the controller's current rain intensity into the slider so
+# the user can SEE the event system working without having to read the shader.
+func _process(_delta: float) -> void:
+	if not visible or _rain_dragging or _controller == null:
+		return
+	var v: float = _controller.get_rain_current_intensity()
+	_rain_slider.set_value_no_signal(v)
+	_rain_label.text = "%.2f" % v
 
 
 func _on_passage_toggled(button_pressed: bool) -> void:

@@ -28,9 +28,16 @@ const REF_MAX_HEIGHT: float = 4.0
 @onready var _sprite: Sprite2D = $Sprite2D
 @onready var _shadow: Sprite2D = $Shadow
 
+# Fired when burn_amount reaches 1.0 via set_burn_amount(). FireManager listens
+# (or polls) to decide when to queue_free this frailejon.
+signal burned_out
+
+const _BURN_SHADER: Shader = preload("res://assets/shaders/burn_char.gdshader")
+
 var cell: Vector2i
 var growth_stage: int = 0
 var _shadow_scale: float = 1.0
+var _burn_mat: ShaderMaterial
 
 var _time_manager: Node
 var _last_hour: int = -1
@@ -261,3 +268,29 @@ func _position_shadow() -> void:
 		_shadow.global_position = Vector2(
 			roundf(global_position.x + _sprite.position.x),
 			roundf(global_position.y + _sprite.position.y - 1.0))
+
+
+# --- Burn API (driven by FireManager) --------------------------------------
+
+func apply_burn_material() -> void:
+	_burn_mat = ShaderMaterial.new()
+	_burn_mat.shader = _BURN_SHADER
+	_burn_mat.set_shader_parameter(&"burn_amount", 0.0)
+	if _sprite != null:
+		_sprite.material = _burn_mat
+
+
+func set_burn_amount(t: float) -> void:
+	var clamped: float = clampf(t, 0.0, 1.0)
+	if _burn_mat != null:
+		_burn_mat.set_shader_parameter(&"burn_amount", clamped)
+	if clamped >= 1.0:
+		burned_out.emit()
+
+
+# Restore the sprite to its un-charred state. Called by FireManager when rain
+# extinguishes a fire mid-burn.
+func clear_burn_material() -> void:
+	if _sprite != null:
+		_sprite.material = null
+	_burn_mat = null

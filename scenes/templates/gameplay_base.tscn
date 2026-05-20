@@ -30,6 +30,8 @@
 [ext_resource type="Script" uid="uid://py1twn3iy3xb" path="res://scripts/systems/free_camera_controller.gd" id="28_fcam"]
 [ext_resource type="Script" uid="uid://chfvu4rhrlxnf" path="res://scripts/systems/altitude_fog_controller.gd" id="29_afog"]
 [ext_resource type="PackedScene" path="res://scenes/ui/title_intro.tscn" id="30_titleintro"]
+[ext_resource type="PackedScene" uid="uid://b0r4inv1xpara" path="res://scenes/vfx/rain.tscn" id="31_rain"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="32_hud"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -61,7 +63,7 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0, 0, 0, 1)
 
-[node name="AmbientModulate" type="CanvasModulate" parent="." unique_id=2136978843]
+[node name="AmbientModulate" type="CanvasModulate" parent="." unique_id=2136978843 groups=["ambient_modulate"]]
 
 [node name="World" type="Node2D" parent="." unique_id=1390293971]
 y_sort_enabled = true
@@ -131,6 +133,9 @@ metadata/altitude = 12
 
 [node name="Player" parent="World" unique_id=119520760 instance=ExtResource("2_player")]
 up_direction = Vector2(1, 0)
+
+[node name="VFXContainer" type="Node2D" parent="World" unique_id=1948391821 groups=["vfx_container"]]
+y_sort_enabled = true
 
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=2006076017]
 
@@ -237,6 +242,10 @@ world = NodePath("../World")
 player = NodePath("../World/Player")
 max_darkness = 0.15
 falloff = 0.1
+
+[node name="RainLayer" parent="." instance=ExtResource("31_rain")]
+
+[node name="HUD" parent="." instance=ExtResource("32_hud")]
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)
