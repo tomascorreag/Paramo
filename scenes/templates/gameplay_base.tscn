@@ -246,6 +246,7 @@ falloff = 0.1
 [node name="RainLayer" parent="." instance=ExtResource("31_rain")]
 
 [node name="HUD" parent="." instance=ExtResource("32_hud")]
+visible = false
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)
