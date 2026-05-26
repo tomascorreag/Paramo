@@ -44,6 +44,9 @@ func _set_seed(v: int) -> void:
 
 
 func _ready() -> void:
+	if not Engine.is_editor_hint():
+		queue_free()
+		return
 	_rebuild()
 
 

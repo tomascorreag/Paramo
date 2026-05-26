@@ -33,7 +33,7 @@ const K_IGNITION_SAMPLES: int = 4 # per ignition tick
 const IGNITION_TICK_SECONDS: float = 0.25
 
 const BURN_RATE_PER_SECOND: float = 0.10 # ~10s for a full burn
-const SPREAD_RATE_PER_NEIGHBOUR_PER_SECOND: float = 0.1
+const SPREAD_RATE_PER_NEIGHBOUR_PER_SECOND: float = 0.2
 const SPREAD_THRESHOLD: float = 0.25 # only spread once the source is well established
 
 const WATER_SEARCH_R: int = 6 # max bounded BFS radius (cells)
@@ -45,9 +45,9 @@ const MAX_CONCURRENT_BURNING: int = 80 # safety cap
 # --- Rain coupling ---
 # Spread chance hits zero at this rain intensity. Linear ramp from 0 (no rain
 # = full spread) to RAIN_SPREAD_ZERO_AT (spread = 0).
-const RAIN_SPREAD_ZERO_AT: float = 0.5
+const RAIN_SPREAD_ZERO_AT: float = 0.2
 # Above this intensity, burning cells start rolling for extinguish each tick.
-const RAIN_EXTINGUISH_THRESHOLD: float = 0.5
+const RAIN_EXTINGUISH_THRESHOLD: float = 0.33
 # Per-second extinguish chance at rain=1.0. Scales linearly between the
 # threshold and 1.0.
 const RAIN_EXTINGUISH_RATE_PER_SECOND: float = 0.8
@@ -58,6 +58,9 @@ const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
 const SOURCE_GRASS: int = 0
 const SOURCE_WATER: int = 3
 const SOURCE_DIRT: int = 2
+
+const _WALKABLE_LAYER: String = "walkable"
+const _TILE_KIND_LAYER: String = "tile_kind"
 
 const _NEIGHBOR_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0),
@@ -87,10 +90,12 @@ var _burning: Dictionary = {}
 
 var _water_dist_cache: Dictionary[Vector2i, int] = {}
 
-# Per-TileSet TileKindIndex for the dirt source. Built lazily on first
-# ignition; cleared on graph_changed when a new map (and possibly a new
-# TileSet) replaces the live grid.
-var _dirt_index_by_tileset: Dictionary = {}
+# tile_set -> { tile_kind: Array[Vector2i] }. For each kind painted on the
+# dirt source, every walkable atlas coord wearing that kind. Built lazily on
+# first ignition; cleared on graph_changed when a new map (and possibly a new
+# TileSet) replaces the live grid. Ignition picks one entry at random so
+# burned patches show visual variety across adjacent cells of the same kind.
+var _dirt_coords_by_tileset: Dictionary = {}
 
 var _ignition_accum: float = 0.0
 
@@ -150,7 +155,7 @@ func _on_graph_changed() -> void:
 			v.queue_free()
 	_burning.clear()
 	_water_dist_cache.clear()
-	_dirt_index_by_tileset.clear()
+	_dirt_coords_by_tileset.clear()
 	call_deferred(&"_refresh_grid_and_vfx")
 
 
@@ -275,22 +280,19 @@ func _ignite(cell: Vector2i) -> void:
 	if grass_src == null:
 		return
 
-	# Resolve the dirt atlas coord matching the grass tile's tile_kind. We
-	# can't reuse the grass atlas coord directly: grass has multi-variant
-	# tiles (e.g. FULL_CUBE at several coords) while dirt typically paints
-	# only one coord per kind, so a blind set_cell with the grass coord
-	# silently leaves the cell empty when dirt has no tile there.
-	var dirt_coord: Vector2i = _resolve_dirt_coord(layer.tile_set, cd.tile_kind)
-	if TileKindIndex.is_unset(dirt_coord):
-		# Dirt source has no equivalent kind — fall back to FLAT, which every
-		# painted biome source is expected to have. If even that's missing,
-		# we skip the swap so the cell isn't left empty.
-		dirt_coord = _resolve_dirt_coord(layer.tile_set, &"FLAT")
+	# Burned terrain keeps the cell's original shape (slope stays slope, etc.)
+	# but swaps to a random walkable dirt variant of the same kind, so a
+	# patch of charred ground shows visual variety. Fall back to FLAT if the
+	# dirt source doesn't paint the cell's kind.
+	var dirt_coord: Vector2i = _pick_random_dirt_coord(layer.tile_set, cd.tile_kind)
+	if dirt_coord.x < 0:
+		dirt_coord = _pick_random_dirt_coord(layer.tile_set, &"FLAT")
 
 	# Swap underlying tile to dirt immediately. The BurningCellVFX overlay
 	# holds the grass texture and dissolves it pixel-by-pixel — as alpha drops,
-	# the freshly-painted dirt tile shows through.
-	if not TileKindIndex.is_unset(dirt_coord):
+	# the freshly-painted dirt tile shows through. Skip the swap if even FLAT
+	# wasn't painted on the dirt source (cell would otherwise go empty).
+	if dirt_coord.x >= 0:
 		layer.set_cell(cell, SOURCE_DIRT, dirt_coord, 0)
 
 	var vfx := BurningCellVFX.new()
@@ -409,14 +411,59 @@ func _is_water_layer(layer: TileMapLayer, cell: Vector2i) -> bool:
 	return layer.get_cell_source_id(cell) == SOURCE_WATER
 
 
-func _resolve_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
-	if tile_set == null:
+func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
+	if tile_set == null or String(kind).is_empty():
 		return Vector2i(-1, -1)
-	var idx: TileKindIndex = _dirt_index_by_tileset.get(tile_set, null)
-	if idx == null:
-		idx = TileKindIndex.new(tile_set, SOURCE_DIRT)
-		_dirt_index_by_tileset[tile_set] = idx
-	return idx.coord(kind)
+	var by_kind: Dictionary = _dirt_coords_by_tileset.get(tile_set, {})
+	if by_kind.is_empty():
+		by_kind = _scan_dirt_walkable_by_kind(tile_set)
+		_dirt_coords_by_tileset[tile_set] = by_kind
+	var coords: Array = by_kind.get(kind, [])
+	if coords.is_empty():
+		return Vector2i(-1, -1)
+	return coords[randi() % coords.size()]
+
+
+# Returns { tile_kind: Array[Vector2i] } over the dirt source: every painted
+# atlas coord, grouped by its tile_kind custom data, excluding any entry whose
+# `walkable` custom data is explicitly false (unset is treated as walkable,
+# matching TerrainPainter's convention). Only alternative 0 is considered —
+# TerrainPainter writes alt 0 for ground tiles.
+static func _scan_dirt_walkable_by_kind(tile_set: TileSet) -> Dictionary:
+	var out: Dictionary = {}
+	var src: TileSetAtlasSource = tile_set.get_source(SOURCE_DIRT) as TileSetAtlasSource
+	if src == null:
+		return out
+	var walk_layer_id: int = -1
+	var kind_layer_id: int = -1
+	for i in tile_set.get_custom_data_layers_count():
+		match tile_set.get_custom_data_layer_name(i):
+			_WALKABLE_LAYER: walk_layer_id = i
+			_TILE_KIND_LAYER: kind_layer_id = i
+	if kind_layer_id < 0:
+		push_warning(
+			"FireManager: dirt source has no '%s' custom data layer — "
+			% _TILE_KIND_LAYER
+			+ "burned cells will not be repainted."
+		)
+		return out
+	for i in src.get_tiles_count():
+		var coord: Vector2i = src.get_tile_id(i)
+		var data: TileData = src.get_tile_data(coord, 0)
+		if data == null:
+			continue
+		if walk_layer_id >= 0:
+			var w: Variant = data.get_custom_data_by_layer_id(walk_layer_id)
+			if w is bool and not w:
+				continue
+		var k: Variant = data.get_custom_data_by_layer_id(kind_layer_id)
+		if not (k is String) or (k as String).is_empty():
+			continue
+		var kind_name := StringName(k as String)
+		if not out.has(kind_name):
+			out[kind_name] = []
+		(out[kind_name] as Array).append(coord)
+	return out
 
 
 func _distance_to_water(cell: Vector2i) -> int:

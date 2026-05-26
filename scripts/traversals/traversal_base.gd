@@ -54,6 +54,7 @@ func build() -> bool:
 # grid afterwards.
 func despawn(placer: StructurePlacer) -> void:
 	_clear_grid_occupants()
+	_disconnect_from_pathfinder()
 	for p in _painted:
 		placer.erase(p["cell"], p["altitude"])
 	_painted.clear()
@@ -116,6 +117,19 @@ func _clear_grid_occupants() -> void:
 		return
 	for cell in occupied_cells():
 		grid.clear_occupant(cell, self)
+
+
+# Symmetric counterpart to _register_with_grid's connect. Called from despawn()
+# BEFORE queue_free so the post-despawn pathfinder.rebuild() can't fire
+# _on_graph_changed on this dying node and re-register it as occupant on the
+# fresh grid (leaving a dangling freed reference behind).
+func _disconnect_from_pathfinder() -> void:
+	if not _grid_signal_connected:
+		return
+	var pf := _get_pathfinder()
+	if pf != null and pf.graph_changed.is_connected(_on_graph_changed):
+		pf.graph_changed.disconnect(_on_graph_changed)
+	_grid_signal_connected = false
 
 
 # graph_changed fires on rebuild and on traversal-edge changes. The new grid
