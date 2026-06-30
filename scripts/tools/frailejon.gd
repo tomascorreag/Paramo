@@ -144,6 +144,10 @@ func _process(_delta: float) -> void:
 		return
 	var max_stage: int = data.variants.size() - 1
 	if growth_stage >= max_stage:
+		# Fully grown: no further growth work ever. Drop out of the per-frame
+		# process list (idle dispatch otherwise scales with planted count). A
+		# future regrow/reset mechanic must call set_process(true) to re-arm.
+		set_process(false)
 		return
 	var hour: int = int(_time_manager.time_of_day * 24.0) % 24
 	if hour != _last_hour:

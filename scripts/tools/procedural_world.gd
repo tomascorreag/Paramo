@@ -289,7 +289,13 @@ func regenerate_async() -> void:
 func _generate_grid_async(
 	params: TerrainGenerationParams, overlay: Node
 ) -> TerrainGrid:
-	if not use_threaded_generation:
+	# Gate the worker-thread path on actual runtime thread capability, not just
+	# the inspector flag: a single-threaded web export (no SharedArrayBuffer) has
+	# no WorkerThreadPool workers, so add_task() would never complete and the
+	# poll loop below would hang the loading screen forever. OS.has_feature(
+	# "threads") is true in the current threaded build (behaviour unchanged) and
+	# false in a single-threaded export, where we fall through to inline gen.
+	if not (use_threaded_generation and OS.has_feature("threads")):
 		return TerrainGenerator.generate(params)
 
 	var holder: Array = []

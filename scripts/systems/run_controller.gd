@@ -59,9 +59,24 @@ func _start() -> void:
 			p.display_name if p != null else "—", SeasonManager.year])
 
 
+# Cached label inputs so the per-frame formatter only runs when a shown value
+# actually changes — avoids building a String + 9-element args Array every frame.
+var _lbl_last_day: int = -1
+var _lbl_last_water: int = -2147483648
+var _lbl_last_ff: bool = false
+
+
 func _process(_delta: float) -> void:
-	# Day count and time advance continuously; cheap enough to repaint each
-	# frame while this is debug-only.
+	# Only the day counter advances continuously (water/season are signal-driven),
+	# so rebuild the label string solely when day, integer water, or the
+	# fast-forward indicator changes.
+	var day: int = SeasonManager.days_into_season()
+	var water_i: int = int(ResourceLedger.get_amount(&"water"))
+	if day == _lbl_last_day and water_i == _lbl_last_water and _fast_forwarding == _lbl_last_ff:
+		return
+	_lbl_last_day = day
+	_lbl_last_water = water_i
+	_lbl_last_ff = _fast_forwarding
 	_refresh_label()
 
 

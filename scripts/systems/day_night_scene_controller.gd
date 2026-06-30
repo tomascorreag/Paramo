@@ -230,21 +230,29 @@ func _apply_grading(t: float) -> void:
 	if _shadows_dirty:
 		_shadows_dirty = false
 		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
+	# `t` is identical for every shadow node, so sample the time-driven curves
+	# once here rather than per node (otherwise N redundant Curve binary searches
+	# each frame, scaling with how many plants/structures the player has built).
+	# Per-node `scale` is applied to the length result inside the loop.
+	var has_shadow_opacity: bool = profile.shadow_opacity_curve != null
+	var has_shadow_length: bool = profile.shadow_length_curve != null
+	var shadow_opacity_val: float = (
+		profile.shadow_opacity_curve.sample(t) if has_shadow_opacity else 0.0)
+	var shadow_length_base: float = (
+		profile.shadow_length_curve.sample(t) if has_shadow_length else 0.0)
 	for node: Node in _shadow_nodes:
 		var mat := (node as CanvasItem).material as ShaderMaterial
 		if mat == null:
 			continue
 		var scale: float = node.get_meta(&"shadow_scale", 1.0)
-		if profile.shadow_opacity_curve:
-			mat.set_shader_parameter(
-				&"shadow_opacity", profile.shadow_opacity_curve.sample(t))
-		if profile.shadow_length_curve:
+		if has_shadow_opacity:
+			mat.set_shader_parameter(&"shadow_opacity", shadow_opacity_val)
+		if has_shadow_length:
 			# Round to integer so the tail grows/shrinks in whole-pixel steps
 			# instead of having taper-edge pixels toggle at close fractional
 			# thresholds (which reads as sub-pixel motion).
 			mat.set_shader_parameter(
-				&"shadow_length",
-				roundf(profile.shadow_length_curve.sample(t) * scale))
+				&"shadow_length", roundf(shadow_length_base * scale))
 
 
 # -----------------------------------------------------------------------------

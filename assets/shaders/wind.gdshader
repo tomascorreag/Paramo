@@ -68,7 +68,10 @@ void fragment() {
 	float opaque_below = 0.0;
 	for (int i = 1; i <= WIND_PROBE_PX; i++) {
 		vec2 s = UV + vec2(0.0, float(i) * TEXTURE_PIXEL_SIZE.y);
-		if (texture(TEXTURE, s).a < 0.1) { break; }
+		// Explicit LOD: this sample sits in data-dependent loop flow, where GLES3
+		// leaves implicit-derivative LOD undefined (some Mesa drivers warn/mis-
+		// sample). Bit-exact here since canvas textures are Nearest with no mips.
+		if (textureLod(TEXTURE, s, 0.0).a < 0.1) { break; }
 		opaque_below += 1.0;
 		if (opaque_below >= saturate_at) { break; }
 	}

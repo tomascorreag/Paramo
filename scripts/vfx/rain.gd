@@ -53,7 +53,9 @@ func _resolve_lantern() -> void:
 
 
 func _process(_delta: float) -> void:
-	if _mat == null:
+	# Skip the per-frame uniform pushes while the rain pass is hidden (set_amount
+	# toggles _rect.visible); nothing is drawn, so there is nothing to update.
+	if _mat == null or _rect == null or not _rect.visible:
 		return
 
 	var cam_off: Vector2 = Vector2.ZERO
@@ -92,9 +94,17 @@ func _update_lantern(cam_off: Vector2) -> void:
 
 
 func set_amount(amount: float) -> void:
+	var a: float = clamp(amount, 0.0, 1.0)
+	# Hide the full-screen rain pass entirely when it isn't raining. A hidden
+	# CanvasItem skips both its draw and its screen-filling fragment shader (the
+	# loop nest costs tens of sin() per pixel even at amount 0), reclaiming GPU
+	# during the idle majority of play. The epsilon re-shows it the instant a
+	# storm ramps up (RAMPING_UP writes amount > 0 the same frame).
+	if _rect != null:
+		_rect.visible = a > 0.001
 	if _mat == null:
 		return
-	_mat.set_shader_parameter(PARAM_AMOUNT, clamp(amount, 0.0, 1.0))
+	_mat.set_shader_parameter(PARAM_AMOUNT, a)
 
 
 func get_amount() -> float:
