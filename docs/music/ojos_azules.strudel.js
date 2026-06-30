@@ -9,6 +9,10 @@
 // the score (mixed 2/4+3/4 phrasing kept); accompaniment is cleaned/simplified.
 setcpm(72 / 22)   // 1 quarter = 72 BPM
 
+// Organic huayno percussion — acoustic samples from the Dirt library, with
+// per-hit randomized dynamics, pitch wobble, and sample-variant rotation.
+// samples('bubo:waveforms')
+
 // Melody (flute) — Theme A then Theme B, exact rhythms from the score.
 // Plays complete only once every 4 loops; the other 3 randomly skip ~40% of
 // notes (dropped notes leave silence, so timing stays locked to the other layers).
@@ -19,7 +23,7 @@ const melodyNotes = note(`
 const melody = melodyNotes
   .degradeBy(0.11)              // 3 of 4 loops: drop notes at random
   .every(4, x => melodyNotes)  // every 4th loop: full melody
-  .sound("gm_pan_flute").gain(0.4).attack(0.005).release(0.2).room(0.35).add(note(rand.range(-12.2, -11.8)))
+  .sound("gm_pan_flute").gain(0.4).attack(0.005).release(0.2).room(0.35).add(note(rand.range(-12.1, -11.9)))
 
 // Chords — ritmo de huayno as a SINGLE-NOTE riff (no chords): the cell is a
 // corchea + dos semicorcheas (eighth + two sixteenths). Per beat: the root on
@@ -36,14 +40,14 @@ const chords = note(`
   c4@2 e4@1 g4@1   c4@2 e4@1 g4@1   c4@2 e4@1 g4@1
   e3@2 gs3@1 b3@1   e3@2 gs3@1 b3@1
   a3@2 c4@1 e4@1   a3@2 c4@1 e4@1
-`).sound("gm_acoustic_guitar_nylon").gain(0.25).attack(0.001).release(0.14).resonance(8).room(0.5).add(note(12))//.octave(choose(0,1))
+`).sound("gm_acoustic_guitar_nylon").gain(0.22).attack(0.001).release(0.14).resonance(8).room(0.5).add(note(12))//.octave(choose(0,1))
 
 // Bass — chord roots, held (one sustained note per harmony instead of repeats)
 const bass = note(`
   a2@8   e2@8   a2@8 c3@4   e2@8   a2@8
   a2@8   g2@8   c3@12   e2@8   a2@8
 `).sound("gm_acoustic_bass").gain(0.75)
-  .attack(0.005).decay(2).sustain(0).release(0.4)   // pluck, then decay to silence (sustain=0) like a real bass
+  .attack(0.005).decay(3.5).sustain(0).release(0.4)   // pluck, then decay to silence (sustain=0) like a real bass
   .add(note(-12))
 
 
@@ -54,8 +58,8 @@ const bombo = sound("bd").bank("AkaiMPC60").fast(11)
   .gain(rand.range(0.3, 0.5)).room(0.2)
 
 // Wood "ti-ki" gallop on the off-beats (triplet lilt), pitch + sample varied
-const ticks = sound("~ bd bd").fast(22)
-  .gain(rand.range(0.15, 0.2))
+const ticks = sound("~ sd sd").fast(22)
+  .gain(rand.range(0.00, 0.04))
   .speed(rand.range(0.94, 1.08)).room(0.15)
 
 // Open hat on each bar's downbeat + a kick pickup that turns the loop
@@ -72,4 +76,5 @@ const sesq = stack(
   sound("sh*2").gain(rand.range(0.2, 0.4)).speed(rand.range(1.15, 1.25))                     // the "2"
 ).fast(22).room(0.2).degradeBy("<0.125 0.25 0.75 0>")
 
-stack(bass, chords, melody, bombo, ticks, accents, sesq)
+// stack(bass, chords, melody, bombo, ticks, accents, sesq)
+stack(melody, bass, bombo, ticks, accents, sesq, chords)
