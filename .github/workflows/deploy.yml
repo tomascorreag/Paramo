@@ -1,0 +1,96 @@
+name: Deploy web build
+
+# main  -> https://tomascorreag.github.io/Paramo/
+# staging -> https://tomascorreag.github.io/Paramo/staging/
+#
+# Both URLs are served by the SAME GitHub Pages site (one site per repo). They
+# coexist on a single, persistent `gh-pages` branch: main publishes to the root,
+# staging publishes into the `staging/` subdirectory. GitHub Pages source must be
+# set to: Branch = gh-pages, Folder = / (root). See the repo's Settings > Pages.
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+# Serialize deploys so a near-simultaneous push to main and staging can't race
+# on the shared gh-pages branch.
+concurrency:
+  group: pages-gh-pages-branch
+  cancel-in-progress: false
+
+jobs:
+  export-and-deploy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # peaceiris pushes the build to the gh-pages branch
+    container:
+      image: barichello/godot-ci:4.6.1 # must match Godot version in CLAUDE.md / project.godot
+    env:
+      GODOT_VERSION: "4.6.1"
+      EXPORT_DIR: build/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The godot-ci image ships the matching export templates at /root/...; Godot
+      # looks for them under the invoking user's home. Move them into place.
+      - name: Install export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mv "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" "${HOME}/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+
+      # Fresh checkout has no .godot/ import cache (it's gitignored). Import first so
+      # the export step finds all imported resources. First import can emit errors
+      # for transient missing caches; tolerate them and let the export be the gate.
+      - name: Import resources
+        run: godot --headless --import || true
+
+      - name: Web export (release)
+        run: |
+          mkdir -p "${EXPORT_DIR}"
+          godot --headless --verbose --export-release "Web" "${EXPORT_DIR}/index.html"
+          test -f "${EXPORT_DIR}/index.html" # fail the job if the export produced nothing
+
+      # --- staging only -----------------------------------------------------------
+      # The generated service worker derives its cache key from the project name
+      # ("Paramo-sw-cache-"). Cache Storage is per-ORIGIN, shared across scopes, and
+      # the SW's activate handler deletes every cache sharing that prefix. Without
+      # this rename, the main (/) and staging (/staging/) builds would mutually evict
+      # each other's caches on every activation. Namespacing the staging prefix
+      # decouples them.
+      - name: Namespace staging service-worker cache
+        if: github.ref == 'refs/heads/staging'
+        run: sed -i "s/Paramo-sw-cache-/Paramo-staging-sw-cache-/g" "${EXPORT_DIR}/index.service.worker.js"
+
+      # NOTE: if you later commit the static music assets referenced by the export's
+      # head_include (music/strudel/web-1.3.0.js, music/paramo-music.js), copy them
+      # into ${EXPORT_DIR}/ here so the deployed build can load them.
+
+      # --- deploy: main -> gh-pages root ------------------------------------------
+      # keep_files: true so refreshing the root build does NOT delete the staging/
+      # subdir. Tradeoff: a file removed from the export set would linger as a stale
+      # orphan, but Godot web exports use a fixed filename set (index.*), so in
+      # practice every file is overwritten in place.
+      - name: Deploy main to root
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./build/web
+          keep_files: true
+          commit_message: "deploy: main -> / (${{ github.sha }})"
+
+      # --- deploy: staging -> gh-pages /staging -----------------------------------
+      # destination_dir scopes peaceiris's file removal to staging/ only, so this
+      # deploy fully refreshes staging/ while leaving the root build untouched.
+      - name: Deploy staging to /staging
+        if: github.ref == 'refs/heads/staging'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./build/web
+          destination_dir: staging
+          commit_message: "deploy: staging -> /staging (${{ github.sha }})"
