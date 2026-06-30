@@ -80,6 +80,17 @@ const _WATER_ALT_NW: int = 4
 # Public entry
 # ----------------------------------------------------------------------------
 
+# Paint job phases (see begin_paint / paint_step). The job paints the playable
+# grid row-by-row (GROUND), then the south-cliff skirt row-by-row (SKIRT), then
+# finishes (DONE). Splitting on rows lets a caller spread the work across frames
+# (ProceduralWorld's async startup) while the single-shot `paint()` wrapper runs
+# every row in one call — identical output either way (iteration order is
+# preserved exactly, which the clumping picker depends on).
+const _PHASE_GROUND: int = 0
+const _PHASE_SKIRT: int = 1
+const _PHASE_DONE: int = 2
+
+
 # `layers_by_altitude` maps altitude (int half-steps) → TileMapLayer.
 # Caller supplies the dict so the painter doesn't need to know the layer-naming
 # scheme; missing altitudes are skipped with a warning.
@@ -88,18 +99,43 @@ const _WATER_ALT_NW: int = 4
 # grass-band top from it (used by cliff-back biome stacking and the grass
 # variant density picker), and reads the rng seed for deterministic variant
 # selection.
+#
+# Synchronous wrapper over the chunked begin_paint/paint_step API: builds the
+# job and runs it to completion in one call. Used by the editor Regenerate
+# button and the CLI bakers, where blocking is fine. Runtime startup drives the
+# chunked API directly to avoid a main-thread freeze.
 static func paint(
 	grid: TerrainGrid,
 	layers_by_altitude: Dictionary,
 	tile_set: TileSet,
 	params: TerrainGenerationParams,
 ) -> void:
+	var ctx: Dictionary = begin_paint(grid, layers_by_altitude, tile_set, params)
+	if ctx.is_empty():
+		return
+	# 0x7FFFFFFF row budget = "paint everything"; loop is a no-op safety net
+	# (paint_step returns done in a single call at that budget).
+	while not paint_step(ctx, 0x7FFFFFFF):
+		pass
+
+
+# Builds a paint job: caches per-source TileKindIndex / variant tables, resolves
+# biome thresholds + per-biome selection noise, clears the target layers, and
+# returns a context Dictionary that paint_step mutates. Returns {} on invalid
+# input (null tile_set / params). The returned ctx is opaque to callers except
+# for paint_step / paint_progress.
+static func begin_paint(
+	grid: TerrainGrid,
+	layers_by_altitude: Dictionary,
+	tile_set: TileSet,
+	params: TerrainGenerationParams,
+) -> Dictionary:
 	if tile_set == null:
-		push_error("TerrainPainter.paint: tile_set is null.")
-		return
+		push_error("TerrainPainter.begin_paint: tile_set is null.")
+		return {}
 	if params == null:
-		push_error("TerrainPainter.paint: params is null.")
-		return
+		push_error("TerrainPainter.begin_paint: params is null.")
+		return {}
 
 	# Cache one TileKindIndex per source we'll touch.
 	var indices: Dictionary[int, TileKindIndex] = {}
@@ -118,28 +154,15 @@ static func paint(
 
 	# Resolve once and thread through. Pure function of params — stable across
 	# the whole paint pass and cheap (single linear walk over biome_bands).
-	var thresholds: Array = params.resolve_biome_thresholds()
-	var seed: int = params.seed
-	# Per-biome variant-selection noise. Keyed by TerrainCell.Biome int. Bands
+	# Per-biome variant-selection noise is keyed by TerrainCell.Biome int; bands
 	# with noise_strength == 0 are omitted so the picker takes the legacy
-	# uniform-hash path with zero overhead. Last band wins on duplicate biome
-	# (designer can have multiple GRASS bands; the topmost-listed one's noise
-	# settings apply).
+	# uniform-hash path. `painted_pd_by_biome` records painted-variant pd per
+	# biome ({pos → pd}) so each biome clumps independently; iteration is y
+	# outer, x inner — deterministic, so paint output stays stable per seed.
+	# `warned_altitudes` rate-limits the missing-layer warning to once per
+	# altitude per pass.
+	var thresholds: Array = params.resolve_biome_thresholds()
 	var biome_noise: Dictionary[int, Dictionary] = _build_biome_noise(params)
-	# Per-biome record of painted-variant pd. Keyed by TerrainCell.Biome int →
-	# {pos → pd}. Each biome clumps independently — a rock cell's pd doesn't
-	# pull a grass neighbor, since pd is a per-source affinity (different
-	# atlases have unrelated affinity scales). Cliff-back tiers still pass an
-	# empty per-tier scratch dict; vertical stacks don't bias horizontal
-	# clumping in any biome. Iteration is y outer, x inner — deterministic, so
-	# paint output stays stable per seed.
-	var painted_pd_by_biome: Dictionary[int, Dictionary] = {}
-
-	# Tracks which altitudes we've already warned about during this paint pass
-	# to keep `_paint_cell` from spamming stderr once per cell when a generation
-	# run produces cells outside the layer ceiling. ProceduralWorld already
-	# validates `top_altitude` up front, so this is a defense-in-depth limiter.
-	var warned_altitudes: Dictionary = {}
 
 	# Clear all target layers first so re-runs don't leave stale tiles.
 	for alt_key in layers_by_altitude:
@@ -147,26 +170,90 @@ static func paint(
 		if l != null:
 			l.clear()
 
-	for y in grid.height:
-		for x in grid.width:
-			var c: TerrainCell = grid.at(x, y)
-			if c.kind == TerrainCell.Kind.EMPTY:
-				continue
-			_paint_cell(
-				grid, layers_by_altitude, indices, variants_by_source,
-				thresholds, seed, biome_noise, painted_pd_by_biome,
-				warned_altitudes, x, y, c,
-			)
+	return {
+		"grid": grid,
+		"layers": layers_by_altitude,
+		"tile_set": tile_set,
+		"params": params,
+		"indices": indices,
+		"variants_by_source": variants_by_source,
+		"thresholds": thresholds,
+		"seed": params.seed,
+		"biome_noise": biome_noise,
+		"painted_pd_by_biome": {},
+		"warned_altitudes": {},
+		"phase": _PHASE_GROUND,
+		"y": 0,
+		"skirt_enabled": false,
+	}
 
-	# After the playable grid is fully painted, drop the south-edge cliff
-	# skirt. The skirt lives at synthetic coordinates beyond the grid (y >=
-	# grid.height for the SW edge, x >= grid.width for the SE edge) and
-	# paints into whichever altitudes the caller registered with
-	# `layers_by_altitude`. Pathfinder-bound layers MUST NOT be in that dict
-	# (or the cliff cubes would pollute the walkability grid). The default
-	# wiring in procedural_base.tscn provides dedicated CliffN<N> layers at
-	# negative altitudes only.
-	_paint_south_cliff_skirt(grid, layers_by_altitude, tile_set, params)
+
+# Advances a paint job by up to `max_rows` rows of the current phase, crossing
+# into the skirt phase (and DONE) as rows are exhausted. Returns true once the
+# whole job is finished. Driving this with a small `max_rows` and an
+# `await get_tree().process_frame` between calls spreads painting across frames.
+static func paint_step(ctx: Dictionary, max_rows: int) -> bool:
+	if ctx.is_empty():
+		return true
+	var grid: TerrainGrid = ctx["grid"]
+	var painted: int = 0
+	while painted < max_rows:
+		var phase: int = ctx["phase"]
+		if phase == _PHASE_GROUND:
+			var yg: int = ctx["y"]
+			if yg >= grid.height:
+				# Ground rows done — prepare the skirt phase and continue.
+				ctx["phase"] = _PHASE_SKIRT
+				ctx["y"] = 0
+				_enter_skirt_phase(ctx)
+				continue
+			_paint_ground_row(ctx, yg)
+			ctx["y"] = yg + 1
+			painted += 1
+		elif phase == _PHASE_SKIRT:
+			if not ctx["skirt_enabled"]:
+				ctx["phase"] = _PHASE_DONE
+				continue
+			var ys: int = ctx["y"]
+			if ys >= grid.height:
+				ctx["phase"] = _PHASE_DONE
+				continue
+			_paint_skirt_row(ctx, ys)
+			ctx["y"] = ys + 1
+			painted += 1
+		else:
+			return true
+	return ctx["phase"] == _PHASE_DONE
+
+
+# Coarse 0..1 completion fraction for progress UI. Treats the job as two
+# equal-length row passes (ground + skirt); slightly nonlinear when the skirt
+# is disabled, which is fine for a loading bar.
+static func paint_progress(ctx: Dictionary) -> float:
+	if ctx.is_empty():
+		return 1.0
+	var h: int = ctx["grid"].height
+	var total: int = maxi(h * 2, 1)
+	var done: int = 0
+	match int(ctx["phase"]):
+		_PHASE_GROUND: done = ctx["y"]
+		_PHASE_SKIRT: done = h + int(ctx["y"])
+		_PHASE_DONE: done = total
+	return clampf(float(done) / float(total), 0.0, 1.0)
+
+
+# Paints one playable-grid row (all x at the given y). EMPTY cells are skipped.
+static func _paint_ground_row(ctx: Dictionary, y: int) -> void:
+	var grid: TerrainGrid = ctx["grid"]
+	for x in grid.width:
+		var c: TerrainCell = grid.at(x, y)
+		if c.kind == TerrainCell.Kind.EMPTY:
+			continue
+		_paint_cell(
+			grid, ctx["layers"], ctx["indices"], ctx["variants_by_source"],
+			ctx["thresholds"], ctx["seed"], ctx["biome_noise"],
+			ctx["painted_pd_by_biome"], ctx["warned_altitudes"], x, y, c,
+		)
 
 
 # ----------------------------------------------------------------------------
@@ -345,13 +432,16 @@ static func _paint_ground(
 # (cliff layers absent from Pathfinder/LayerConfigurator wirings), not via
 # per-tile walkable=false. The rock FULL_CUBE atlas entry stays walkable
 # everywhere it's used in the playable region.
-static func _paint_south_cliff_skirt(
-	grid: TerrainGrid,
-	layers_by_altitude: Dictionary,
-	tile_set: TileSet,
-	params: TerrainGenerationParams,
-) -> void:
+# Precomputes the skirt-pass state into `ctx` (run once when paint_step crosses
+# from the GROUND phase into SKIRT). Mirrors the head of the old monolithic
+# skirt pass: resolves the non-walkable rock block tiles, builds the decorrelated
+# jitter noise, and computes cliff_floor / row count. Sets ctx["skirt_enabled"]
+# false (so the SKIRT phase is a no-op) when the skirt is disabled by params or
+# no rock block tile is available.
+static func _enter_skirt_phase(ctx: Dictionary) -> void:
+	var params: TerrainGenerationParams = ctx["params"]
 	if params.cliff_depth_steps <= 0 or params.cliff_skirt_rows <= 0:
+		ctx["skirt_enabled"] = false
 		return
 	# Resolve every (atlas_coord, alternative) on the rock source whose
 	# walkable=false AND tile_kind=FULL_CUBE. Per-cube selection then picks
@@ -359,12 +449,13 @@ static func _paint_south_cliff_skirt(
 	# adding a 2nd/3rd non-walkable variant in the atlas automatically gives
 	# the cliff visual variety with no code change. Today there's typically
 	# one entry, in which case selection collapses to that single tile.
-	var blocks: Array = _resolve_rock_block_tiles(tile_set)
+	var blocks: Array = _resolve_rock_block_tiles(ctx["tile_set"])
 	if blocks.is_empty():
 		push_warning(
 			"TerrainPainter: no rock FULL_CUBE with walkable=false found in tile_set — "
 			+ "skipping south cliff skirt. Mark a rock-source FULL_CUBE tile non-walkable."
 		)
+		ctx["skirt_enabled"] = false
 		return
 
 	var noise := FastNoiseLite.new()
@@ -374,30 +465,41 @@ static func _paint_south_cliff_skirt(
 	noise.frequency = params.cliff_noise_frequency
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 
-	var cliff_floor: int = -2 * params.cliff_depth_steps
-	var rows: int = params.cliff_skirt_rows
+	ctx["skirt_blocks"] = blocks
+	ctx["skirt_noise"] = noise
+	ctx["cliff_floor"] = -2 * params.cliff_depth_steps
+	ctx["skirt_rows"] = params.cliff_skirt_rows
+	ctx["skirt_enabled"] = true
 
-	for y in grid.height:
-		for x in grid.width:
-			var c: TerrainCell = grid.at(x, y)
-			if c.kind == TerrainCell.Kind.EMPTY:
+
+# Paints one row (all x at `y`) of the south-cliff skirt. For every non-EMPTY
+# cell whose SW or SE face neighbor is carved away, stacks the lip-face rock
+# column and the skirt ray in that direction. A cell can have both faces carved
+# (south corner of the disc) — each is treated independently; the lip-face fill
+# is idempotent rock cubes, so double-writing is harmless.
+static func _paint_skirt_row(ctx: Dictionary, y: int) -> void:
+	var grid: TerrainGrid = ctx["grid"]
+	var layers_by_altitude: Dictionary = ctx["layers"]
+	var blocks: Array = ctx["skirt_blocks"]
+	var noise: FastNoiseLite = ctx["skirt_noise"]
+	var params: TerrainGenerationParams = ctx["params"]
+	var cliff_floor: int = ctx["cliff_floor"]
+	var rows: int = ctx["skirt_rows"]
+	for x in grid.width:
+		var c: TerrainCell = grid.at(x, y)
+		if c.kind == TerrainCell.Kind.EMPTY:
+			continue
+		for d in [DiamondCompass.DIR_SW, DiamondCompass.DIR_SE]:
+			if not _is_carved_neighbor(grid, x, y, d):
 				continue
-			# A cell can have its SW carved, its SE carved, or both (south
-			# corner of the disc). Treat each independently — both directions
-			# get their own skirt ray + lip face fill at the same lip coord
-			# (the lip-face fill is idempotent rock cubes; double-writing is
-			# harmless).
-			for d in [DiamondCompass.DIR_SW, DiamondCompass.DIR_SE]:
-				if not _is_carved_neighbor(grid, x, y, d):
-					continue
-				_stack_rock_at_coord(
-					layers_by_altitude, blocks, params.seed,
-					Vector2i(x, y), c.altitude - 2, cliff_floor,
-				)
-				_paint_skirt_ray(
-					layers_by_altitude, blocks, params.seed, noise, params,
-					Vector2i(x, y), d, c.altitude, cliff_floor, rows,
-				)
+			_stack_rock_at_coord(
+				layers_by_altitude, blocks, params.seed,
+				Vector2i(x, y), c.altitude - 2, cliff_floor,
+			)
+			_paint_skirt_ray(
+				layers_by_altitude, blocks, params.seed, noise, params,
+				Vector2i(x, y), d, c.altitude, cliff_floor, rows,
+			)
 
 
 # Scans the rock source for every (atlas_coord, alternative) pair whose

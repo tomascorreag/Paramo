@@ -36,11 +36,15 @@ const _C_BORDER_PANEL: Color = Color(0.4235, 0.5059, 0.6314, 0.85) # #6C81A1 (27
 const _C_BORDER_INNER: Color = Color(0.2510, 0.3216, 0.4510, 0.85) # #405273 (28)
 const _C_BORDER_ITEM: Color  = Color(0.4235, 0.5059, 0.6314, 0.85) # #6C81A1 (27)
 
+## Wheel sprite is 64×64; rotate around its center.
+const _WHEEL_PIVOT: Vector2 = Vector2(32, 32)
+
 @onready var _slot: Button = %EquippedSlot
 @onready var _slot_icon: TextureRect = %EquippedIcon
 @onready var _menu_root: Control = %ItemMenu
 @onready var _minimap: Panel = %Minimap
 @onready var _minimap_inner: Panel = %MinimapInner
+@onready var _season_wheel: TextureRect = %SeasonWheel
 
 var _items: Array[Dictionary] = []
 var _item_buttons: Array[Button] = []
@@ -59,6 +63,26 @@ func _ready() -> void:
 	_menu_root.modulate.a = 0.0
 	if not _items.is_empty():
 		set_equipped(_items[0]["id"])
+
+	_season_wheel.pivot_offset = _WHEEL_PIVOT
+
+
+# The season wheel turns continuously with the season clock: a half-turn (180°)
+# per season, so the current season's weather sits at the top exactly when that
+# season begins (dry → sun up at 0°, wet → rain up at 180°) and it keeps turning
+# one direction across the run. (day_count + time_of_day) is a continuous,
+# monotonic season clock: it advances smoothly, wraps cleanly (time_of_day 1→0
+# the same frame day_count +1), and freezes when the clock is paused (planning /
+# run over), so the wheel holds between seasons instead of only moving at
+# boundaries. Tied to season length, so it's slow at normal speed (a season is
+# many minutes) and clearest under fast-forward.
+func _process(_delta: float) -> void:
+	if SeasonManager.phase == SeasonManager.Phase.IDLE:
+		_season_wheel.rotation = 0.0
+		return
+	var dps: float = maxf(1.0, float(SeasonManager.days_per_season))
+	var seasons_elapsed: float = (TimeManager.day_count + TimeManager.time_of_day) / dps
+	_season_wheel.rotation = deg_to_rad(seasons_elapsed * 180.0)
 
 
 ## Replace the placeholder roster. Each entry must contain `id: StringName`

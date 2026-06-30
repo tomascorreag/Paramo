@@ -26,6 +26,7 @@ const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/a
 const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/action_build_ladder.gd")
 const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
+const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
 
 # Visuals for submenu group nodes — rendered as parent items on the wheel
 # whose submenu children are the individual TileActions in that group.
@@ -47,6 +48,7 @@ var _menu: Control  # RadialMenu instance
 var _menu_layer: CanvasLayer
 var _radial_menu_script: GDScript
 var _registry: ActionRegistry
+var _interaction_accept: Callable
 
 var _ux_overlay: Node2D  # UXOverlay
 var _frailejon_scene: PackedScene
@@ -88,6 +90,13 @@ func _ready() -> void:
 	_registry.register(_ACTION_REMOVE_BRIDGE.new())
 	_registry.register(_ACTION_REMOVE_LADDER.new())
 	_registry.register(_ACTION_REMOVE_ROCK.new())
+	_registry.register(_ACTION_EXTINGUISH_FIRE.new())
+
+	# General interaction-target rule, shared by the right-click handler and
+	# UXOverlay hover: resolve the topmost cell that is walkable OR has an
+	# available action. No tile-type special-casing.
+	_interaction_accept = func(c: Vector2i) -> bool:
+		return pathfinder.is_terrain_walkable(c) or has_any_action(c)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -103,16 +112,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	var global_pos := _event_global_position(mb)
-	var cell := pathfinder.resolve_click(global_pos)
-
-	if not is_interactable(cell):
+	# Resolve the cell under the cursor with the general interaction rule: the
+	# topmost cell that is walkable OR has an available action — so water /
+	# burning tiles resolve with no tile-type special-casing here.
+	var cell := pathfinder.resolve_click(global_pos, _interaction_accept)
+	if cell == Pathfinder.NO_CELL:
 		return
 
 	var ctx := _build_context(cell)
 	var actions := _registry.available_for(ctx)
 	if actions.is_empty():
-		# Right-click landed on a reachable tile but nothing applies — signal
-		# the no-op so the player doesn't wonder if the click registered.
+		# Resolved a tile (e.g. one you can move to) but no action applies —
+		# flash so the player knows the click registered.
 		if _ux_overlay and _ux_overlay.has_method(&"flash_denied"):
 			_ux_overlay.flash_denied(cell)
 		get_viewport().set_input_as_handled()
@@ -143,56 +154,34 @@ func planted_cells() -> Dictionary:
 	return grid.occupants_of_kind(&"frailejon")
 
 
-## True iff `cell` is a right-clickable tile from the player's current position:
-## resolved, Chebyshev-adjacent, and either walkable or made unwalkable solely
-## by a removable blocking occupant (a Rock today). The latter exception keeps
-## rock cells reachable for the pickaxe action — without it, is_walkable would
-## reject them up-front and the menu would never open.
-##
-## Planted/bridge/ladder cells stay interactable via the walkable branch — the
-## registry picks what (if anything) applies via per-action is_available.
-func is_interactable(cell: Vector2i) -> bool:
-	if cell == Pathfinder.NO_CELL:
-		return false
-	if pathfinder == null or player == null:
-		return false
-	if not pathfinder.is_walkable(cell) and not _has_removable_blocker(cell):
-		return false
-	var diff := cell - player.current_cell
-	return maxi(abs(diff.x), abs(diff.y)) == 1
+## Callable(cell) -> bool used to resolve right-click / hover targets. A cell is
+## a valid interaction target if it's walkable terrain (movable, plantable, …)
+## OR at least one action is available on it (water to fill, fire to put out, …).
+## The single general rule — no tile-type branches. Exposed so UXOverlay resolves
+## hover cells by the exact same rule the right-click handler uses.
+func interaction_accept() -> Callable:
+	return _interaction_accept
 
 
-# True iff the cell carries an occupant that flips it unwalkable (rocks today)
-# AND the underlying tile is itself walkable terrain. This is the gate that
-# lets right-click reach a rock cell so ActionRemoveRock can run.
-func _has_removable_blocker(cell: Vector2i) -> bool:
-	if pathfinder == null:
+## True iff at least one registered action is available on `cell`. This is the
+## gate: any available action makes the tile interactable (opens the menu / shows
+## a reticle). Availability is each action's own call over the four inputs
+## (proximity, occupants, tile type, inventory).
+func has_any_action(cell: Vector2i) -> bool:
+	if _registry == null:
 		return false
-	var grid := pathfinder.grid()
-	if grid == null:
-		return false
-	var t := pathfinder.get_tile(cell)
-	if t == null or not t.walkable:
-		return false
-	var occ := grid.occupant_at(cell)
-	if occ == null:
-		return false
-	if not occ.has_method(&"blocks_movement"):
-		return false
-	return occ.blocks_movement()
+	return not _registry.available_for(_build_context(cell)).is_empty()
 
 
 ## True iff right-clicking `cell` would offer at least one non-debug action
-## (plant, build, remove, …). Inspect is excluded — it's a dev-only readout
-## and shouldn't promote a tile from "movable" to "actionable" in the UX.
-## Used by UXOverlay to choose between the solid and dim circle rows.
+## (plant, build, remove, extinguish, …). Inspect is excluded — it's a
+## dev-only readout and shouldn't promote a tile from "movable" to "actionable"
+## in the UX. Used by UXOverlay to choose between the solid and dim circle rows.
+## Proximity is enforced by each action, so far cells return false naturally.
 func has_meaningful_action(cell: Vector2i) -> bool:
-	if not is_interactable(cell):
-		return false
 	if _registry == null:
 		return false
-	var ctx := _build_context(cell)
-	for action in _registry.available_for(ctx):
+	for action in _registry.available_for(_build_context(cell)):
 		if action.id != &"inspect":
 			return true
 	return false
@@ -207,6 +196,7 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.cell = cell
 	ctx.tile = pathfinder.get_tile(cell)
 	ctx.player_cell = player.current_cell
+	ctx.player = player
 	ctx.tile_interaction = self
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder

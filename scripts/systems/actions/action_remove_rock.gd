@@ -2,9 +2,9 @@ class_name ActionRemoveRock
 extends TileAction
 
 # Pickaxe: remove a Rock occupant from the clicked cell. The cell is
-# unwalkable while a rock sits on it (Rock.blocks_movement = true), so this
-# is the ONLY action that should appear on a rock cell — TileInteractionController
-# whitelists rock cells in is_interactable() so the menu opens at all.
+# unwalkable while a rock sits on it (Rock.blocks_movement = true), but the
+# underlying terrain is walkable, so resolution lands on it and this action —
+# gated only on the occupant being a Rock — is the one that applies there.
 
 
 func _init() -> void:
@@ -13,7 +13,7 @@ func _init() -> void:
 	group = &""  # top-level
 
 
-func is_available(ctx: ActionContext) -> bool:
+func _applies(ctx: ActionContext) -> bool:
 	if ctx.tile_interaction == null or ctx.pathfinder == null:
 		return false
 	var grid := ctx.pathfinder.grid()

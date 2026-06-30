@@ -196,7 +196,14 @@ func _update_cursor_cell() -> void:
 func _resolve_hovered_cell() -> Vector2i:
 	if pathfinder == null:
 		return Pathfinder.NO_CELL
-	return pathfinder.resolve_click(_mouse_global_position())
+	# In HOVER, resolve by the interaction rule (walkable OR has an available
+	# action) so the strong reticle can land on actionable non-walkable tiles
+	# (water). In PLACEMENT, keep the default walkable resolution the endpoint
+	# hints rely on.
+	var accept := Callable()
+	if _state == State.HOVER and tile_interaction_controller != null:
+		accept = tile_interaction_controller.interaction_accept()
+	return pathfinder.resolve_click(_mouse_global_position(), accept)
 
 
 func _refresh_base_x(_old_cell: Vector2i) -> void:
@@ -229,20 +236,23 @@ func _refresh_circle() -> void:
 	if _state != State.HOVER or hovered_cell == Pathfinder.NO_CELL:
 		_circle.visible = false
 		return
-	# Three tiers:
-	#   unreachable                   → no circle (BaseX only)
-	#   reachable, no real action     → dim circle (movable only)
-	#   reachable + meaningful action → solid circle
+	# Three tiers, actionability first so it wins regardless of reachability:
+	#   meaningful action available → solid circle (even if unreachable)
+	#   else reachable              → dim circle (movable only)
+	#   else                        → no circle (BaseX only)
 	# "Meaningful" = anything beyond inspect (debug). Decided by the registry
 	# via TileInteractionController.has_meaningful_action().
-	if not _is_hovered_cell_reachable():
-		_circle.visible = false
-		return
 	var actionable := (
 		tile_interaction_controller != null
 		and tile_interaction_controller.has_meaningful_action(hovered_cell)
 	)
-	_circle.texture = _CIRCLE_SOLID if actionable else _CIRCLE_DIM
+	if actionable:
+		_circle.texture = _CIRCLE_SOLID
+	elif _is_hovered_cell_reachable():
+		_circle.texture = _CIRCLE_DIM
+	else:
+		_circle.visible = false
+		return
 	_circle.global_position = cell_visual_center(hovered_cell)
 	_circle.visible = true
 

@@ -21,6 +21,9 @@ DisplayManager="*res://scripts/systems/display_manager.gd"
 TimeManager="*res://scripts/systems/time_manager.gd"
 Debug="*res://scripts/systems/debug.gd"
 FireManager="*res://scripts/systems/fire_manager.gd"
+ResourceLedger="*res://scripts/systems/resource_ledger.gd"
+SeasonManager="*res://scripts/systems/season_manager.gd"
+MusicDirector="*res://scripts/systems/music_director.gd"
 
 [display]
 
@@ -30,6 +33,10 @@ window/size/window_width_override=1440
 window/size/window_height_override=810
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+
+[gui]
+
+theme/custom="res://resources/ui/paramo_theme.tres"
 
 [input]
 

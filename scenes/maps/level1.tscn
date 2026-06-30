@@ -76,11 +76,11 @@ tile_map_data = PackedByteArray("AAAAAAAABAAAAAQAAAAAAAEABAAAAAIAAAAAAAIABAAAAAQ
 [node name="TileDebugOverlay" parent="." index="9" unique_id=1330998519]
 editor_show_tile_altitudes = false
 
-[node name="ProceduralWorld" parent="." index="18"]
-generation_params = ExtResource("2_b7bw0")
-seed_override = 26
-randomize_seed_on_ready = true
-
 [node name="FireShaderPreview" type="Node2D" parent="." index="19" unique_id=1622658602]
 position = Vector2(-128, 400)
 script = ExtResource("3_fpv")
+
+[node name="ProceduralWorld" parent="." index="20"]
+generation_params = ExtResource("2_b7bw0")
+seed_override = 26
+randomize_seed_on_ready = true

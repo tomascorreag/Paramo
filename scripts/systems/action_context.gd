@@ -22,6 +22,9 @@ extends RefCounted
 var cell: Vector2i
 var tile: CellData
 var player_cell: Vector2i
+# The Player node — actions read player state (cell, held_item, …) to gate
+# availability and act on execute.
+var player: Player
 
 # --- Injected services (temporary — see header note) -----------------------
 

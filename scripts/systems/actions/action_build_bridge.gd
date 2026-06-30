@@ -11,7 +11,7 @@ func _init() -> void:
 	group = &"build"
 
 
-func is_available(ctx: ActionContext) -> bool:
+func _applies(ctx: ActionContext) -> bool:
 	if ctx.tile == null or not ctx.tile.walkable:
 		return false
 	if ctx.traversal == null:

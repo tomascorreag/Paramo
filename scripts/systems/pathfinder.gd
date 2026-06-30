@@ -290,6 +290,15 @@ func is_walkable(cell: Vector2i) -> bool:
 	return _grid.is_walkable(cell)
 
 
+# Terrain-only walkability — ignores occupant blocking (rocks). Passthrough to
+# TileGrid.is_terrain_walkable for callers that resolve clicks / build the
+# interaction accept predicate without reaching into the grid directly.
+func is_terrain_walkable(cell: Vector2i) -> bool:
+	if _grid == null:
+		return false
+	return _grid.is_terrain_walkable(cell)
+
+
 # Flood-fill reachable set from `from` using the same traversal model as
 # find_path (4-neighbor + can_transition + traversal edges, ramp/penalty
 # rules ignored — reachability, not cost). O(N) once; callers should cache
@@ -494,11 +503,19 @@ func grid() -> TileGrid:
 # Iterates layer altitudes descending (highest first) so that a plateau
 # visually covering a ground cell beneath it wins the click.
 #
-# Returns NO_CELL if no walkable terrain is under the cursor. Cells with
-# blocking occupants (rocks) DO resolve — UI layers gate their own actions
-# (TileInteractionController whitelists rock cells; find_path rejects them
-# for movement). Only the underlying terrain's walkable flag is consulted.
-func resolve_click(global_pos: Vector2) -> Vector2i:
+# Returns NO_CELL if no acceptable cell is under the cursor.
+#
+# accept: optional Callable(cell: Vector2i) -> bool deciding whether a candidate
+# cell (the one under the cursor at the altitude being iterated) is a valid
+# resolution target. Cells the predicate rejects are skipped, so iteration
+# continues to lower altitudes — the topmost ACCEPTED cell wins. When omitted,
+# the default is terrain-walkable: movement, traversal, and hover-move resolve
+# the topmost walkable cell (a rock-occupied cell stays terrain-walkable, so it
+# resolves and the remove-rock action can run; find_path rejects it for movement
+# separately). The interaction layer passes a "walkable OR has an available
+# action" predicate so non-walkable but actionable tiles (water) also resolve —
+# no tile-type special-casing lives here.
+func resolve_click(global_pos: Vector2, accept: Callable = Callable()) -> Vector2i:
 	if _grid == null:
 		return NO_CELL
 
@@ -520,10 +537,8 @@ func resolve_click(global_pos: Vector2) -> Vector2i:
 			var net_shift := float(alt) * HALF_STEP_PX + layer.position.y
 			var shifted := local + Vector2(0.0, net_shift) - VISUAL_SURFACE_OFFSET
 			var cell := layer.local_to_map(shifted)
-			# Terrain-walkable, not is_walkable: a rock-occupied cell must
-			# still resolve so right-click can offer remove-rock. Movement
-			# rejection happens later in find_path.
-			if not _grid.is_terrain_walkable(cell):
+			var ok: bool = accept.call(cell) if accept.is_valid() else _grid.is_terrain_walkable(cell)
+			if not ok:
 				continue
 			if _grid.layer_of(cell) != layer:
 				continue

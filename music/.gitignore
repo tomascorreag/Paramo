@@ -1,0 +1,11 @@
+# Python venv (recreate via README; large, machine-specific)
+.venv/
+# Node deps for Strudel verification (recreate via npm install)
+node_modules/
+package-lock.json
+# Installer binaries / OMR intermediates / logs
+*.msi
+*.log
+*.omr
+sources/
+# Keep: scripts, README, package.json, and final *.strudel.js outputs

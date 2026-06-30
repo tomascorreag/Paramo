@@ -109,6 +109,23 @@ func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
 
 
+# --- Public query / control ------------------------------------------------
+
+## True iff `cell` is currently on fire.
+func is_burning(cell: Vector2i) -> bool:
+	return _burning.has(cell)
+
+
+## Put out the fire at `cell` (e.g. a player extinguish action). Rolls the cell
+## back to its pre-ignition grass — same path rain uses, so no tile_burned
+## fires. Returns true if a fire was actually extinguished.
+func extinguish(cell: Vector2i) -> bool:
+	if not _burning.has(cell):
+		return false
+	_extinguish(cell)
+	return true
+
+
 func _on_node_added(n: Node) -> void:
 	if _pathfinder != null and is_instance_valid(_pathfinder):
 		return
@@ -225,11 +242,18 @@ func _roll_spread(from_cell: Vector2i, delta: float, rain_mult: float) -> void:
 	var p_per_neighbour: float = SPREAD_RATE_PER_NEIGHBOUR_PER_SECOND * delta * rain_mult
 	if p_per_neighbour <= 0.0:
 		return
+	# Strict elevation rule: a burning slope can't propagate, and spread only
+	# crosses to coplanar flats at the same altitude (never up/down elevation).
+	var from_cd = _grid.get_tile(from_cell)
+	if from_cd == null or not _is_flat(from_cd):
+		return
 	for d in _NEIGHBOR_DIRS:
 		var nb: Vector2i = from_cell + d
 		if _burning.has(nb):
 			continue
 		if not _is_grass(nb):
+			continue
+		if not _same_flat_level(from_cd, nb):
 			continue
 		if randf() < p_per_neighbour:
 			_ignite(nb)
@@ -403,6 +427,21 @@ func _is_grass(cell: Vector2i) -> bool:
 	if cd == null or cd.layer == null:
 		return false
 	return cd.layer.get_cell_source_id(cell) == SOURCE_GRASS
+
+
+func _is_flat(cd) -> bool:
+	# A flat tile sits at one altitude with no ramp. Slopes (rise_dir != ZERO)
+	# and any cell whose low/high differ are "elevation" and block spread.
+	return cd != null and cd.rise_dir == Vector2i.ZERO \
+			and cd.altitude_low == cd.altitude_high
+
+
+func _same_flat_level(from_cd, nb: Vector2i) -> bool:
+	# Spread only between coplanar flats at the identical altitude.
+	var nb_cd = _grid.get_tile(nb)
+	if nb_cd == null:
+		return false
+	return _is_flat(nb_cd) and nb_cd.altitude_low == from_cd.altitude_low
 
 
 func _is_water_layer(layer: TileMapLayer, cell: Vector2i) -> bool:

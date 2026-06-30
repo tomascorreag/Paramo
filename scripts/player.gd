@@ -55,6 +55,16 @@ const DIR_TO_FACING: Dictionary = {
 ## Time of day [0..1] when lantern turns off (e.g., 0.28 = dawn).
 @export var lantern_deactivate_time: float = 0.28
 
+# --- Held item -------------------------------------------------------------
+#
+# The player holds at most one object, DERIVED from time of day rather than
+# stored: the lantern at night, nothing during the day. There's no manual
+# "equip" UI. _update_lantern reads this each frame to drive the light.
+
+## Identifiers returned by held_item(). Empty = nothing in hand.
+const ITEM_NONE: StringName = &""
+const ITEM_LANTERN: StringName = &"lantern"
+
 @onready var _sprite: Sprite2D = $Sprite2D
 @onready var _shadow: Sprite2D = $Shadow
 @onready var _camera: Camera2D = $Camera2D
@@ -93,6 +103,18 @@ var _pathfinder: Pathfinder
 var _time_manager: Node # TimeManager autoload
 
 var current_cell: Vector2i = Vector2i.ZERO
+
+# True once the player has been successfully placed at its starting cell.
+# Guards _snap_to_starting_cell against running twice (e.g. a stray re-call),
+# which would re-trigger the opening camera pan. A FAILED attempt (non-walkable
+# grid) leaves this false so a later attempt can still succeed.
+var _started: bool = false
+
+# True when a world generator (ProceduralWorld) owns initial placement, set via
+# defer_to_external_placement() before generation. Suppresses the player's own
+# deferred self-placement so the generator's spawn pick is authoritative on
+# procedural maps. See _maybe_self_place / snap_to_start.
+var _external_placement: bool = false
 
 # Current facing (0..3). The sprite frame is _facing * WALK_FRAMES_PER_DIR +
 # walk_frame. Shadow uses a 4-frame base sheet, so its frame == _facing.
@@ -178,7 +200,7 @@ func _ready() -> void:
 	# Pathfinder joins its group in _enter_tree but builds the AStar graph in
 	# _ready. Defer the starting-cell snap by one frame so the graph is ready
 	# regardless of sibling _ready ordering.
-	call_deferred("_snap_to_starting_cell")
+	call_deferred("_maybe_self_place")
 
 
 # ----------------------------------------------------------------------------
@@ -495,18 +517,28 @@ func _tick_shadow_cutoff(delta: float) -> void:
 	mat.set_shader_parameter(&"cutoff_x", _shadow_cutoff_current)
 
 
-func _update_lantern() -> void:
-	if _time_manager == null:
-		return
-	var t: float = _time_manager.time_of_day
-	# activate > deactivate means the active window wraps past midnight
-	var should_be_on: bool
-	if lantern_activate_time > lantern_deactivate_time:
-		should_be_on = t >= lantern_activate_time or t < lantern_deactivate_time
-	else:
-		should_be_on = t >= lantern_activate_time and t < lantern_deactivate_time
+# Pure night-window test. activate > deactivate means the active window wraps
+# past midnight (e.g. dusk 0.75 → dawn 0.28). Static so it can be unit-tested
+# without a Player instance (see tests/test_lantern_logic.gd).
+static func is_night(t: float, activate: float, deactivate: float) -> bool:
+	if activate > deactivate:
+		return t >= activate or t < deactivate
+	return t >= activate and t < deactivate
 
-	if should_be_on:
+
+## The object currently in the player's hand (derived; see the held-item note).
+## The lantern at night, nothing by day.
+func held_item() -> StringName:
+	var night := false
+	if _time_manager != null:
+		night = is_night(_time_manager.time_of_day, lantern_activate_time, lantern_deactivate_time)
+	return ITEM_LANTERN if night else ITEM_NONE
+
+
+# The lantern is lit iff it's the currently held item — i.e. it's night.
+# Driven every physics frame.
+func _update_lantern() -> void:
+	if held_item() == ITEM_LANTERN:
 		_light.activate()
 	else:
 		_light.deactivate()
@@ -524,12 +556,54 @@ func _set_facing(dir: Vector2i) -> void:
 # Startup positioning
 # ----------------------------------------------------------------------------
 
+# Called by ProceduralWorld AFTER it has positioned the player on its chosen
+# spawn cell. The generator is the sole placement authority on procedural maps
+# (it picks a grass-plateau center, not the authored node position), so this is
+# what establishes current_cell, the altitude lift, the sort-Y, and the opening
+# camera pan against the cell the generator actually moved the player to.
+#
+# Without this — or if the player's own self-placement (see _maybe_self_place)
+# were allowed to win — global_position and current_cell would describe two
+# DIFFERENT cells: the visual sits at the spawn while the logic thinks it's at
+# the authored cell, giving a wrong altitude lift (renders behind tiles) and
+# pathing from the wrong cell (can't move).
+func snap_to_start() -> void:
+	_snap_to_starting_cell()
+
+
+# Deferred from _ready as the FALLBACK placement for non-procedural maps (test
+# scenes, handcrafted levels) where the player's authored position is its spawn
+# and no generator will call snap_to_start. On procedural maps ProceduralWorld
+# calls defer_to_external_placement() before generating, which suppresses this
+# so the generator's spawn pick is the only placement. The flag is read here at
+# DEFERRED (idle) time, so it doesn't matter whether Player._ready or
+# ProceduralWorld._ready ran first — the generator's claim always lands before
+# this executes.
+func _maybe_self_place() -> void:
+	if _external_placement:
+		return
+	_snap_to_starting_cell()
+
+
+## Claim placement authority. ProceduralWorld calls this before generating so
+## the player's deferred self-placement stands down and waits for snap_to_start.
+func defer_to_external_placement() -> void:
+	_external_placement = true
+
+
 func _snap_to_starting_cell() -> void:
+	# Guard re-entrancy: once placed, ignore further calls so the camera pan
+	# isn't set up twice.
+	if _started:
+		return
 	if _pathfinder == null:
 		return
 
 	var start := _pathfinder.world_to_cell(global_position)
 	if not _pathfinder.is_walkable(start):
+		# Don't set _started — the grid may simply not be painted yet (async
+		# startup). Leaving it false lets the ProceduralWorld-driven retry place
+		# the player once the terrain exists.
 		push_warning(
 			"Player: starting position %s resolves to non-walkable cell %s. "
 			% [global_position, start]
@@ -537,6 +611,7 @@ func _snap_to_starting_cell() -> void:
 		)
 		return
 
+	_started = true
 	current_cell = start
 	_altitude = _pathfinder.altitude_center(start)
 	_apply_position(current_cell, _altitude)

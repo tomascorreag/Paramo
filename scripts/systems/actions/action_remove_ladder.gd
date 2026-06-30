@@ -12,7 +12,7 @@ func _init() -> void:
 	group = &""  # top-level
 
 
-func is_available(ctx: ActionContext) -> bool:
+func _applies(ctx: ActionContext) -> bool:
 	if ctx.traversal == null or ctx.tile_interaction == null:
 		return false
 	var t := ctx.traversal.find_traversal_at(ctx.cell)

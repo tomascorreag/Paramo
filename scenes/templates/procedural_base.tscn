@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" path="res://scenes/templates/gameplay_base.tscn" id="1_base"]
 [ext_resource type="TileSet" path="res://resources/tiles/base_tileset.tres" id="2_tileset"]
 [ext_resource type="Script" path="res://scripts/tools/procedural_world.gd" id="3_pw"]
+[ext_resource type="Script" path="res://scripts/systems/run_controller.gd" id="4_run"]
 
 [node name="ProceduralBase" instance=ExtResource("1_base")]
 
@@ -111,3 +112,9 @@ cliff_layers = [NodePath("../World/Ground_n1"), NodePath("../World/CliffN4"), No
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
 world = NodePath("../World")
+
+[node name="RunController" type="Node" parent="." node_paths=PackedStringArray("procedural_world", "day_night_controller", "debug_label")]
+script = ExtResource("4_run")
+procedural_world = NodePath("../ProceduralWorld")
+day_night_controller = NodePath("../DayNightController")
+debug_label = NodePath("../HUD/RunDebugLabel")

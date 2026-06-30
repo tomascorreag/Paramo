@@ -10,7 +10,7 @@ func _init() -> void:
 	group = &""  # top-level
 
 
-func is_available(ctx: ActionContext) -> bool:
+func _applies(ctx: ActionContext) -> bool:
 	if ctx.tile_interaction == null or ctx.pathfinder == null:
 		return false
 	var grid := ctx.pathfinder.grid()

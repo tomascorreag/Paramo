@@ -15,7 +15,7 @@ func _init() -> void:
 	group = &""
 
 
-func is_available(ctx: ActionContext) -> bool:
+func _applies(ctx: ActionContext) -> bool:
 	return ctx.tile != null and ctx.tile.walkable
 
 

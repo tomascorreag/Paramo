@@ -209,15 +209,32 @@ static func paint(
 	world: Node2D,
 	pathfinder: Pathfinder,
 ) -> void:
+	var ctx: Dictionary = begin_spawn(grid, world, pathfinder)
+	if ctx.is_empty():
+		return
+	while not spawn_step(ctx, 0x7FFFFFFF):
+		pass
+
+
+## Begins a chunked spawn job: validates inputs, rolls `assign_object_kinds`
+## (non-deterministic), clears prior procedural-group children, and returns a
+## context Dictionary that spawn_step consumes. Returns {} on invalid input.
+## Driving spawn_step with a small row budget across frames keeps instantiation
+## (100-500 nodes) from freezing the main thread on load.
+static func begin_spawn(
+	grid: TerrainGrid,
+	world: Node2D,
+	pathfinder: Pathfinder,
+) -> Dictionary:
 	if grid == null:
-		push_error("ObjectPainter.paint: grid is null.")
-		return
+		push_error("ObjectPainter.begin_spawn: grid is null.")
+		return {}
 	if world == null:
-		push_error("ObjectPainter.paint: world Node2D is null — wire it in the inspector.")
-		return
+		push_error("ObjectPainter.begin_spawn: world Node2D is null — wire it in the inspector.")
+		return {}
 	if pathfinder == null:
-		push_error("ObjectPainter.paint: pathfinder is null.")
-		return
+		push_error("ObjectPainter.begin_spawn: pathfinder is null.")
+		return {}
 
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
@@ -225,46 +242,89 @@ static func paint(
 	assign_object_kinds(grid, rng)
 	_clear_existing(world)
 
-	for y in grid.height:
-		for x in grid.width:
-			var c: TerrainCell = grid.at(x, y)
-			if c.object_kind == &"":
-				continue
-			var scene: PackedScene = _SCENE_BY_KIND.get(c.object_kind)
-			if scene == null:
-				push_warning(
-					"ObjectPainter: unknown object_kind '%s' at (%d, %d)."
-					% [c.object_kind, x, y]
-				)
-				continue
-			var inst: Node2D = scene.instantiate()
-			inst.cell = Vector2i(x, y)
-			# Override the .tscn-wired `data` with the kind-specific resource.
-			# Multiple kinds share `rock.tscn`, so the @export default
-			# (rock.tres) needs to be replaced with rock_snow.tres /
-			# rock_moss.tres / etc. before _ready runs (which happens at
-			# add_child below) so variant lookups read from the right .tres.
-			var data: WorldObjectData = _DATA_BY_KIND[c.object_kind]
-			if "data" in inst:
-				inst.data = data
-			# Variant pick — read variant count off the (now-overridden) data.
-			if "rock_variant" in inst and data.variants.size() > 0:
-				inst.rock_variant = rng.randi_range(0, data.variants.size() - 1)
-			# Plant kinds use `variants` as growth stages, not random skins.
-			# Procgen scatter (paramo background) should look established, so
-			# spread across stages instead of all sprouting from stage 0. The
-			# field's growth loop continues to advance from whichever stage we
-			# seed here. Set BEFORE add_child so _ready picks up the correct
-			# texture on its initial _apply_variant_texture call.
-			if "growth_stage" in inst and data.variants.size() > 0:
-				inst.growth_stage = rng.randi_range(0, data.variants.size() - 1)
-			# Tag for cleanup on next regenerate.
-			inst.add_to_group(_GROUP_PROCEDURAL)
-			# Add BEFORE setting global_position so _ready (which depends on
-			# pathfinder.altitude_center(cell)) runs with the world transform
-			# resolved.
-			world.add_child(inst)
-			inst.global_position = pathfinder.cell_to_world(inst.cell)
+	return {
+		"grid": grid,
+		"world": world,
+		"pathfinder": pathfinder,
+		"rng": rng,
+		"y": 0,
+	}
+
+
+## Spawns up to `max_rows` rows of flagged occupants. Returns true once every
+## row has been spawned.
+static func spawn_step(ctx: Dictionary, max_rows: int) -> bool:
+	if ctx.is_empty():
+		return true
+	var grid: TerrainGrid = ctx["grid"]
+	var spawned: int = 0
+	while spawned < max_rows:
+		var y: int = ctx["y"]
+		if y >= grid.height:
+			return true
+		_spawn_row(grid, ctx["world"], ctx["pathfinder"], ctx["rng"], y)
+		ctx["y"] = y + 1
+		spawned += 1
+	return int(ctx["y"]) >= grid.height
+
+
+## Coarse 0..1 completion fraction for progress UI.
+static func spawn_progress(ctx: Dictionary) -> float:
+	if ctx.is_empty():
+		return 1.0
+	var h: int = ctx["grid"].height
+	return clampf(float(ctx["y"]) / float(maxi(h, 1)), 0.0, 1.0)
+
+
+# Spawns every flagged occupant in row `y`. Instantiation + add_child + the
+# pathfinder.cell_to_world placement run on the main thread (scene-tree access),
+# so this is the unit a chunked caller advances per frame.
+static func _spawn_row(
+	grid: TerrainGrid,
+	world: Node2D,
+	pathfinder: Pathfinder,
+	rng: RandomNumberGenerator,
+	y: int,
+) -> void:
+	for x in grid.width:
+		var c: TerrainCell = grid.at(x, y)
+		if c.object_kind == &"":
+			continue
+		var scene: PackedScene = _SCENE_BY_KIND.get(c.object_kind)
+		if scene == null:
+			push_warning(
+				"ObjectPainter: unknown object_kind '%s' at (%d, %d)."
+				% [c.object_kind, x, y]
+			)
+			continue
+		var inst: Node2D = scene.instantiate()
+		inst.cell = Vector2i(x, y)
+		# Override the .tscn-wired `data` with the kind-specific resource.
+		# Multiple kinds share `rock.tscn`, so the @export default
+		# (rock.tres) needs to be replaced with rock_snow.tres /
+		# rock_moss.tres / etc. before _ready runs (which happens at
+		# add_child below) so variant lookups read from the right .tres.
+		var data: WorldObjectData = _DATA_BY_KIND[c.object_kind]
+		if "data" in inst:
+			inst.data = data
+		# Variant pick — read variant count off the (now-overridden) data.
+		if "rock_variant" in inst and data.variants.size() > 0:
+			inst.rock_variant = rng.randi_range(0, data.variants.size() - 1)
+		# Plant kinds use `variants` as growth stages, not random skins.
+		# Procgen scatter (paramo background) should look established, so
+		# spread across stages instead of all sprouting from stage 0. The
+		# field's growth loop continues to advance from whichever stage we
+		# seed here. Set BEFORE add_child so _ready picks up the correct
+		# texture on its initial _apply_variant_texture call.
+		if "growth_stage" in inst and data.variants.size() > 0:
+			inst.growth_stage = rng.randi_range(0, data.variants.size() - 1)
+		# Tag for cleanup on next regenerate.
+		inst.add_to_group(_GROUP_PROCEDURAL)
+		# Add BEFORE setting global_position so _ready (which depends on
+		# pathfinder.altitude_center(cell)) runs with the world transform
+		# resolved.
+		world.add_child(inst)
+		inst.global_position = pathfinder.cell_to_world(inst.cell)
 
 
 # Free any procedurally-spawned objects parented under `world`. Called after

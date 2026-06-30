@@ -21,7 +21,8 @@ extends CanvasLayer
 # just paints over the screen briefly. The pan keeps running underneath
 # and is still in motion long after the title clears.
 #
-# Skippable: any input fast-forwards to a quick fade-out and frees the node.
+# Skippable: a key / joypad press fast-forwards to a quick fade-out and frees
+# the node. Mouse clicks are swallowed but do NOT skip.
 # Skipping also snaps the opening camera pan to its endpoint (via
 # Player.finish_opening_pan_now) so the camera doesn't keep drifting after
 # the curtain clears.
@@ -447,12 +448,12 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 	if _skipped:
 		return
-	# Skip on any discrete press. Motion / axis events are intentionally
-	# consumed-but-not-skip so the player doesn't blow past the title from
-	# bumping the mouse while picking up the controller.
+	# Skip on a discrete key / joypad press. Mouse clicks are intentionally
+	# consumed-but-not-skip so the player can't blow past the title by clicking
+	# the scene. Motion / axis events are likewise consumed-but-not-skip so a
+	# bumped mouse doesn't skip either.
 	var is_skip: bool = (
 		(event is InputEventKey and event.pressed and not event.echo)
-		or (event is InputEventMouseButton and event.pressed)
 		or (event is InputEventJoypadButton and event.pressed)
 	)
 	if not is_skip:

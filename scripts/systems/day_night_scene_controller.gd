@@ -127,6 +127,19 @@ func _ready() -> void:
 	_apply_grading(_time_manager.time_of_day)
 
 
+## Swap the active day/night look (Dry → Wet at a season boundary) and re-grade
+## immediately at the current time. Null is ignored, so a season without an
+## authored profile leaves the current look untouched. Resets the time dedup so
+## the re-grade isn't skipped when the clock hasn't moved since the swap.
+func set_profile(new_profile: DayNightProfile) -> void:
+	if new_profile == null or new_profile == profile:
+		return
+	profile = new_profile
+	if _time_manager != null:
+		_last_time = -1.0
+		_apply_grading(_time_manager.time_of_day)
+
+
 func _resolve_rain_layer() -> void:
 	_rain_layer = get_tree().get_first_node_in_group(&"rain_layer") as RainLayer
 	# Boot roll: give the first launch a chance to start raining immediately
@@ -393,3 +406,13 @@ func clear_rain_override() -> void:
 
 func get_rain_current_intensity() -> float:
 	return _rain_current
+
+
+## Current ambient brightness — the HSV value of the CanvasModulate tint, in
+## [0,1]. Roughly 0.9 in full daylight, ~0.2 at deep night. Other systems (e.g.
+## fire light) scale against this to dim themselves when the scene is already
+## bright. Returns 1.0 if no CanvasModulate is wired (treat as full daylight).
+func get_ambient_value() -> float:
+	if canvas_modulate:
+		return canvas_modulate.color.v
+	return 1.0

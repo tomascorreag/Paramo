@@ -9,11 +9,27 @@ extends Node
 # would constrain calls to base GDScript members and lose access to static
 # methods declared in the script.
 const _OBJECT_PAINTER = preload("res://scripts/systems/object_painter.gd")
+# Preloaded for the same @tool class-cache reason as _OBJECT_PAINTER: the
+# overlay is only spawned at runtime, but preloading keeps the reference stable
+# regardless of editor reimport timing.
+const _LOADING_OVERLAY = preload("res://scripts/ui/loading_overlay.gd")
 
 # Minimum size (in cells) of a same-altitude grass plateau to qualify as a
 # spawn target. Below this we fall back to the legacy "any flat ground" pick
 # so degenerate seeds still produce a usable spawn.
 const MIN_PLATEAU_SIZE: int = 8
+
+# Async-startup chunking budget. The runtime path (regenerate_async) paints /
+# spawns this many grid rows per frame, awaiting a frame between batches, so the
+# main thread never freezes for the whole pass. A 48-row grid completes in
+# ~8 frames per phase. Tune up for fewer frames (longer per-frame hitch) or down
+# for smoother but longer loads.
+const PAINT_ROWS_PER_FRAME: int = 6
+const SPAWN_ROWS_PER_FRAME: int = 6
+# Extra frames the world is allowed to draw beneath the loading overlay before
+# it fades — long enough for WebGL to compile the water / post-process / rain
+# shaders while still hidden, so the first visible frame doesn't stutter.
+const SHADER_WARM_FRAMES: int = 3
 
 # ============================================================================
 # ProceduralWorld
@@ -27,6 +43,14 @@ const MIN_PLATEAU_SIZE: int = 8
 # At runtime, generates in `_ready()` if `auto_generate_on_ready` is set.
 #
 # ============================================================================
+
+
+## Emitted once the world is fully generated, painted, pathfound, populated, and
+## the player is placed — i.e. the map is ready to play. A RunController listens
+## here to kick off the season clock (start_run) only after the world exists.
+## Fires at runtime from both regenerate() and regenerate_async(); harmless in
+## the editor where nothing is connected.
+signal generation_finished
 
 
 @export_group("Generation")
@@ -75,6 +99,17 @@ const MIN_PLATEAU_SIZE: int = 8
 ## Print a one-line "generated WxH, seed=N" summary on each regenerate.
 ## Default off; flip on when iterating on the generator.
 @export var verbose_logs: bool = false
+## When true, the runtime startup (regenerate_async) runs TerrainGenerator on a
+## WorkerThreadPool task so the main thread keeps presenting frames (animated
+## loading overlay) during generation. Requires the export template's thread
+## support — enabled in the Web preset. Set false for a non-threaded build, where
+## generation runs inline (a brief freeze behind the already-visible overlay).
+## Editor-time Regenerate always runs synchronously regardless of this flag.
+@export var use_threaded_generation: bool = true
+## When true, the runtime startup shows the full-screen LoadingOverlay while it
+## generates / paints / spawns, then fades it out. Disable to skip the overlay
+## (e.g. when this scene is embedded inside another that owns its own loading UI).
+@export var show_loading_overlay: bool = true
 
 @export_tool_button("Regenerate") var regenerate_action := regenerate
 @export_tool_button("Clear") var clear_action := clear
@@ -92,7 +127,21 @@ func _ready() -> void:
 		# the `seed_override >= 0` sentinel in _resolve_params.
 		seed_override = randi()
 	if auto_generate_on_ready:
-		regenerate()
+		# Claim placement authority BEFORE generating so the player's own
+		# deferred self-placement stands down (it would otherwise snap to the
+		# authored node position, which differs from the spawn cell we pick in
+		# _place_player_on_walkable — leaving global_position and current_cell
+		# describing two different cells). Set synchronously here so the flag is
+		# live before the player's deferred self-place runs at idle, regardless
+		# of sibling _ready order.
+		if player != null and player.has_method(&"defer_to_external_placement"):
+			player.call(&"defer_to_external_placement")
+		# Fire-and-forget coroutine: spreads generation/paint/spawn across frames
+		# (and offloads generation to a worker thread) so the browser tab stays
+		# responsive on load instead of freezing through the whole pass. The
+		# editor never reaches here (guarded above); the Regenerate button uses
+		# the synchronous regenerate() path.
+		regenerate_async()
 
 
 # ----------------------------------------------------------------------------
@@ -109,25 +158,8 @@ func regenerate() -> void:
 		return
 
 	var params: TerrainGenerationParams = _resolve_params()
-
-	# Validate layer ceiling: cells generated above the tallest layer's
-	# altitude have no place to be painted and silently disappear (the
-	# painter logs a per-cell warning, but by then the map is already
-	# half-rendered). Surface this up-front so the author sees a single
-	# clear message instead of N painter warnings.
 	var layers_by_altitude: Dictionary = _build_layer_map()
-	var max_layer_alt: int = -1
-	for alt in layers_by_altitude.keys():
-		if int(alt) > max_layer_alt:
-			max_layer_alt = int(alt)
-	if max_layer_alt >= 0 and params.top_altitude > max_layer_alt:
-		push_warning(
-			"ProceduralWorld: top_altitude=%d exceeds tallest TileMapLayer altitude=%d. "
-			% [params.top_altitude, max_layer_alt]
-			+ "Cells above %d will not be painted. " % max_layer_alt
-			+ "Add Ground layers up to altitude %d, or lower top_altitude to %d."
-			% [params.top_altitude, max_layer_alt]
-		)
+	_validate_layer_ceiling(params, layers_by_altitude)
 
 	var grid: TerrainGrid = TerrainGenerator.generate(params)
 	TerrainPainter.paint(grid, layers_by_altitude, tile_set, params)
@@ -157,6 +189,157 @@ func regenerate() -> void:
 		print(
 			"ProceduralWorld: generated %dx%d, top altitude %d, seed %d."
 			% [params.width, params.height, params.top_altitude, params.seed]
+		)
+
+	generation_finished.emit()
+
+
+# Runtime equivalent of regenerate() that spreads the work across frames and
+# offloads generation to a worker thread, behind a loading overlay. Same five
+# steps (generate → paint → rebuild → spawn objects → place player), but:
+#   - generation runs on WorkerThreadPool (main thread keeps presenting frames)
+#   - painting and object spawning are chunked PAINT/SPAWN_ROWS_PER_FRAME rows
+#     per frame
+#   - the painted world draws a few frames beneath the overlay (shader pre-warm)
+#     before the overlay fades, so the first visible frame doesn't stutter.
+# Output is identical to regenerate() for the same resolved params/seed — the
+# painters preserve iteration order across chunk boundaries.
+func regenerate_async() -> void:
+	if ground_layers.is_empty():
+		push_error("ProceduralWorld: no ground_layers wired.")
+		return
+	var tile_set: TileSet = ground_layers[0].tile_set
+	if tile_set == null:
+		push_error("ProceduralWorld: ground_layers[0] has no TileSet.")
+		return
+
+	var overlay: Node = null
+	if show_loading_overlay:
+		overlay = _spawn_overlay()
+		# Let the overlay render once before we start heavy work so the player
+		# sees it immediately rather than a black/last frame.
+		await get_tree().process_frame
+
+	var params: TerrainGenerationParams = _resolve_params()
+	var layers_by_altitude: Dictionary = _build_layer_map()
+	_validate_layer_ceiling(params, layers_by_altitude)
+
+	if overlay != null:
+		overlay.set_status("Generando terreno…")
+	var grid: TerrainGrid = await _generate_grid_async(params, overlay)
+	if grid == null:
+		push_error("ProceduralWorld: terrain generation returned null — aborting.")
+		if overlay != null:
+			overlay.queue_free()
+		return
+
+	# Paint the playable grid + south-cliff skirt, a few rows per frame.
+	if overlay != null:
+		overlay.set_status("Dibujando el mundo…")
+	var paint_ctx: Dictionary = TerrainPainter.begin_paint(
+		grid, layers_by_altitude, tile_set, params
+	)
+	if not paint_ctx.is_empty():
+		while not TerrainPainter.paint_step(paint_ctx, PAINT_ROWS_PER_FRAME):
+			if overlay != null:
+				overlay.set_progress(0.30 + 0.40 * TerrainPainter.paint_progress(paint_ctx))
+			await get_tree().process_frame
+
+	# Rebuild pathfinding off the painted layers, then scatter objects (chunked).
+	if pathfinder != null:
+		pathfinder.bounds_clip = Rect2i(0, 0, params.width, params.height)
+		pathfinder.rebuild()
+		if world != null:
+			if overlay != null:
+				overlay.set_status("Sembrando vegetación…")
+			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(grid, world, pathfinder)
+			if not spawn_ctx.is_empty():
+				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
+					if overlay != null:
+						overlay.set_progress(0.70 + 0.25 * _OBJECT_PAINTER.spawn_progress(spawn_ctx))
+					await get_tree().process_frame
+
+	_place_player_on_walkable(grid)
+	if overlay != null:
+		overlay.set_progress(1.0)
+
+	if verbose_logs:
+		print(
+			"ProceduralWorld: generated %dx%d, top altitude %d, seed %d (async)."
+			% [params.width, params.height, params.top_altitude, params.seed]
+		)
+
+	# Shader pre-warm: hold the overlay up while the just-painted world (water /
+	# post-process / rain materials) draws hidden, so WebGL compiles those
+	# shaders before the player can see the map. Then fade out and free.
+	if overlay != null:
+		for _i in SHADER_WARM_FRAMES:
+			await get_tree().process_frame
+		await overlay.fade_out()
+		overlay.queue_free()
+
+	generation_finished.emit()
+
+
+# Generates the grid, optionally on a worker thread. Threaded path: dispatch
+# TerrainGenerator.generate (pure compute — no scene/global access, safe
+# off-thread) to WorkerThreadPool and poll completion while yielding frames, so
+# the overlay stays animated. Falls back to inline generation when threading is
+# disabled or the task produced no result.
+func _generate_grid_async(
+	params: TerrainGenerationParams, overlay: Node
+) -> TerrainGrid:
+	if not use_threaded_generation:
+		return TerrainGenerator.generate(params)
+
+	var holder: Array = []
+	var task_id: int = WorkerThreadPool.add_task(
+		func() -> void: holder.append(TerrainGenerator.generate(params)),
+		true, "terrain_generate"
+	)
+	while not WorkerThreadPool.is_task_completed(task_id):
+		if overlay != null:
+			# No measurable sub-progress from a single generate() call — drift
+			# the bar toward the end of the generation band so it isn't frozen.
+			overlay.pulse_toward(0.28)
+		await get_tree().process_frame
+	# Reap the handle (returns immediately; the task is already complete).
+	WorkerThreadPool.wait_for_task_completion(task_id)
+
+	if holder.is_empty():
+		push_warning(
+			"ProceduralWorld: threaded generation produced no grid; "
+			+ "falling back to inline generation."
+		)
+		return TerrainGenerator.generate(params)
+	return holder[0]
+
+
+func _spawn_overlay() -> Node:
+	var overlay: Node = _LOADING_OVERLAY.new()
+	add_child(overlay)
+	return overlay
+
+
+# Validates the layer ceiling: cells generated above the tallest layer's
+# altitude have no place to be painted and silently disappear (the painter logs
+# a per-cell warning, but by then the map is already half-rendered). Surface
+# this up-front so the author sees a single clear message instead of N painter
+# warnings. Shared by regenerate() and regenerate_async().
+func _validate_layer_ceiling(
+	params: TerrainGenerationParams, layers_by_altitude: Dictionary
+) -> void:
+	var max_layer_alt: int = -1
+	for alt in layers_by_altitude.keys():
+		if int(alt) > max_layer_alt:
+			max_layer_alt = int(alt)
+	if max_layer_alt >= 0 and params.top_altitude > max_layer_alt:
+		push_warning(
+			"ProceduralWorld: top_altitude=%d exceeds tallest TileMapLayer altitude=%d. "
+			% [params.top_altitude, max_layer_alt]
+			+ "Cells above %d will not be painted. " % max_layer_alt
+			+ "Add Ground layers up to altitude %d, or lower top_altitude to %d."
+			% [params.top_altitude, max_layer_alt]
 		)
 
 
@@ -243,10 +426,19 @@ func _place_player_on_walkable(grid: TerrainGrid) -> void:
 		push_warning("ProceduralWorld: no walkable cell found; leaving player at authored position.")
 		return
 	var world_pos: Vector2 = _cell_to_world(cell)
-	# At runtime, Player._snap_to_starting_cell re-applies the altitude lift
-	# on top of this position, so we just set the ground-level world position
-	# here and the lift is handled per-frame by the Player script.
+	# Set the ground-level (altitude-0) world position; the Player script owns
+	# the altitude lift, sort-Y offset, and current_cell.
 	player.global_position = world_pos
+	# Drive the player's placement against the cell we just moved it to. The
+	# generator is the sole placement authority on procedural maps (the player's
+	# own deferred self-placement is suppressed via defer_to_external_placement
+	# in _ready), so this establishes current_cell, altitude lift, sort-Y, and
+	# the opening camera pan. DEFERRED so it runs after Player._ready regardless
+	# of sibling _ready order (the synchronous regenerate() path can reach here
+	# before the player has initialized). Editor-guarded: the non-@tool Player
+	# has no runtime state during an editor Regenerate.
+	if not Engine.is_editor_hint() and player.has_method(&"snap_to_start"):
+		player.call_deferred(&"snap_to_start")
 
 
 # Preferred spawn: the interior of the largest contiguous same-altitude grass
