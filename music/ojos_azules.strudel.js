@@ -6,10 +6,6 @@
 // the score (mixed 2/4+3/4 phrasing kept); accompaniment is cleaned/simplified.
 setcpm(72 / 22)   // 1 quarter = 72 BPM
 
-// Organic huayno percussion — acoustic samples from the Dirt library, with
-// per-hit randomized dynamics, pitch wobble, and sample-variant rotation.
-samples('bubo:waveforms')
-
 // Melody (flute) — Theme A then Theme B, exact rhythms from the score.
 // Plays complete only once every 4 loops; the other 3 randomly skip ~40% of
 // notes (dropped notes leave silence, so timing stays locked to the other layers).

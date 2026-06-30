@@ -23,7 +23,6 @@ Debug="*res://scripts/systems/debug.gd"
 FireManager="*res://scripts/systems/fire_manager.gd"
 ResourceLedger="*res://scripts/systems/resource_ledger.gd"
 SeasonManager="*res://scripts/systems/season_manager.gd"
-MusicDirector="*res://scripts/systems/music_director.gd"
 
 [display]
 

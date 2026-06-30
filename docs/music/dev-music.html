@@ -2,33 +2,36 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Paramo — dev music sidecar</title>
+  <title>Paramo — music preview</title>
   <style>
     body { font-family: monospace; background: #111; color: #ddd; padding: 2rem; line-height: 1.6; }
     h1 { font-size: 1.1rem; }
     button { font: inherit; padding: 0.6rem 1rem; background: #2a2a2a; color: #fff; border: 1px solid #444; cursor: pointer; }
     button:hover { background: #383838; }
+    code { color: #cda; }
     .k { color: #8ab; }
     .hint { color: #888; }
   </style>
 </head>
 <body>
-  <h1>Paramo · dev music sidecar</h1>
-  <p class="hint">Keep this tab open while running the game in the Godot editor.<br>
-     It hosts the real Strudel engine and plays whatever the editor sends over WebSocket.</p>
+  <h1>Paramo · music preview</h1>
+  <p class="hint">Plays the exact in-game arrangement
+     (<code>docs/music/ojos_azules.strudel.js</code>) through the vendored Strudel
+     engine — the fidelity check strudel.cc can't give you (CDN vs. vendored
+     samples/soundfonts).<br>
+     Serve <code>docs/</code> over http (fetch needs it): e.g.
+     <code>python -m http.server</code> in <code>docs/</code>, then open
+     <code>http://localhost:8000/music/dev-music.html</code>.</p>
 
   <p><button id="enable">▶ Click to enable audio</button>
      <span class="hint">(browsers block audio until you interact)</span></p>
 
-  <p>WebSocket: <span class="k" id="ws-status">starting…</span></p>
-  <p>Season: <span class="k" id="season">—</span> · Playing: <span class="k" id="playing">—</span></p>
+  <p>Playing: <span class="k" id="playing">—</span></p>
   <p style="color:#e66">Error: <span id="error">none</span></p>
 
-  <!-- Same vendored engine + music the web export uses... -->
+  <!-- Same vendored engine + music the web export uses. -->
   <script src="./strudel/web-sf-1.3.0.js"></script>
-  <script src="./paramo-music.js?v=2b1"></script>
-  <!-- ...plus the dev-only WebSocket transport. -->
-  <script src="./dev-ws.js"></script>
+  <script src="./paramo-music.js?v=mvp1"></script>
   <script>
     document.getElementById("enable").onclick = function () { window.ParamoMusic.start(); };
   </script>
