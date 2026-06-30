@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1782783179|3897210';
+const CACHE_VERSION = '1782783246|3770194';
 /** @type {string} */
 const CACHE_PREFIX = 'Paramo-staging-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
