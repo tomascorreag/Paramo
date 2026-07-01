@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/title_intro.gd" id="1_ti_script"]
 [ext_resource type="Texture2D" path="res://assets/sprites/Titles/MainTitle_animated.png" id="2_ti_anim"]
+[ext_resource type="Theme" path="res://resources/ui/paramo_theme.tres" id="3_ti_theme"]
 
 [node name="TitleIntro" type="CanvasLayer"]
 layer = 200
@@ -32,3 +33,23 @@ grow_vertical = 2
 mouse_filter = 2
 expand_mode = 1
 stretch_mode = 5
+
+[node name="ClickToBegin" type="Label" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120.0
+offset_top = 40.0
+offset_right = 120.0
+offset_bottom = 64.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("3_ti_theme")
+theme_override_colors/font_color = Color(0.996, 0.882, 0.722, 1)
+theme_override_font_sizes/font_size = 16
+text = "click to begin"
+horizontal_alignment = 1
+vertical_alignment = 1

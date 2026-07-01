@@ -147,6 +147,20 @@ func _resolve_rain_layer() -> void:
 	# Uses the same P(start) = base * curve formula, so dry-day-time-of-day
 	# launches still usually start dry.
 	_roll_rain_start_if_idle()
+	# The boot roll runs during the title gate, when TimeManager is paused and
+	# _process is suppressed. A rolled start leaves us in RAMPING_UP with
+	# rain_current = 0, so the paused pre-title lake shot would show no rain even
+	# though it "is" raining. Snap to the held target and push once here (this
+	# path has no pause guard) so the gate shows steady rain iff the roll fired.
+	# The title intro clears this back to dry at the camera snap
+	# (see reset_weather_dry) so gameplay still begins without rain.
+	if _rain_state == _RainState.RAMPING_UP:
+		_rain_current = _rain_target
+		_rain_state = _RainState.ACTIVE
+		_rain_state_t = 0.0
+		_rain_state_game_t = 0.0
+	if _rain_layer != null:
+		_push_rain_to_shader()
 
 
 func _on_scene_tree_changed(_n: Node) -> void:
@@ -379,6 +393,22 @@ func _roll_weather() -> void:
 			return
 		if randf() < base * (1.0 - p_curve):
 			_stop_rain_event()
+
+
+## Force a clean, dry weather state and push it to the shader immediately.
+## Called by the title intro once the navy curtain is fully opaque, so gameplay
+## is revealed without rain even when the boot roll showed rain over the
+## pre-title lake shot. Normal rolls resume unthrottled from the next period
+## boundary (game_t = INF mirrors the boot init, so no post-stop cooldown).
+func reset_weather_dry() -> void:
+	_rain_state = _RainState.IDLE
+	_rain_state_t = 0.0
+	_rain_state_game_t = INF
+	_rain_target = 0.0
+	_rain_ramp_from = 0.0
+	_rain_current = 0.0
+	if _rain_layer != null:
+		_push_rain_to_shader()
 
 
 func _start_rain_event() -> void:

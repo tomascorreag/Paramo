@@ -26,6 +26,13 @@ var player_cell: Vector2i
 # availability and act on execute.
 var player: Player
 
+# Set of cells reachable from the player's current cell, keyed by Vector2i
+# (values are `true`). Injected by TileInteractionController from
+# Pathfinder.reachable_from(); read by TileAction.is_offerable to decide whether
+# a far tile's action can be reached. Defaults to {} (never null) so `.has()` is
+# safe for callers/tests that don't populate it.
+var reachable: Dictionary = {}
+
 # --- Injected services (temporary — see header note) -----------------------
 
 var tile_interaction: TileInteractionController

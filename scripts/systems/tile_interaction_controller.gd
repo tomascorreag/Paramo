@@ -44,6 +44,14 @@ const _CENTER_ICON: Texture2D = preload("res://assets/sprites/UX/icons/center.tr
 @export var traversal_placement_controller: TraversalPlacementController
 
 var _pending_cell: Vector2i
+
+# Walk-then-act state. When an action is selected on a tile the player can't
+# reach from where it stands, the player walks to a reachable neighbour and the
+# action fires on arrival. `_pending_action` != null means a walk is in flight;
+# `_process` watches player.is_moving() drop to false to detect arrival.
+var _pending_action: TileAction
+var _pending_target: Vector2i
+
 var _menu: Control  # RadialMenu instance
 var _menu_layer: CanvasLayer
 var _radial_menu_script: GDScript
@@ -98,6 +106,16 @@ func _ready() -> void:
 	_interaction_accept = func(c: Vector2i) -> bool:
 		return pathfinder.is_terrain_walkable(c) or has_any_action(c)
 
+	# Cancel any in-flight walk-then-act when the player is redirected by a
+	# left-click. Our own approach walks call player.follow_path directly (not
+	# through ClickToMoveController), so path_dispatched fires only for genuine
+	# user clicks — no self-cancel.
+	var c2m := get_tree().get_first_node_in_group(
+		ClickToMoveController.GROUP_NAME
+	) as ClickToMoveController
+	if c2m:
+		c2m.path_dispatched.connect(_on_user_path_dispatched)
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if pathfinder == null or player == null:
@@ -110,6 +128,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
 	if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
 		return
+
+	# A new right-click supersedes any walk-then-act already in flight.
+	_cancel_pending()
 
 	var global_pos := _event_global_position(mb)
 	# Resolve the cell under the cursor with the general interaction rule: the
@@ -200,6 +221,9 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.tile_interaction = self
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
+	# Cached BFS from the player's cell — lets is_offerable answer "can the player
+	# reach a cell to act from?" without a per-action flood fill.
+	ctx.reachable = pathfinder.reachable_from(player.current_cell)
 	return ctx
 
 
@@ -252,7 +276,9 @@ func _close_menu() -> void:
 		_menu.closed.disconnect(_on_menu_closed)
 		_menu.queue_free()
 		_menu = null
-		if _ux_overlay:
+		# Keep the lock while a walk-then-act is pending — the marker rides the
+		# target tile until the player arrives (or the walk is cancelled).
+		if _ux_overlay and _pending_action == null:
 			_ux_overlay.unlock()
 
 
@@ -266,26 +292,97 @@ func _on_item_selected(id: String) -> void:
 		return
 	var ctx := _build_context(_pending_cell)
 	# State may have shifted between menu open and item click (player moved,
-	# a structure got removed externally, etc.). Re-check availability against
-	# fresh context before executing.
-	if not action.is_available(ctx):
-		if _ux_overlay and _ux_overlay.has_method(&"flash_denied"):
-			_ux_overlay.flash_denied(_pending_cell)
+	# a structure got removed externally, etc.). Re-check reachability-aware
+	# offerability against fresh context before doing anything.
+	if not action.is_offerable(ctx):
+		_deny(_pending_cell)
+		return
+	# Already standing next to the target -> act immediately (unchanged UX).
+	if action.is_available(ctx):
+		action.execute(ctx)
 		if _ux_overlay:
 			_ux_overlay.unlock()
 		return
-	action.execute(ctx)
-	# Per UX spec: the lock square should clear the instant a placement
-	# commits, not wait for the menu's close animation. Placement/removal
-	# actions carry no residual state, so unlock unconditionally here.
+	# Otherwise walk to the nearest reachable standing cell and act on arrival.
+	var approach := _best_approach_path(action, ctx)
+	if approach.size() < 2:
+		_deny(_pending_cell)
+		return
+	approach.remove_at(0)  # drop the start cell; player already stands there
+	_pending_action = action
+	_pending_target = _pending_cell
+	player.follow_path(approach)
+	# Keep a marker on the target tile for the duration of the walk. The menu's
+	# `closed` signal won't tear it down (guarded by _pending_action above).
 	if _ux_overlay:
-		_ux_overlay.unlock()
+		_ux_overlay.lock_at(_pending_target)
 
 
 func _on_menu_closed() -> void:
 	_menu = null
+	if _ux_overlay and _pending_action == null:
+		_ux_overlay.unlock()
+
+
+# ---------------------------------------------------------------------------
+# Walk-then-act
+# ---------------------------------------------------------------------------
+
+# Watch for the pending walk to end. is_moving() stays true between steps and
+# while a path is queued, so a single true->false transition means the player
+# either arrived or the path aborted — either way, re-check and act (or deny).
+func _process(_delta: float) -> void:
+	if _pending_action == null:
+		return
+	if player == null or player.is_moving():
+		return
+	var action := _pending_action
+	var target := _pending_target
+	_pending_action = null  # clear first so unlock/close guards see no pending
+	var ctx := _build_context(target)
+	if action.is_available(ctx):
+		action.execute(ctx)
+		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
+		# for plant/remove it clears the walk marker.
+		if _ux_overlay:
+			_ux_overlay.unlock()
+	else:
+		_deny(target)
+
+
+# Shortest reachable approach path to a cell this action can be performed from.
+# Returns the full path (start included) or [] when no standing cell is reachable.
+func _best_approach_path(action: TileAction, ctx: ActionContext) -> Array[Vector2i]:
+	var best: Array[Vector2i] = []
+	for s in action.standing_cells(ctx):
+		if not ctx.reachable.has(s):
+			continue
+		var p := pathfinder.find_path(player.current_cell, s)
+		if p.size() >= 2 and (best.is_empty() or p.size() < best.size()):
+			best = p
+	return best
+
+
+func _cancel_pending() -> void:
+	if _pending_action == null:
+		return
+	_pending_action = null
 	if _ux_overlay:
 		_ux_overlay.unlock()
+
+
+func _on_user_path_dispatched(_cells: Array[Vector2i]) -> void:
+	_cancel_pending()
+
+
+# Clear any lock and flash a denied reticle on `cell`. flash_denied only renders
+# in HOVER state, so unlock() must run first.
+func _deny(cell: Vector2i) -> void:
+	if _ux_overlay == null:
+		return
+	_ux_overlay.unlock()
+	if _ux_overlay.has_method(&"flash_denied"):
+		_ux_overlay.flash_denied(cell)
 
 
 # ---------------------------------------------------------------------------

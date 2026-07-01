@@ -70,6 +70,23 @@ const _TILE_KIND_FIELD: String = "tile_kind"
 const _WALKABLE_FIELD: String = "walkable"
 const _ALTITUDE_META: String = "altitude"
 
+# Largest flat-to-flat altitude gap (half-steps) the player can climb on foot
+# without a ladder — a "scramble". 2 half-steps = one full cube. Anything
+# taller still needs a ladder (or a ramp). See can_transition / classify_step.
+const _SCRAMBLE_MAX_DELTA: int = 2
+
+
+# Classification of a single 4-connected step, shared by the pathfinder (route
+# cost) and the player (step timing / visual). The geometry rules live here so
+# both callers agree. See classify_step().
+enum StepKind {
+	FLAT,       # same-altitude flat-to-flat (or any non-elevation step)
+	RAMP_AXIS,  # along a ramp's rise axis (walking up/down a stair/slope)
+	RAMP_SIDE,  # perpendicular onto/off a ramp's side
+	SCRAMBLE,   # flat-to-flat ledge, 0 < |Δalt| <= _SCRAMBLE_MAX_DELTA, no ladder
+	LADDER,     # crosses a registered traversal edge
+}
+
 
 # --- Shape table: pure rise semantics, no altitude math --------------------
 #
@@ -111,19 +128,6 @@ const _SHAPES: Dictionary = {
 
 	# Non-walkable (implicitly excluded from this dict):
 	#   WALL_NW, WALL_NE, WALL_SE, WALL_SW, EDGE_*
-}
-
-
-# Half-height ramps (ramp_size == 1). Pathfinding treats these as permissive
-# on their perpendicular edges: a neighbor at `low` can step on/off from the
-# two sides perpendicular to the rise (in addition to the rise-axis low end),
-# and likewise a neighbor at `high` can use the perpendicular sides. Full
-# ramps (ramp_size == 2) remain strictly axis-locked.
-const _HALF_RAMPS: Dictionary = {
-	&"HALF_SLOPE_NE": true, &"HALF_SLOPE_NW": true,
-	&"HALF_SLOPE_SE": true, &"HALF_SLOPE_SW": true,
-	&"HALF_STAIR_NE": true, &"HALF_STAIR_NW": true,
-	&"HALF_STAIR_SE": true, &"HALF_STAIR_SW": true,
 }
 
 
@@ -650,12 +654,50 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	if exit_alts.is_empty():
 		return false
 	var enter_alts := _edge_altitudes(to, -dir)
-	if enter_alts.is_empty():
-		return false
-	for a in exit_alts:
-		if a in enter_alts:
+	if not enter_alts.is_empty():
+		for a in exit_alts:
+			if a in enter_alts:
+				return true
+
+	# Scramble: foot-climb a small ledge between two flats, no ladder needed.
+	# Allowed when both endpoints are flats and the gap is 0 < |Δalt| <=
+	# _SCRAMBLE_MAX_DELTA (one full cube). The mover plays it slower than a
+	# ladder (see classify_step / Player). Taller gaps still need a ladder.
+	var tf := _get_raw(from)
+	var tt := _get_raw(to)
+	if tf != null and tt != null and tf.rise_dir == Vector2i.ZERO and tt.rise_dir == Vector2i.ZERO:
+		var delta: int = absi(tf.altitude_low - tt.altitude_low)
+		if delta > 0 and delta <= _SCRAMBLE_MAX_DELTA:
 			return true
+
 	return false
+
+
+# Classify a single legal 4-connected step into a StepKind. The pathfinder uses
+# this to weight route cost; the player uses it to pick step duration and visual
+# style. Callers guarantee the step is a legal transition (came from find_path /
+# a confirmed path), so this does no walkability re-validation.
+func classify_step(from: Vector2i, to: Vector2i) -> int:
+	if has_traversal_edge(from, to):
+		return StepKind.LADDER
+	var tf := _get_raw(from)
+	var tt := _get_raw(to)
+	if tf == null or tt == null:
+		return StepKind.FLAT
+	var dir: Vector2i = to - from
+	var from_ramp: bool = tf.rise_dir != Vector2i.ZERO
+	var to_ramp: bool = tt.rise_dir != Vector2i.ZERO
+	# Side-step: perpendicular to a ramp's rise on either the entered or the
+	# exited cell. (dir perpendicular to rise == dir is neither +rise nor -rise.)
+	if to_ramp and dir != tt.rise_dir and dir != -tt.rise_dir:
+		return StepKind.RAMP_SIDE
+	if from_ramp and dir != tf.rise_dir and dir != -tf.rise_dir:
+		return StepKind.RAMP_SIDE
+	if from_ramp or to_ramp:
+		return StepKind.RAMP_AXIS
+	if tf.altitude_low != tt.altitude_low:
+		return StepKind.SCRAMBLE
+	return StepKind.FLAT
 
 
 # ----------------------------------------------------------------------------
@@ -718,10 +760,12 @@ func _edge_altitudes(cell: Vector2i, dir: Vector2i) -> Array[int]:
 		return [t.altitude_high]
 	if dir == -t.rise_dir:
 		return [t.altitude_low]
-	# Perpendicular edge: permissive for half-ramps only.
-	if _HALF_RAMPS.has(t.tile_kind):
-		return [t.altitude_low, t.altitude_high]
-	return []
+	# Perpendicular edge: permissive for ALL ramps. A neighbor at the ramp's
+	# low or high altitude can step on/off the side. (A neighbor at the
+	# in-between odd altitude won't match — same limitation as before; rare,
+	# since terrain abutting a full ramp sits at its low/high.) The mover times
+	# these side-steps as a short climb — see classify_step.
+	return [t.altitude_low, t.altitude_high]
 
 
 # ----------------------------------------------------------------------------

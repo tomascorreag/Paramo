@@ -20,12 +20,14 @@ func register(action: TileAction) -> void:
 	_actions.append(action)
 
 
-## Returns all actions whose `is_available(ctx)` returns true, in registration
-## order. Callers group by `action.group` to build submenus.
+## Returns all actions whose `is_offerable(ctx)` returns true, in registration
+## order. Offerable (reachability-aware) rather than available (act-from-here) so
+## far-but-reachable tiles surface their actions in the menu / hover reticle.
+## Callers group by `action.group` to build submenus.
 func available_for(ctx: ActionContext) -> Array[TileAction]:
 	var out: Array[TileAction] = []
 	for a in _actions:
-		if a.is_available(ctx):
+		if a.is_offerable(ctx):
 			out.append(a)
 	return out
 

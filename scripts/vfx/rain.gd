@@ -37,6 +37,11 @@ func _ready() -> void:
 		var v: Variant = _mat.get_shader_parameter(PARAM_VIEWPORT)
 		if v is Vector2:
 			_vp_size = v
+	# Start dry regardless of the authored scene value. Nothing else zeroes the
+	# rain at load, and the only driver (DayNightSceneController._process) is
+	# suppressed while TimeManager is paused — so without this the title gate's
+	# paused window would render the scene's default rain_amount over the lake.
+	set_amount(0.0)
 	# The CanvasModulate that tints the World canvas. Same tint applied to the
 	# world — using the BG rect instead darkens rain (BG is HSV-halved to avoid
 	# double-tinting). If absent (e.g. rain instanced outside a gameplay map)

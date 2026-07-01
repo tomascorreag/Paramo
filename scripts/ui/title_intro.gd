@@ -48,6 +48,12 @@ extends CanvasLayer
 ## Set false on debug/test scenes to skip the intro entirely.
 @export var play_intro: bool = true
 
+## If true (and play_intro), the intro does NOT auto-run. Instead a frozen
+## navy "click to begin" screen is shown and the cinematic + music + fullscreen
+## are all triggered by the first click / key press. Set false to restore the
+## old auto-running intro (e.g. on debug scenes that want no gate).
+@export var wait_for_click: bool = true
+
 ## Curtain color shown during the initial reveal + static hold. Cold paramo
 ## pre-dawn navy.
 @export var color_a: Color = Color(0.04, 0.09, 0.18, 1.0)
@@ -108,7 +114,7 @@ extends CanvasLayer
 @export_range(0.0, 1.0, 0.001) var day_time_of_day: float = 0.41667
 
 ## Curtain alpha ramp-in duration.
-@export var curtain_fade_in: float = 1.0
+@export var curtain_fade_in: float = 2.0
 ## Title alpha ramp-in duration (runs in parallel with curtain fade-in).
 @export var title_fade_in: float = 1.5
 ## Delay before the title fade-in begins, so it reads as one reveal with the curtain.
@@ -147,6 +153,20 @@ func get_pan_duration() -> float:
 
 @onready var _curtain: ColorRect = $Curtain
 @onready var _title: TextureRect = $Title
+@onready var _click_label: Label = $ClickToBegin
+
+# True while the frozen "click to begin" gate is showing and waiting for the
+# first input. Read by Player (is_awaiting_click) to hold the opening pan clock.
+var _awaiting_click: bool = false
+# True between _ready and gate activation: the world is still generating behind
+# the loading overlay, so the prompt is hidden and all input is swallowed (no
+# begin yet). Cleared by _activate_gate on ProceduralWorld.generation_finished.
+var _gate_pending: bool = false
+# Looping alpha-pulse on the click label; killed when the gate is dismissed.
+var _pulse_tween: Tween
+# TimeManager.paused snapshot taken when the gate freezes time-of-day, restored
+# when the click starts the cinematic.
+var _was_time_paused: bool = false
 
 var _atlas: AtlasTexture
 var _current_frame: int = 0
@@ -218,6 +238,36 @@ func _ready() -> void:
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	_gate_gameplay_ux()
+
+	if wait_for_click:
+		# Frozen entry screen, shown ONCE the terrain has generated: the world is
+		# revealed at the camera's lake-centered start pose (curtain transparent,
+		# title hidden) with a "click to begin" prompt. The whole cinematic — navy
+		# fade-in, title, music, fullscreen and the straight-down camera pan — is
+		# deferred to the first click (see _begin_from_click). The opening pan is
+		# held by Player (it reads is_awaiting_click()), and TimeManager is paused
+		# so the static view stays at night until the click.
+		#
+		# Until generation finishes (loading overlay up, layer 128, below this
+		# layer 200), the gate stays PENDING: prompt hidden, all input swallowed,
+		# no begin. _activate_gate flips it on at ProceduralWorld.generation_finished.
+		_curtain.modulate.a = 0.0
+		_title.modulate.a = 0.0
+		_click_label.modulate.a = 0.0
+		if _time_manager != null:
+			_was_time_paused = _time_manager.paused
+			_time_manager.paused = true
+		_gate_pending = true
+		var pw := get_tree().get_first_node_in_group(&"procedural_world")
+		if pw != null and pw.has_signal(&"generation_finished"):
+			pw.connect(&"generation_finished", _activate_gate, CONNECT_ONE_SHOT)
+		else:
+			# No async generation (handcrafted/test maps): world is ready now.
+			_activate_gate()
+		return
+
+	# No gate: auto-run the intro and hide the prompt.
+	_click_label.visible = false
 	_run_intro()
 
 
@@ -367,8 +417,18 @@ func _stage_reveal(token: int) -> bool:
 	await tw.finished
 	if token != _cancel_token:
 		return false
+	# Curtain is now fully opaque — the hidden moment to snap the camera's X over
+	# the player (the lake→player horizontal correction) and swap to daytime, both
+	# invisible behind the solid curtain.
+	var player := get_tree().get_first_node_in_group(&"player")
+	if player != null and player.has_method(&"snap_camera_over_player"):
+		player.snap_camera_over_player()
 	if control_time_of_day and _time_manager != null and _time_manager.has_method("set_time"):
 		_time_manager.set_time(day_time_of_day)
+	# Curtain is solid: clear any rain shown over the pre-title lake shot so
+	# gameplay begins dry. Normal weather rolls resume from here. Hidden behind
+	# the opaque curtain, so there's no visible pop.
+	_reset_weather_dry()
 	return true
 
 
@@ -436,10 +496,104 @@ func _stage_fade_out_duration() -> float:
 
 
 # ----------------------------------------------------------------------------
+# Click-to-begin gate
+# ----------------------------------------------------------------------------
+
+## True while the frozen entry screen is up and waiting for the first input.
+## Player reads this so it can hold the opening camera pan until we release it.
+func is_awaiting_click() -> bool:
+	return _awaiting_click
+
+
+# Generation finished (loading overlay gone, world visible at the lake): reveal
+# the prompt and start accepting the begin click.
+func _activate_gate() -> void:
+	if not _gate_pending:
+		return
+	_gate_pending = false
+	_awaiting_click = true
+	_running = true
+	_click_label.modulate.a = 1.0
+	_start_pulse()
+
+
+# Gentle alpha breathing on the prompt so the frozen screen reads as alive.
+func _start_pulse() -> void:
+	_pulse_tween = create_tween().set_loops()
+	_pulse_tween.tween_property(_click_label, "modulate:a", 0.35, 1.1) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_pulse_tween.tween_property(_click_label, "modulate:a", 1.0, 1.1) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+# First interaction: fade the prompt out, request fullscreen, start the music,
+# release the camera pan + time, then run the intro. The full sequence runs
+# (preroll included): the camera begins panning on click and start_delay
+# elapses with the world visible before the navy curtain starts fading in —
+# matching the auto-run path.
+func _begin_from_click() -> void:
+	_awaiting_click = false
+
+	if _pulse_tween != null and _pulse_tween.is_valid():
+		_pulse_tween.kill()
+	_pulse_tween = null
+	var fade: Tween = create_tween()
+	fade.tween_property(_click_label, "modulate:a", 0.0, 0.25) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	fade.tween_callback(_click_label.hide)
+
+	# Resume time-of-day; the intro drives night→day from here.
+	if _time_manager != null:
+		_time_manager.paused = _was_time_paused
+
+	_request_fullscreen()
+	_start_music()
+
+	# Release the opening camera pan held by Player during the gate.
+	var player := get_tree().get_first_node_in_group(&"player")
+	if player != null and player.has_method(&"start_opening_pan"):
+		player.start_opening_pan()
+
+	_run_intro()
+
+
+func _request_fullscreen() -> void:
+	var mode := DisplayServer.window_get_mode()
+	if mode == DisplayServer.WINDOW_MODE_FULLSCREEN \
+			or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+		return
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+# Web-only: music lives entirely in the page (no Godot autoload). The first
+# click is the user gesture browsers require to start audio. start() is
+# idempotent (see docs/music/paramo-music.js).
+func _start_music() -> void:
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("window.ParamoMusic && window.ParamoMusic.start && window.ParamoMusic.start();")
+
+
+# ----------------------------------------------------------------------------
 # Skip handling
 # ----------------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
+	# Gate still pending (world generating): swallow everything, never begin.
+	if _gate_pending:
+		get_viewport().set_input_as_handled()
+		return
+	# Gate phase: swallow everything, begin on a discrete click / key / button.
+	if _awaiting_click:
+		get_viewport().set_input_as_handled()
+		var is_begin: bool = (
+			(event is InputEventMouseButton and event.pressed)
+			or (event is InputEventKey and event.pressed and not event.echo)
+			or (event is InputEventJoypadButton and event.pressed)
+		)
+		if is_begin:
+			_begin_from_click()
+		return
+
 	if not _running:
 		return
 	# Swallow EVERY event while the intro is running — clicks, hover-targeting
@@ -498,7 +652,18 @@ func _run_skip_fade(token: int) -> void:
 	# the curtain reached full opacity.
 	if control_time_of_day and _time_manager != null and _time_manager.has_method("set_time"):
 		_time_manager.set_time(day_time_of_day)
+	# A skip kills the reveal tween, so its dry-weather reset may never have run.
+	# Ensure gameplay starts dry regardless of when the player skipped.
+	_reset_weather_dry()
 	_finish()
+
+
+# Clear rain shown over the pre-title lake shot so gameplay begins dry. Normal
+# weather rolls resume from here. No-op on maps without a DayNight controller.
+func _reset_weather_dry() -> void:
+	var dnc := get_tree().get_first_node_in_group(&"day_night_controller")
+	if dnc != null and dnc.has_method(&"reset_weather_dry"):
+		dnc.reset_weather_dry()
 
 
 func _finish() -> void:

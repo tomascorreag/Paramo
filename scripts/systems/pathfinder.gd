@@ -116,6 +116,13 @@ var _cell_penalties: Dictionary[Vector2i, float] = {}
 # order-independent.
 var _traversal_edges: Dictionary[StringName, Array] = {}
 
+# One-entry cache for reachable_from(): the last anchor queried and its BFS
+# result. Both the hover reticle and the tile action controller anchor on the
+# player's current cell, so they share hits. Invalidated on graph_changed (see
+# _ready) and whenever a different anchor is requested.
+var _reach_anchor: Vector2i = NO_CELL
+var _reach_cache: Dictionary[Vector2i, bool] = {}
+
 
 func _enter_tree() -> void:
 	# Join the group in _enter_tree (runs top-down before sibling _readys) so
@@ -127,6 +134,10 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	rebuild()
+	# Drop the reachable-set cache on any graph-shape change. One connection
+	# covers every emit site (rebuild, traversal edge add/remove) and any future
+	# emitter, so the cache can't serve a stale set after a ladder/bridge lands.
+	graph_changed.connect(func() -> void: _reach_anchor = NO_CELL)
 
 
 # ----------------------------------------------------------------------------
@@ -209,7 +220,11 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 			var turn_cost: float = 0.0 if cur_dir == -1 or cur_dir == dir_idx else _TURN_EPSILON
 			# Ladder steps (traversal edges) cost one unit per half-step of
 			# altitude climbed, so one full cube (2 half-steps) costs the same
-			# as 2 horizontal tile steps. Normal steps stay at the flat 1.0.
+			# as 2 horizontal tile steps. Scramble steps (a bare ledge, no
+			# ladder) cost double that — 2 units per half-step — so A* prefers a
+			# ladder/ramp when one exists but still scrambles when it's the only
+			# route. Normal/ramp steps stay at the flat 1.0 (ramps lean on the
+			# small _cell_enter_cost tiebreaker instead).
 			var step_cost: float = 1.0
 			if _grid.has_traversal_edge(cur_cell, nb):
 				var alt_delta: float = absf(
@@ -217,6 +232,10 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 				)
 				if alt_delta > step_cost:
 					step_cost = alt_delta
+			elif _grid.classify_step(cur_cell, nb) == TileGrid.StepKind.SCRAMBLE:
+				step_cost = 2.0 * absf(
+					_grid.altitude_center(nb) - _grid.altitude_center(cur_cell)
+				)
 			var tentative_g: float = cur_g + step_cost + turn_cost + _cell_enter_cost(nb)
 			var nb_key := Vector3i(nb.x, nb.y, dir_idx + 1)
 			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
@@ -327,10 +346,30 @@ func compute_reachable_set(from: Vector2i) -> Dictionary[Vector2i, bool]:
 	return reachable
 
 
+## Cached wrapper over compute_reachable_set. Recomputes only when `anchor`
+## differs from the last query or the graph changed shape (graph_changed clears
+## the anchor). Returns the shared cache dict — callers must treat it as
+## read-only. Use this for per-frame hover / per-click availability queries;
+## use compute_reachable_set directly for one-off anchors you won't repeat.
+func reachable_from(anchor: Vector2i) -> Dictionary[Vector2i, bool]:
+	if anchor != _reach_anchor:
+		_reach_anchor = anchor
+		_reach_cache = compute_reachable_set(anchor)
+	return _reach_cache
+
+
 func altitude_center(cell: Vector2i) -> float:
 	if _grid == null:
 		return 0.0
 	return _grid.altitude_center(cell)
+
+
+# Classify a step (TileGrid.StepKind) for movers that adjust per-step timing
+# (Player). Delegates to TileGrid; returns FLAT when no grid is built.
+func classify_step(from: Vector2i, to: Vector2i) -> int:
+	if _grid == null:
+		return TileGrid.StepKind.FLAT
+	return _grid.classify_step(from, to)
 
 
 func get_tile(cell: Vector2i) -> CellData:

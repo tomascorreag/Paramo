@@ -122,6 +122,10 @@ signal generation_finished
 func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
+	# Discoverable by TitleIntro, which waits on generation_finished before
+	# showing its "click to begin" gate (so the prompt isn't drawn over the
+	# loading overlay and clicks aren't accepted before the world exists).
+	add_to_group(&"procedural_world")
 	if randomize_seed_on_ready:
 		# randi() is non-negative (0..2^32-1 mod int range), so it satisfies
 		# the `seed_override >= 0` sentinel in _resolve_params.
@@ -424,6 +428,26 @@ func _ensure_even(v: int) -> int:
 # near the map centroid — and snaps the player onto it. Reads the abstract
 # grid directly so it works in both editor and runtime (Pathfinder is not
 # @tool and its methods are placeholders during editor edits).
+# Centroid cell of the summit lake — still water (WATER kind with no river flow,
+# i.e. river_width == 0). Returns (-1, -1) when the map has no lake, so the
+# opening camera pan falls back to its default start pose. The river/waterfalls
+# are excluded so the centroid sits in the lake body, not dragged south.
+func _compute_lake_center(grid: TerrainGrid) -> Vector2i:
+	var sx: int = 0
+	var sy: int = 0
+	var n: int = 0
+	for y in grid.height:
+		for x in grid.width:
+			var c: TerrainCell = grid.at(x, y)
+			if c.kind == TerrainCell.Kind.WATER and c.river_width == 0:
+				sx += x
+				sy += y
+				n += 1
+	if n == 0:
+		return Vector2i(-1, -1)
+	return Vector2i(sx / n, sy / n)
+
+
 func _place_player_on_walkable(grid: TerrainGrid) -> void:
 	if player == null:
 		return
@@ -443,8 +467,15 @@ func _place_player_on_walkable(grid: TerrainGrid) -> void:
 	# of sibling _ready order (the synchronous regenerate() path can reach here
 	# before the player has initialized). Editor-guarded: the non-@tool Player
 	# has no runtime state during an editor Regenerate.
-	if not Engine.is_editor_hint() and player.has_method(&"snap_to_start"):
-		player.call_deferred(&"snap_to_start")
+	if not Engine.is_editor_hint():
+		# Aim the opening camera pan at the summit lake (straight-down pan start).
+		# Must be set BEFORE the deferred snap_to_start, which reads it. Computed
+		# here because the lake↔river distinction (river_width) only survives in
+		# the abstract grid, not the painted runtime tiles.
+		if player.has_method(&"set_opening_pan_start_cell"):
+			player.call(&"set_opening_pan_start_cell", _compute_lake_center(grid))
+		if player.has_method(&"snap_to_start"):
+			player.call_deferred(&"snap_to_start")
 
 
 # Preferred spawn: the interior of the largest contiguous same-altitude grass

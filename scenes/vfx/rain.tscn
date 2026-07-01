@@ -9,7 +9,7 @@ shader_parameter/rain_color = Color(0.7505, 0.820325, 0.95, 0.78431374)
 shader_parameter/tint_color = Color(1, 1, 1, 1)
 shader_parameter/tint_intensity = 0.50000002375
 shader_parameter/additive_boost = 0.15
-shader_parameter/rain_amount = 0.5
+shader_parameter/rain_amount = 0.0
 shader_parameter/column_spacing = 1.0
 shader_parameter/cell_height = 270.0
 shader_parameter/fall_speed = 220.00001045
@@ -34,6 +34,7 @@ layer = 50
 script = ExtResource("2_rainscript")
 
 [node name="RainRect" type="ColorRect" parent="." unique_id=2094271543]
+visible = false
 material = SubResource("ShaderMaterial_rain")
 anchors_preset = 15
 anchor_right = 1.0

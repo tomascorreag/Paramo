@@ -25,6 +25,9 @@ extends Node
 # ============================================================================
 
 
+const GROUP_NAME: StringName = &"click_to_move_controller"
+
+
 @export var pathfinder: Pathfinder
 @export var player: Player
 @export var enabled: bool = true
@@ -33,6 +36,13 @@ extends Node
 
 signal path_dispatched(cells: Array[Vector2i])
 signal click_rejected(global_pos: Vector2, reason: String)
+
+
+# Join the group in _enter_tree (top-down, before sibling _readys) so
+# TileInteractionController can find us and subscribe to path_dispatched to
+# cancel a pending walk-then-act when the player is redirected by a click.
+func _enter_tree() -> void:
+	add_to_group(GROUP_NAME)
 
 
 func _ready() -> void:

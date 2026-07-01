@@ -232,10 +232,29 @@ func test_can_transition_flat_to_flat_same_alt() -> void:
 	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
 
 
-func test_can_transition_flat_to_flat_different_alt() -> void:
+func test_can_transition_flat_to_flat_scramble_one_cube() -> void:
+	# A one-cube ledge (Δalt = 2 half-steps) is foot-scramble-able, no ladder.
 	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 4, 4)
 	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 6, 6)
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+
+
+func test_can_transition_flat_to_flat_scramble_half_step() -> void:
+	# A half-step ledge (Δalt = 1) is also scramble-able.
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 4, 4)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 5, 5)
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+
+
+func test_can_transition_flat_to_flat_too_tall() -> void:
+	# Δalt = 4 half-steps (2 cubes) exceeds the 1-cube scramble limit → blocked
+	# without a ladder.
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 4, 4)
 	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
 
 
 func test_can_transition_flat_to_ramp_matching() -> void:
@@ -373,19 +392,80 @@ func test_half_slope_perp_from_high_neighbor() -> void:
 	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(-1, 0)))
 
 
-func test_full_stair_perp_still_blocked() -> void:
-	# Regression: full-height STAIR_NE keeps the strict axis-lock.
+func test_full_stair_perp_altitude_mismatch() -> void:
+	# Full-height STAIR_NE low=0 high=2. Perpendicular neighbor at the in-between
+	# altitude 1 matches neither low nor high → still blocked (side access only
+	# connects neighbors at the ramp's low or high altitude).
 	_inject_walkable(Vector2i(0, 0), &"STAIR_NE", Vector2i(0, -1), 0, 2)
 	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
 	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
 	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
 
 
-func test_full_slope_perp_still_blocked() -> void:
+func test_full_slope_perp_altitude_mismatch() -> void:
 	_inject_walkable(Vector2i(0, 0), &"SLOPE_NE", Vector2i(0, -1), 0, 2)
 	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 1, 1)
 	assert_false(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
 	assert_false(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_full_ramp_perp_from_low_neighbor() -> void:
+	# Side access is now enabled on full ramps too: a perpendicular flat at the
+	# ramp's LOW altitude can step on/off.
+	_inject_walkable(Vector2i(0, 0), &"SLOPE_NE", Vector2i(0, -1), 0, 2)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+func test_full_ramp_perp_from_high_neighbor() -> void:
+	# Perpendicular flat at the ramp's HIGH altitude can also step on/off.
+	_inject_walkable(Vector2i(0, 0), &"STAIR_NE", Vector2i(0, -1), 0, 2)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 2, 2)
+	assert_true(grid.can_transition(Vector2i(1, 0), Vector2i(0, 0)))
+	assert_true(grid.can_transition(Vector2i(0, 0), Vector2i(1, 0)))
+
+
+# ===========================================================================
+# classify_step
+# ===========================================================================
+
+func test_classify_step_flat() -> void:
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_eq(grid.classify_step(Vector2i(0, 0), Vector2i(1, 0)), TileGrid.StepKind.FLAT)
+
+
+func test_classify_step_scramble() -> void:
+	# Flat-to-flat ledge, one cube up.
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 2, 2)
+	assert_eq(grid.classify_step(Vector2i(0, 0), Vector2i(1, 0)), TileGrid.StepKind.SCRAMBLE)
+	assert_eq(grid.classify_step(Vector2i(1, 0), Vector2i(0, 0)), TileGrid.StepKind.SCRAMBLE)
+
+
+func test_classify_step_ramp_axis() -> void:
+	# SLOPE_NE rise=(0,-1). Stepping along the rise axis (from the low end).
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	_inject_walkable(Vector2i(0, -1), &"SLOPE_NE", Vector2i(0, -1), 0, 2)
+	assert_eq(grid.classify_step(Vector2i(0, 0), Vector2i(0, -1)), TileGrid.StepKind.RAMP_AXIS)
+
+
+func test_classify_step_ramp_side() -> void:
+	# SLOPE_NE rise=(0,-1). Stepping perpendicular onto it from the side.
+	_inject_walkable(Vector2i(0, 0), &"SLOPE_NE", Vector2i(0, -1), 0, 2)
+	_inject_walkable(Vector2i(1, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_eq(grid.classify_step(Vector2i(1, 0), Vector2i(0, 0)), TileGrid.StepKind.RAMP_SIDE)
+	assert_eq(grid.classify_step(Vector2i(0, 0), Vector2i(1, 0)), TileGrid.StepKind.RAMP_SIDE)
+
+
+func test_classify_step_ladder() -> void:
+	# A registered traversal edge classifies as LADDER regardless of altitude gap.
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	_inject_walkable(Vector2i(0, -1), &"FLAT", Vector2i.ZERO, 4, 4)
+	grid.add_traversal_edge(Vector2i(0, 0), Vector2i(0, -1))
+	assert_eq(grid.classify_step(Vector2i(0, 0), Vector2i(0, -1)), TileGrid.StepKind.LADDER)
+	assert_eq(grid.classify_step(Vector2i(0, -1), Vector2i(0, 0)), TileGrid.StepKind.LADDER)
 
 
 func test_half_stair_rise_axis_still_works() -> void:

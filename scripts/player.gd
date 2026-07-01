@@ -45,8 +45,14 @@ const DIR_TO_FACING: Dictionary = {
 ## Pathfinder traversal edge (ladders). Total climb time scales with the
 ## ladder's height: step_duration * climb_duration_multiplier * height_cubes.
 ## A 1-cube climb at multiplier 1.5 takes 1.5× a normal step; a 4-cube climb
-## takes 6×.
+## takes 6×. Also used flat (×1) for ramp side-steps — stepping onto/off a
+## ramp from the side costs the same as a 1-cube ladder climb.
 @export var climb_duration_multiplier: float = 2
+## Per-cube multiplier applied to step_duration when the step is a no-ladder
+## SCRAMBLE up/down a small ledge. At 4.0 a full-cube scramble takes 4× a
+## normal step — 2× the cost of climbing the same cube on a ladder — and a
+## half-step ledge takes 2×. Scales with height (no clamp), unlike ladders.
+@export var scramble_duration_multiplier: float = 4
 @export var debug_logging: bool = false
 
 @export_group("Lantern")
@@ -162,6 +168,17 @@ var _camera_target_local_y: float = 0.0
 var _pan_elapsed: float = 0.0
 var _pan_duration: float = 0.0
 var _pan_eased_prev: float = 0.0
+# When the TitleIntro shows a "click to begin" gate, the camera is armed at the
+# pan-start pose (_camera_panning true, suppressing the per-frame visual lift)
+# but the pan CLOCK is held until the click releases it via start_opening_pan().
+var _pan_running: bool = true
+
+# Cell the opening pan CENTERS on at the start (the summit lake), pushed by
+# ProceduralWorld before placement. -1 = no lake known → fall back to the old
+# start-above-player pose. The pan then moves straight DOWN from this cell's X;
+# the horizontal jump to the player is hidden by snap_camera_over_player() once
+# the curtain is solid, so all visible camera motion is purely vertical.
+var _opening_pan_start_cell: Vector2i = Vector2i(-1, -1)
 
 
 func _enter_tree() -> void:
@@ -289,22 +306,33 @@ func _begin_next_step() -> void:
 	_step_to_alt = _pathfinder.altitude_center(next_cell)
 	_step_t = 0.0
 	_stepping = true
-	# Ladder steps (any step that crosses a Pathfinder traversal edge) take
-	# longer than a normal grid step — the player is climbing, not walking —
-	# and follow an L-shaped visual path (see _apply_step_interp).
-	_step_is_climb = _pathfinder.has_traversal_edge(current_cell, next_cell)
+	# Step timing & visual depend on the kind of move (see TileGrid.classify_step).
+	# Only a LADDER step uses the L-shaped visual path (the sprite climbs a wall);
+	# scrambles and ramp side-steps animate as a normal straight lerp, just slower.
+	var kind: int = _pathfinder.classify_step(current_cell, next_cell)
+	_step_is_climb = (kind == TileGrid.StepKind.LADDER)
 	_step_climb_turned = false
-	if _step_is_climb:
-		# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
-		# validated to integer-cube heights, so this divides evenly; floats
-		# are used only to tolerate any future sub-cube edges without
-		# collapsing to zero. Clamp to >=1 so a degenerate 0-delta edge
-		# still takes one climb step's worth of time.
-		var alt_delta: float = absf(_step_to_alt - _step_from_alt)
-		var cubes: float = maxf(alt_delta / 2.0, 1.0)
-		_step_duration_effective = step_duration * climb_duration_multiplier * cubes
-	else:
-		_step_duration_effective = step_duration
+	var alt_delta: float = absf(_step_to_alt - _step_from_alt)
+	match kind:
+		TileGrid.StepKind.LADDER:
+			# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
+			# validated to integer-cube heights, so this divides evenly; floats
+			# are used only to tolerate any future sub-cube edges without
+			# collapsing to zero. Clamp to >=1 so a degenerate 0-delta edge
+			# still takes one climb step's worth of time.
+			var cubes: float = maxf(alt_delta / 2.0, 1.0)
+			_step_duration_effective = step_duration * climb_duration_multiplier * cubes
+		TileGrid.StepKind.SCRAMBLE:
+			# No-ladder ledge climb: scales with height, no clamp, so a half-step
+			# ledge → 0.5 cube → 2× a step and a full cube → 4×. Double the cost
+			# of climbing the same height on a ladder.
+			_step_duration_effective = step_duration * scramble_duration_multiplier * (alt_delta / 2.0)
+		TileGrid.StepKind.RAMP_SIDE:
+			# Stepping onto/off a ramp from the side: flat 2× (same as a 1-cube
+			# ladder), regardless of the sub-step change to the ramp center.
+			_step_duration_effective = step_duration * climb_duration_multiplier
+		_:
+			_step_duration_effective = step_duration
 
 	# Commit the "logical" cell now: future pathfinds will plan from
 	# _step_to_cell, not from the cell we're leaving. This lets reclicks
@@ -571,6 +599,13 @@ func snap_to_start() -> void:
 	_snap_to_starting_cell()
 
 
+## Point the opening camera pan's START at a grid cell (the summit lake). Called
+## by the world generator (ProceduralWorld) before snap_to_start. The camera
+## centers here and then pans straight down to the player.
+func set_opening_pan_start_cell(cell: Vector2i) -> void:
+	_opening_pan_start_cell = cell
+
+
 # Deferred from _ready as the FALLBACK placement for non-procedural maps (test
 # scenes, handcrafted levels) where the player's authored position is its spawn
 # and no generator will call snap_to_start. On procedural maps ProceduralWorld
@@ -637,13 +672,25 @@ func _snap_to_starting_cell() -> void:
 		_camera_panning = false
 	else:
 		var rest_world := _camera_pan_target_world()
+		# Pan START pose: centered on the summit lake when the generator told us
+		# where it is, else the old pose just above the player. From here the pan
+		# only ever moves straight DOWN (X is held; the horizontal correction to
+		# the player is hidden later by snap_camera_over_player()).
+		var start_world: Vector2
+		if _opening_pan_start_cell.x >= 0:
+			start_world = _cell_camera_world(_opening_pan_start_cell)
+		else:
+			start_world = Vector2(rest_world.x, rest_world.y - intro.pan_offset_px)
 		_camera_panning = true
 		_pan_elapsed = 0.0
 		_pan_duration = intro.get_pan_duration()
 		_pan_eased_prev = 0.0
 		_camera.position_smoothing_enabled = false
 		_camera.top_level = true
-		_camera.position = Vector2(rest_world.x, rest_world.y - intro.pan_offset_px)
+		_camera.position = start_world
+		# Hold the pan clock while the click-to-begin gate is up; TitleIntro
+		# releases it via start_opening_pan() on the first click.
+		_pan_running = not intro.is_awaiting_click()
 
 	if debug_logging:
 		print("Player: snapped to cell %s at altitude %s" % [current_cell, _altitude])
@@ -658,13 +705,26 @@ func _camera_pan_target_world() -> Vector2:
 	return Vector2(global_position.x, global_position.y + _camera_target_local_y)
 
 
+# World position to center the camera on a cell, including its altitude lift
+# (cell_to_world returns the altitude-0 origin; the visual surface sits
+# alt*HALF_STEP_PX higher on screen). Used to aim the opening pan at the lake.
+func _cell_camera_world(cell: Vector2i) -> Vector2:
+	var w := _pathfinder.cell_to_world(cell)
+	w.y -= _pathfinder.altitude_center(cell) * Pathfinder.HALF_STEP_PX
+	return w
+
+
 func _process(delta: float) -> void:
-	if not _camera_panning:
+	if not _camera_panning or not _pan_running:
 		return
 	_pan_elapsed += delta
-	var target: Vector2 = _camera_pan_target_world()
+	# Straight-down pan: ease only the camera's Y toward the player's rest Y.
+	# X is left untouched — it starts at the lake's X and is snapped to the
+	# player's X by snap_camera_over_player() while the curtain is solid, so the
+	# horizontal correction is never visible. All seen motion stays vertical.
+	var target_y: float = _camera_pan_target_world().y
 	if _pan_elapsed >= _pan_duration:
-		_camera.position = target
+		_camera.position.y = target_y
 		_finish_opening_pan()
 		return
 	var t: float = _pan_elapsed / _pan_duration
@@ -674,8 +734,24 @@ func _process(delta: float) -> void:
 	# the target is static, but tracks a moving target smoothly because k
 	# applies to the *current* gap, not a stale start point.
 	var k: float = (eased - _pan_eased_prev) / maxf(1.0 - _pan_eased_prev, 0.0001)
-	_camera.position = _camera.position.lerp(target, k)
+	_camera.position.y = lerpf(_camera.position.y, target_y, k)
 	_pan_eased_prev = eased
+
+
+# Snap the camera's X directly over the player. Called by TitleIntro the instant
+# the curtain is fully opaque, hiding the lake→player horizontal jump. The pan
+# keeps easing Y down afterward, so all visible motion stays vertical.
+func snap_camera_over_player() -> void:
+	if not _camera_panning:
+		return
+	_camera.position.x = _camera_pan_target_world().x
+
+
+# Release the opening pan clock. Called by TitleIntro when the player clicks
+# through the "click to begin" gate so the pan begins exactly as the cinematic
+# starts. No-op when there's no gate (the pan was already running).
+func start_opening_pan() -> void:
+	_pan_running = true
 
 
 # Snap the opening pan to its endpoint and hand the camera back to player
