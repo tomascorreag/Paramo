@@ -291,7 +291,7 @@
 
   // --- Control surface ---
   window.ParamoMusic = {
-    start: function () { wantPlaying = true; play(); },
+    start: function () { if (playing) return; wantPlaying = true; play(); },
     stop: function () { wantPlaying = false; playing = false; stopPoll(); revealOrder = null; if (repl) repl.stop(); updateDebug(); },
     _ready: function () { return repl != null && songCode != null; },
   };
