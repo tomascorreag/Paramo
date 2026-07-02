@@ -73,6 +73,11 @@
   var wantPlaying = false;
   var playing = false;
 
+  // Master volume multiplier applied on top of the song's per-layer .gain()s.
+  // The pause-menu slider drives this via ParamoMusic.setVolume(). Default 0.75
+  // (the slider's midpoint) so the game opens at ~75% of the authored loudness.
+  var masterVolume = 0.75;
+
   // --- Music director: progressive instrument layering ---
   // The song's final stack(...) lists every layer (parsed, not hardcoded). We
   // don't play it verbatim; instead we start with the base layer alone and fold
@@ -157,6 +162,7 @@
 
       if (!layers) {                          // parse failed: play the song verbatim
         repl.evaluate(songCode);
+        applyVolume();
         playing = true;
         updateDebug();
         return;
@@ -210,6 +216,7 @@
   function evalActive() {
     var active = revealOrder.slice(0, revealIndex);
     repl.evaluate(defs + "\nstack(" + active.join(", ") + ")\n");
+    applyVolume();   // re-assert master gain in case the graph was (re)built
   }
 
   // Current cycle position from the scheduler (float). 0 if unavailable.
@@ -271,6 +278,25 @@
     if (revealIndex >= revealOrder.length) stopPoll();   // full mix reached
   }
 
+  // Master volume lives on superdough's own output node: every voice routes
+  // channelMerger -> destinationGain -> ctx.destination (verified in
+  // web-sf-1.3.0.js). getSuperdoughAudioController() returns that graph (lazily
+  // creating it), so its output.destinationGain.gain IS the master. Setting
+  // .value is live — no re-evaluate, so a dragged slider responds instantly.
+  function destinationGainNode() {
+    try {
+      var getCtl = window.strudel && window.strudel.getSuperdoughAudioController;
+      var ctl = (typeof getCtl === "function") ? getCtl() : null;
+      var g = ctl && ctl.output && ctl.output.destinationGain;
+      return (g && g.gain) ? g : null;
+    } catch (e) { return null; }
+  }
+
+  function applyVolume() {
+    var g = destinationGainNode();
+    if (g) g.gain.value = masterVolume;
+  }
+
   function resumeAudio() {
     try {
       var getCtx = (window.strudel && window.strudel.getAudioContext) || window.getAudioContext;
@@ -293,6 +319,15 @@
   window.ParamoMusic = {
     start: function () { if (playing) return; wantPlaying = true; play(); },
     stop: function () { wantPlaying = false; playing = false; stopPoll(); revealOrder = null; if (repl) repl.stop(); updateDebug(); },
+    // Master volume, 0..1.5 (1.0 = authored loudness). Live: sets the superdough
+    // output gain directly, so a dragged slider responds without a re-evaluate.
+    setVolume: function (v) {
+      v = Number(v);
+      if (!isFinite(v)) return;
+      masterVolume = Math.max(0, Math.min(1.5, v));
+      applyVolume();
+    },
+    getVolume: function () { return masterVolume; },
     _ready: function () { return repl != null && songCode != null; },
   };
 

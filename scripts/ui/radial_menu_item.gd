@@ -20,10 +20,7 @@ func setup(data: Dictionary) -> void:
 	item_data = data
 
 	var tex: Texture2D = data["icon"]
-	_icon = TextureRect.new()
-	_icon.texture = tex
-	_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_icon = PixelUI.make_icon_sized(tex)
 	add_child(_icon)
 
 	var icon_size := tex.get_size()

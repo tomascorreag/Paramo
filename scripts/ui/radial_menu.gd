@@ -17,7 +17,9 @@ const OPEN_STAGGER: float = 0.03
 const CLOSE_DURATION: float = 0.10
 const MIN_RADIUS: float = 12.0
 const PARENT_DIM_ALPHA: float = 0.35
-const OVERLAY_COLOR: Color = Color(0.0, 0.0, 0.0, 0.25)
+# Dim scrim behind the wheel. Palette-bound (was pure black); with_alpha isn't
+# const-evaluable, so this is a var.
+var OVERLAY_COLOR: Color = Palette.with_alpha(Palette.PANEL_BG, 0.25)
 
 var _item_script: GDScript = preload("res://scripts/ui/radial_menu_item.gd")
 
@@ -240,10 +242,7 @@ func _spawn_center_icon(center: Vector2) -> void:
 
 	var icon_size := center_icon_texture.get_size()
 
-	_center_icon = TextureRect.new()
-	_center_icon.texture = center_icon_texture
-	_center_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_center_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_center_icon = PixelUI.make_icon_sized(center_icon_texture)
 	_center_icon.position = center - icon_size / 2.0
 	_center_icon.pivot_offset = icon_size / 2.0
 	_center_icon.scale = Vector2.ZERO

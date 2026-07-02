@@ -158,7 +158,7 @@ func flash_denied(cell: Vector2i) -> void:
 	if _denied_tween and _denied_tween.is_valid():
 		_denied_tween.kill()
 	_locked_x.global_position = cell_visual_center(cell)
-	_locked_x.modulate = Color(1.0, 0.3, 0.3, 1.0)
+	_locked_x.modulate = Palette.DANGER
 	_locked_x.visible = true
 	_denied_tween = create_tween()
 	_denied_tween.tween_property(_locked_x, "modulate:a", 0.0, 0.25)

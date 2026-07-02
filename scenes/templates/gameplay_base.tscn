@@ -32,6 +32,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/title_intro.tscn" id="30_titleintro"]
 [ext_resource type="PackedScene" uid="uid://b0r4inv1xpara" path="res://scenes/vfx/rain.tscn" id="31_rain"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="32_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -259,3 +260,5 @@ day_time_of_day = 0.4
 curtain_fade_in = 4.0
 title_fade_in_delay = 3.5
 hold_duration = 3.0
+
+[node name="PauseMenu" parent="." instance=ExtResource("33_pause")]

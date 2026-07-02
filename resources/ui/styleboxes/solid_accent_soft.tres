@@ -1,0 +1,12 @@
+[gd_resource type="StyleBoxTexture" format=3 uid="uid://7h7iou0et3mf"]
+
+[ext_resource type="Texture2D" uid="uid://ddwwlnfsavmqt" path="res://assets/sprites/UX/icons.png" id="1"]
+
+[resource]
+texture = ExtResource("1")
+texture_margin_left = 2.0
+texture_margin_top = 2.0
+texture_margin_right = 2.0
+texture_margin_bottom = 2.0
+region_rect = Rect2(20, 20, 8, 8)
+modulate_color = Color(0.64705884, 0.47058824, 0.33333334, 1)

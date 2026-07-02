@@ -5,7 +5,7 @@
 [ext_resource type="Theme" path="res://resources/ui/paramo_theme.tres" id="3_ti_theme"]
 
 [node name="TitleIntro" type="CanvasLayer"]
-layer = 200
+layer = 210
 script = ExtResource("1_ti_script")
 animated_texture = ExtResource("2_ti_anim")
 
@@ -16,7 +16,10 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.04, 0.09, 0.18, 1)
+; Authored transparent so it doesn't blanket the viewport in the editor. At
+; runtime title_intro.gd _ready sets color = color_a (opaque) and drives the
+; fade via modulate.a, so this alpha is editor-only.
+color = Color(0.04, 0.09, 0.18, 0)
 
 [node name="Title" type="TextureRect" parent="."]
 anchors_preset = 8

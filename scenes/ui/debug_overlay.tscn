@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://scripts/ui/debug_overlay.gd" id="1_dbg"]
 
 [node name="DebugOverlay" type="CanvasLayer"]
-layer = 100
+layer = 250
 script = ExtResource("1_dbg")
 
 [node name="Panel" type="PanelContainer" parent="."]

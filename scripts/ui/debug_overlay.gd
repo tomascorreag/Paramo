@@ -30,6 +30,9 @@ var _controller: DayNightSceneController
 
 
 func _ready() -> void:
+	# Authoritative layer (kept in sync with the .tscn); always on top so the dev
+	# panel is never occluded by HUD / post-process.
+	layer = UILayers.DEBUG
 	visible = Debug.enabled
 	Debug.enabled_changed.connect(_on_debug_enabled_changed)
 

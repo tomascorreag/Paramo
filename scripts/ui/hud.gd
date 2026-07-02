@@ -26,36 +26,29 @@ const _OPEN_DURATION: float = 0.20
 const _OPEN_STAGGER: float = 0.030
 const _CLOSE_DURATION: float = 0.10
 
-# Palette: palette2.aseprite. Indices in comments. Alpha is the only free knob.
-const _C_ACCENT: Color       = Color(0.9922, 0.8196, 0.4745, 1.00) # #FDD179 (12)
-const _C_BG_PANEL: Color     = Color(0.0784, 0.1373, 0.2275, 0.62) # #14233A (30)
-const _C_BG_HOVER: Color     = Color(0.2510, 0.3216, 0.4510, 0.80) # #405273 (28)
-const _C_BG_PRESSED: Color   = Color(0.1882, 0.2196, 0.2627, 0.88) # #303843 (29)
-const _C_BG_INNER: Color     = Color(0.1882, 0.2196, 0.2627, 0.75) # #303843 (29)
-const _C_BORDER_PANEL: Color = Color(0.4235, 0.5059, 0.6314, 0.85) # #6C81A1 (27)
-const _C_BORDER_INNER: Color = Color(0.2510, 0.3216, 0.4510, 0.85) # #405273 (28)
-const _C_BORDER_ITEM: Color  = Color(0.4235, 0.5059, 0.6314, 0.85) # #6C81A1 (27)
-
 ## Wheel sprite is 64×64; rotate around its center.
 const _WHEEL_PIVOT: Vector2 = Vector2(32, 32)
 
 @onready var _slot: Button = %EquippedSlot
 @onready var _slot_icon: TextureRect = %EquippedIcon
 @onready var _menu_root: Control = %ItemMenu
-@onready var _minimap: Panel = %Minimap
-@onready var _minimap_inner: Panel = %MinimapInner
 @onready var _season_wheel: TextureRect = %SeasonWheel
+@onready var _pause_button: Button = %PauseButton
+var _pause_bars: Array[NinePatchRect] = []
 
 var _items: Array[Dictionary] = []
 var _item_buttons: Array[Button] = []
 var _equipped_id: StringName = &""
 var _menu_open: bool = false
 var _tween: Tween
-var _frame_cache: Dictionary = {}
 
 
 func _ready() -> void:
-	_apply_static_frames()
+	# TitleIntro finds and hides the HUD via this group for the duration of the
+	# opening cinematic (see title_intro.gd _gate_gameplay_ux), so it isn't
+	# visible over the pre-title lake shot.
+	add_to_group(&"hud")
+	_setup_pause_button()
 	_items = _placeholder_items()
 	_slot.pressed.connect(_on_slot_pressed)
 	_build_menu()
@@ -110,40 +103,28 @@ func set_equipped(id: StringName) -> void:
 			return
 
 
-func _apply_static_frames() -> void:
-	_minimap.add_theme_stylebox_override(&"panel", _frame_stylebox(_C_BORDER_PANEL, _C_BG_PANEL))
-	_minimap_inner.add_theme_stylebox_override(&"panel", _frame_stylebox(_C_BORDER_INNER, _C_BG_INNER))
-	_slot.add_theme_stylebox_override(&"normal", _frame_stylebox(_C_BORDER_PANEL, _C_BG_PANEL))
-	_slot.add_theme_stylebox_override(&"hover", _frame_stylebox(_C_ACCENT, _C_BG_HOVER))
-	_slot.add_theme_stylebox_override(&"pressed", _frame_stylebox(_C_ACCENT, _C_BG_PRESSED))
-	_slot.add_theme_stylebox_override(&"focus", _frame_stylebox(_C_BORDER_PANEL, _C_BG_PANEL))
+func _setup_pause_button() -> void:
+	# Frameless: two solid-sprite bars form the pause glyph directly on the button.
+	var empty := StyleBoxEmpty.new()
+	for state: StringName in [&"normal", &"hover", &"pressed", &"focus"]:
+		_pause_button.add_theme_stylebox_override(state, empty)
+	_pause_bars.clear()
+	for x: int in [3, 9]:
+		var bar := PixelUI.make_solid_ninepatch(Palette.TEXT)
+		bar.position = Vector2(x, 3)
+		bar.size = Vector2(4, 10)
+		_pause_button.add_child(bar)
+		_pause_bars.append(bar)
+	_pause_button.mouse_entered.connect(_tint_pause_bars.bind(Palette.ACCENT))
+	_pause_button.mouse_exited.connect(_tint_pause_bars.bind(Palette.TEXT))
+	_pause_button.pressed.connect(func() -> void:
+		get_tree().call_group(&"pause_menu", &"toggle")
+	)
 
 
-## Builds (or returns cached) a StyleBoxTexture whose 3x3 source has
-## transparent corners, single-texel border edges, and a single-texel fill.
-## With texture_margin = 1 the corners stay 1:1 (chamfered) while edges
-## and interior stretch — every visible pixel snaps to one source texel.
-func _frame_stylebox(border: Color, fill: Color) -> StyleBoxTexture:
-	var key := "%s|%s" % [border.to_html(true), fill.to_html(true)]
-	if _frame_cache.has(key):
-		return _frame_cache[key]
-
-	var img := Image.create(3, 3, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
-	img.set_pixel(1, 0, border)
-	img.set_pixel(0, 1, border)
-	img.set_pixel(2, 1, border)
-	img.set_pixel(1, 2, border)
-	img.set_pixel(1, 1, fill)
-
-	var sb := StyleBoxTexture.new()
-	sb.texture = ImageTexture.create_from_image(img)
-	sb.texture_margin_left = 1
-	sb.texture_margin_top = 1
-	sb.texture_margin_right = 1
-	sb.texture_margin_bottom = 1
-	_frame_cache[key] = sb
-	return sb
+func _tint_pause_bars(c: Color) -> void:
+	for bar in _pause_bars:
+		bar.self_modulate = c
 
 
 func _on_slot_pressed() -> void:
@@ -225,18 +206,13 @@ func _make_item_button(item: Dictionary) -> Button:
 	b.size = Vector2(_ITEM_CELL, _ITEM_CELL)
 	b.focus_mode = Control.FOCUS_NONE
 	b.pivot_offset = Vector2(_ITEM_CELL, _ITEM_CELL) / 2.0
-	b.add_theme_stylebox_override(&"normal", _frame_stylebox(_C_BORDER_ITEM, _C_BG_PANEL))
-	b.add_theme_stylebox_override(&"hover", _frame_stylebox(_C_ACCENT, _C_BG_HOVER))
-	b.add_theme_stylebox_override(&"pressed", _frame_stylebox(_C_ACCENT, _C_BG_PRESSED))
-	b.add_theme_stylebox_override(&"focus", _frame_stylebox(_C_BORDER_ITEM, _C_BG_PANEL))
+	# Fills come from the global Button theme; a frame overlay draws the outline
+	# and is retinted per equipped state (_refresh_equipped_highlight).
+	var frame := PixelUI.make_frame_ninepatch(Palette.BORDER)
+	frame.name = "Frame"
+	b.add_child(frame)
 
-	var icon := TextureRect.new()
-	icon.texture = item["icon"]
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var icon := PixelUI.make_icon_fill(item["icon"])
 	b.add_child(icon)
 
 	b.pressed.connect(func() -> void:
@@ -249,11 +225,9 @@ func _make_item_button(item: Dictionary) -> Button:
 func _refresh_equipped_highlight() -> void:
 	for i in _item_buttons.size():
 		var equipped: bool = _items[i]["id"] == _equipped_id
-		var border: Color = _C_ACCENT if equipped else _C_BORDER_ITEM
-		var btn := _item_buttons[i]
-		btn.add_theme_stylebox_override(&"normal", _frame_stylebox(border, _C_BG_PANEL))
-		btn.add_theme_stylebox_override(&"hover", _frame_stylebox(_C_ACCENT, _C_BG_HOVER))
-		btn.add_theme_stylebox_override(&"pressed", _frame_stylebox(_C_ACCENT, _C_BG_PRESSED))
+		var frame := _item_buttons[i].get_node_or_null(^"Frame")
+		if frame != null:
+			frame.self_modulate = Palette.ACCENT if equipped else Palette.BORDER
 
 
 func _punch_icon() -> void:

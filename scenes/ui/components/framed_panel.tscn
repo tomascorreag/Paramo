@@ -1,0 +1,27 @@
+[gd_scene load_steps=2 format=3 uid="uid://cframedpanel001"]
+
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/frame_border.tres" id="1_frame"]
+
+; Reusable "solid fill + frame outline" panel primitive (the two-node pattern).
+; The root Panel gets its solid PANEL_BG fill from the global theme (Panel/panel);
+; the Frame child overlays the hollow rounded outline; put content in Content.
+; Instance this (enable "editable children" to add nodes under Content), or copy
+; the pattern inline. All editor-visible/editable.
+
+[node name="FramedPanel" type="Panel"]
+
+[node name="Frame" type="Panel" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("1_frame")
+
+[node name="Content" type="MarginContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10

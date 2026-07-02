@@ -127,6 +127,20 @@ extends CanvasLayer
 ## Skip-fade duration when the player presses any input. Fast but not instant.
 @export var skip_fade_duration: float = 0.15
 
+@export_group("Click Prompt")
+## Alpha the "click to begin" prompt settles to when the mouse is far away.
+@export_range(0.0, 1.0, 0.01) var prompt_min_alpha: float = 0.08
+## Alpha the prompt reaches when the mouse is on top of it.
+@export_range(0.0, 1.0, 0.01) var prompt_max_alpha: float = 1.0
+## Distance from the prompt at which intensity bottoms out at prompt_min_alpha.
+## Measured in the project's base-resolution units (stretch=canvas_items over a
+## 480x270 viewport), NOT physical pixels — so this spans the on-screen space
+## regardless of window size. Center-to-corner is ~275, so ~200 uses the full
+## intensity range across the visible screen.
+@export var prompt_falloff_px: float = 200.0
+## Exponential smoothing rate for the intensity ramp (higher = snappier follow).
+@export var prompt_track_speed: float = 10.0
+
 
 ## Sum of every sequence stage in _run_intro. Player reads this (plus
 ## pan_additional_duration) as the total opening camera pan duration.
@@ -162,8 +176,9 @@ var _awaiting_click: bool = false
 # the loading overlay, so the prompt is hidden and all input is swallowed (no
 # begin yet). Cleared by _activate_gate on ProceduralWorld.generation_finished.
 var _gate_pending: bool = false
-# Looping alpha-pulse on the click label; killed when the gate is dismissed.
-var _pulse_tween: Tween
+# True while the click prompt is tracking the mouse (from gate activation until
+# the first click). Drives per-frame proximity intensity in _process.
+var _tracking_prompt: bool = false
 # TimeManager.paused snapshot taken when the gate freezes time-of-day, restored
 # when the click starts the cinematic.
 var _was_time_paused: bool = false
@@ -195,9 +210,9 @@ var _cancel_token: int = 0
 
 
 func _ready() -> void:
-	# This layer must draw above post-process (layer 100). Set in code as
-	# well as the scene so refactors of the scene file can't quietly break it.
-	layer = 200
+	# This layer must draw above post-process (UILayers.POST_PROCESS). Set in code
+	# as well as the scene so refactors of the scene file can't quietly break it.
+	layer = UILayers.TITLE
 
 	# Register so Player can read pan_offset_px / pan_duration without a hard
 	# NodePath dependency. Done before any early-return so designers tweaking
@@ -287,29 +302,58 @@ func _gate_gameplay_ux() -> void:
 	# UXOverlay drives the hover cursor and candidate hints. Disable + hide.
 	for n: Node in tree.get_nodes_in_group(&"ux_overlay"):
 		_register_gated(n)
+	# HUD (minimap, equipped slot, season wheel) — hide for the whole cinematic
+	# so it doesn't sit over the pre-title lake shot. Restored in
+	# _restore_gameplay_ux when the intro finishes.
+	for n: Node in tree.get_nodes_in_group(&"hud"):
+		_register_gated(n)
 
 
 func _register_gated(node: Node) -> void:
 	if node == null or _gated_nodes.has(node):
 		return
 	_gated_nodes.append(node)
-	if node is CanvasItem:
-		_gated_visible[node] = (node as CanvasItem).visible
-		(node as CanvasItem).visible = false
+	# Both CanvasItem (Control/Node2D) and CanvasLayer (e.g. the HUD) expose
+	# `visible`; they share no common base that declares it, so snapshot + clear
+	# it dynamically. Hiding the CanvasLayer also hides its whole subtree.
+	if node is CanvasItem or node is CanvasLayer:
+		_gated_visible[node] = node.get(&"visible")
+		node.set(&"visible", false)
 	# Snapshot process_mode so a node authored with PROCESS_MODE_ALWAYS isn't
 	# silently downgraded to INHERIT on restore.
 	_gated_process_mode[node] = node.process_mode
 	node.process_mode = Node.PROCESS_MODE_DISABLED
 
 
+# Restore a single gated node's process_mode + visibility and drop it from the
+# tracking dicts, so a later blanket restore won't touch it again.
+func _restore_gated_node(node: Node) -> void:
+	if is_instance_valid(node):
+		if _gated_process_mode.has(node):
+			node.process_mode = _gated_process_mode[node]
+		if _gated_visible.has(node):
+			node.set(&"visible", _gated_visible[node])
+	_gated_nodes.erase(node)
+	_gated_visible.erase(node)
+	_gated_process_mode.erase(node)
+
+
+# Re-enable the HUD ahead of the general restore. Called at the flash: the
+# curtain is still fully opaque, so the HUD (layer 110, below this layer 200)
+# is rendered but hidden behind it — then the fade-out reveals a HUD that is
+# already live underneath, rather than popping in when the intro frees.
+func _restore_hud() -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	for n: Node in tree.get_nodes_in_group(&"hud"):
+		_restore_gated_node(n)
+
+
 func _restore_gameplay_ux() -> void:
-	for n: Node in _gated_nodes:
-		if not is_instance_valid(n):
-			continue
-		if _gated_process_mode.has(n):
-			n.process_mode = _gated_process_mode[n]
-		if n is CanvasItem and _gated_visible.has(n):
-			(n as CanvasItem).visible = _gated_visible[n]
+	# Duplicate: _restore_gated_node mutates _gated_nodes as it goes.
+	for n: Node in _gated_nodes.duplicate():
+		_restore_gated_node(n)
 	_gated_nodes.clear()
 	_gated_visible.clear()
 	_gated_process_mode.clear()
@@ -321,6 +365,9 @@ func _restore_gameplay_ux() -> void:
 # ----------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if _tracking_prompt:
+		_update_prompt_intensity(delta)
+
 	if not _animating:
 		return
 	if anim_fps <= 0.0:
@@ -452,6 +499,10 @@ func _stage_static_hold_duration() -> float:
 # Stage: flash curtain to color_b. Short tween → feels like a snap / event.
 # Using `color` (not modulate) so the curtain stays fully opaque.
 func _stage_flash(token: int) -> bool:
+	# Bring the HUD back to life now, while the curtain is still opaque and
+	# hides it, so the upcoming fade-out reveals a HUD that is already running
+	# underneath instead of popping in when the intro frees.
+	_restore_hud()
 	var tw: Tween = create_tween()
 	tw.tween_property(_curtain, "color", color_b, flash_duration) \
 		.set_trans(Tween.TRANS_LINEAR)
@@ -513,17 +564,29 @@ func _activate_gate() -> void:
 	_gate_pending = false
 	_awaiting_click = true
 	_running = true
-	_click_label.modulate.a = 1.0
-	_start_pulse()
+	# Start dim; proximity tracking in _process ramps it up as the mouse nears.
+	_click_label.modulate.a = prompt_min_alpha
+	_tracking_prompt = true
 
 
-# Gentle alpha breathing on the prompt so the frozen screen reads as alive.
-func _start_pulse() -> void:
-	_pulse_tween = create_tween().set_loops()
-	_pulse_tween.tween_property(_click_label, "modulate:a", 0.35, 1.1) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	_pulse_tween.tween_property(_click_label, "modulate:a", 1.0, 1.1) \
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+# Per-frame: drive the prompt's alpha from how close the mouse is to it. On top
+# of / inside the label → prompt_max_alpha; at prompt_falloff_px or beyond →
+# prompt_min_alpha. Uses distance to the label's rect (0 when inside) so the
+# whole glyph is the target, not just its center. Exponential smoothing keeps
+# the ramp from snapping/jittering as the cursor moves.
+func _update_prompt_intensity(delta: float) -> void:
+	var rect: Rect2 = _click_label.get_global_rect()
+	var m: Vector2 = _click_label.get_global_mouse_position()
+	var closest := Vector2(
+		clampf(m.x, rect.position.x, rect.end.x),
+		clampf(m.y, rect.position.y, rect.end.y)
+	)
+	var dist: float = m.distance_to(closest)
+	# Linear ramp: intensity falls off evenly with distance from the label.
+	var t: float = clampf(dist / maxf(prompt_falloff_px, 1.0), 0.0, 1.0)
+	var target: float = lerpf(prompt_max_alpha, prompt_min_alpha, t)
+	var k: float = 1.0 - exp(-prompt_track_speed * delta)
+	_click_label.modulate.a = lerpf(_click_label.modulate.a, target, k)
 
 
 # First interaction: fade the prompt out, request fullscreen, start the music,
@@ -534,9 +597,8 @@ func _start_pulse() -> void:
 func _begin_from_click() -> void:
 	_awaiting_click = false
 
-	if _pulse_tween != null and _pulse_tween.is_valid():
-		_pulse_tween.kill()
-	_pulse_tween = null
+	# Stop proximity tracking so _process stops fighting the fade-out tween.
+	_tracking_prompt = false
 	var fade: Tween = create_tween()
 	fade.tween_property(_click_label, "modulate:a", 0.0, 0.25) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)

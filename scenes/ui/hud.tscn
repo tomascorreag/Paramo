@@ -1,8 +1,9 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
 [ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/frailejon.tres" id="2_icon"]
 [ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/season_wheel.tres" id="3_wheel"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/frame_border.tres" id="4_frame"]
 
 ; Stepped (constant-interpolation) glow rising from the slit, behind the wheel.
 ; Single palette colour (index 30 #14233A) fading to transparent over 4 hard
@@ -109,6 +110,13 @@ offset_bottom = 40.0
 grow_horizontal = 0
 mouse_filter = 1
 
+[node name="Frame" type="Panel" parent="Minimap"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("4_frame")
+
 [node name="MinimapInner" type="Panel" parent="Minimap"]
 unique_name_in_owner = true
 anchors_preset = 15
@@ -158,6 +166,13 @@ offset_bottom = -4.0
 grow_vertical = 0
 focus_mode = 0
 
+[node name="Frame" type="Panel" parent="EquippedSlot"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("4_frame")
+
 [node name="EquippedIcon" type="TextureRect" parent="EquippedSlot"]
 unique_name_in_owner = true
 texture_filter = 1
@@ -181,3 +196,19 @@ offset_right = 36.0
 offset_bottom = -38.0
 grow_vertical = 0
 mouse_filter = 1
+
+; Pause affordance, bottom-right corner (mirrors EquippedSlot's bottom-left 32x32).
+; Styled + given its glyph in hud.gd; opens the PauseMenu via the pause_menu group.
+[node name="PauseButton" type="Button" parent="."]
+unique_name_in_owner = true
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -20.0
+offset_top = -20.0
+offset_right = -4.0
+offset_bottom = -4.0
+grow_horizontal = 0
+grow_vertical = 0
+focus_mode = 0

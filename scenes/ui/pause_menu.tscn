@@ -1,0 +1,177 @@
+[gd_scene format=3 uid="uid://bpr62cb8hqunk"]
+
+[ext_resource type="Script" uid="uid://b0iavpm205dq" path="res://scripts/ui/pause_menu.gd" id="1_pm"]
+[ext_resource type="StyleBox" uid="uid://cki27kvgffc87" path="res://resources/ui/styleboxes/frame_border.tres" id="2_frame"]
+[ext_resource type="StyleBox" uid="uid://7h7iou0et3mf" path="res://resources/ui/styleboxes/solid_accent_soft.tres" id="3_8uki6"]
+[ext_resource type="StyleBox" uid="uid://c0jnuq8a11a8i" path="res://resources/ui/styleboxes/solid_surface.tres" id="3_surface"]
+
+[sub_resource type="StyleBoxEmpty" id="SB_empty"]
+
+[node name="PauseMenu" type="CanvasLayer" unique_id=645504101]
+layer = 220
+script = ExtResource("1_pm")
+
+[node name="Dim" type="ColorRect" parent="." unique_id=766800268]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.078431, 0.137255, 0.227451, 0.6)
+
+[node name="Center" type="CenterContainer" parent="." unique_id=430150094]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Panel" type="Panel" parent="Center" unique_id=1162574523]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(184, 104)
+layout_mode = 2
+
+[node name="Frame" type="Panel" parent="Center/Panel" unique_id=1973741509]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel" unique_id=1359933053]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="Stack" type="VBoxContainer" parent="Center/Panel/Margin" unique_id=2000380345]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Center/Panel/Margin/Stack" unique_id=270835396]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "paused"
+horizontal_alignment = 1
+
+[node name="Main" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1368542683]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Settings" type="VBoxContainer" parent="Center/Panel/Margin/Stack/Main" unique_id=1406095421]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Separator" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1484330112]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="BarLeft" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1407428516]
+custom_minimum_size = Vector2(0, 3)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_styles/panel = ExtResource("3_8uki6")
+
+[node name="SettingsHeader" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1251077074]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
+text = "settings"
+horizontal_alignment = 1
+
+[node name="BarRight" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1904957683]
+custom_minimum_size = Vector2(0, 3)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_styles/panel = ExtResource("3_8uki6")
+
+[node name="VolumeLabel" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1450622199]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
+text = "volume"
+horizontal_alignment = 1
+
+[node name="SliderFrame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=328256822]
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+theme_override_styles/panel = ExtResource("3_surface")
+
+[node name="SliderFrameBorder" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame" unique_id=1859048661]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="VolumeSlider" type="HSlider" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame" unique_id=2146019563]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+theme_override_styles/slider = SubResource("SB_empty")
+max_value = 1.5
+step = 0.05
+value = 0.75
+
+[node name="Confirm" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1435831011]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ConfirmLabel" type="Label" parent="Center/Panel/Margin/Stack/Confirm" unique_id=857861158]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "discard run and restart?"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="ConfirmRow" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Confirm" unique_id=1301750421]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="YesBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow" unique_id=1536091334]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 24)
+layout_mode = 2
+text = "yes"
+
+[node name="CancelBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow" unique_id=1645592046]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(72, 24)
+layout_mode = 2
+text = "cancel"
+
+[node name="ResumeBtn" type="Button" parent="Center/Panel" unique_id=82048195]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -24.0
+offset_top = -8.0
+offset_right = 24.000023
+offset_bottom = 6.0
+grow_horizontal = 2
+grow_vertical = 0
+pivot_offset_ratio = Vector2(0.5, 0.5)
+focus_mode = 0
+text = "resume"
+
+[node name="Frame" type="Panel" parent="Center/Panel/ResumeBtn" unique_id=990110001]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")

@@ -23,13 +23,11 @@ extends CanvasLayer
 #   fade_out()          — await a short fade; caller frees the node after
 # ============================================================================
 
-# Palette indices: 30 (deep night), 23 (near-white), 01 (warm grey),
-# 28 (dusk blue), 20 (paramo green).
-const _COL_BG := Color(0x14 / 255.0, 0x23 / 255.0, 0x3A / 255.0, 1.0)
-const _COL_TEXT := Color(0xF1 / 255.0, 0xF6 / 255.0, 0xF0 / 255.0, 1.0)
-const _COL_DIM := Color(0x87 / 255.0, 0x85 / 255.0, 0x7C / 255.0, 1.0)
-const _COL_TRACK := Color(0x40 / 255.0, 0x52 / 255.0, 0x73 / 255.0, 1.0)
-const _COL_FILL := Color(0x89 / 255.0, 0xA4 / 255.0, 0x77 / 255.0, 1.0)
+# Colors from Palette.* (palette2). The progress bar + label text pick up the
+# global theme (resources/ui/paramo_theme.tres); only the full-screen backdrop
+# (ColorRect, no theme hook) and the dimmed status line are set here.
+const _COL_BG := Palette.PANEL_BG    # 30 deep night
+const _COL_DIM := Palette.TEXT_DIM   # 01 warm grey
 
 # Easing factor for pulse_toward — per-call lerp weight. Called once per frame
 # during the generation poll loop, so this is effectively per-frame smoothing.
@@ -44,7 +42,7 @@ var _bar_value: float = 0.0
 func _ready() -> void:
 	# Above HUD / world; PROCESS_MODE_ALWAYS so the fade tween runs even if the
 	# tree is paused (planning phase pauses the simulation in this game).
-	layer = 128
+	layer = UILayers.LOADING
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 	_canvas = Control.new()
@@ -71,7 +69,6 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "Páramo"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", _COL_TEXT)
 	title.add_theme_font_size_override("font_size", 24)
 	box.add_child(title)
 
@@ -87,14 +84,7 @@ func _ready() -> void:
 	_bar.max_value = 1.0
 	_bar.value = 0.0
 	_bar.show_percentage = false
-	var sb_bg := StyleBoxFlat.new()
-	sb_bg.bg_color = _COL_TRACK
-	sb_bg.set_corner_radius_all(3)
-	var sb_fg := StyleBoxFlat.new()
-	sb_fg.bg_color = _COL_FILL
-	sb_fg.set_corner_radius_all(3)
-	_bar.add_theme_stylebox_override("background", sb_bg)
-	_bar.add_theme_stylebox_override("fill", sb_fg)
+	# Track + fill styleboxes come from the global theme's ProgressBar entry.
 	box.add_child(_bar)
 
 

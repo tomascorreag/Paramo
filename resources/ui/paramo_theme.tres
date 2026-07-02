@@ -1,7 +1,30 @@
-[gd_resource type="Theme" load_steps=2 format=3]
+[gd_resource type="Theme" format=3 uid="uid://dwg1b0tio8ymu"]
 
 [ext_resource type="FontFile" uid="uid://vgqs6kp2kuxg" path="res://assets/fonts/Tiny5-Regular.ttf" id="1_tiny5"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_panel.tres" id="2_panel"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_surface.tres" id="3_surface"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_hover.tres" id="4_hover"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_accent_soft.tres" id="5_accsoft"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_progress.tres" id="6_progress"]
+[ext_resource type="Texture2D" path="res://resources/ui/styleboxes/grabber.tres" id="7_grabber"]
 
 [resource]
 default_font = ExtResource("1_tiny5")
 default_font_size = 8
+Button/colors/font_color = Color(0.945098, 0.964706, 0.941176, 1)
+Button/colors/font_hover_color = Color(0.945098, 0.964706, 0.941176, 1)
+Button/colors/font_pressed_color = Color(0.078431, 0.137255, 0.227451, 1)
+Button/styles/focus = ExtResource("3_surface")
+Button/styles/hover = ExtResource("4_hover")
+Button/styles/normal = ExtResource("3_surface")
+Button/styles/pressed = ExtResource("5_accsoft")
+HSlider/icons/grabber = ExtResource("7_grabber")
+HSlider/icons/grabber_highlight = ExtResource("7_grabber")
+HSlider/styles/grabber_area = ExtResource("6_progress")
+HSlider/styles/grabber_area_highlight = ExtResource("6_progress")
+HSlider/styles/slider = ExtResource("3_surface")
+Label/colors/font_color = Color(0.945098, 0.964706, 0.941176, 1)
+Panel/styles/panel = ExtResource("2_panel")
+PanelContainer/styles/panel = ExtResource("2_panel")
+ProgressBar/styles/background = ExtResource("3_surface")
+ProgressBar/styles/fill = ExtResource("6_progress")

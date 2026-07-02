@@ -86,7 +86,7 @@ func _ready() -> void:
 	_frailejon_scene = load("res://scenes/tools/frailejon.tscn")
 
 	_menu_layer = CanvasLayer.new()
-	_menu_layer.layer = 101  # above PostProcessLayer (100)
+	_menu_layer.layer = UILayers.RADIAL_MENU
 	add_child(_menu_layer)
 
 	_registry = ActionRegistry.new()
@@ -129,8 +129,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if mb.button_index != MOUSE_BUTTON_RIGHT or not mb.pressed:
 		return
 
-	# A new right-click supersedes any walk-then-act already in flight.
-	_cancel_pending()
+	# Right-click while the player is moving = brake: stop where it is and drop
+	# any in-flight walk-then-act, WITHOUT opening a menu. The pending action
+	# must be cancelled before the movement ends so the arrival poll (_process)
+	# doesn't fire it. A second right-click, now that the player is static,
+	# brings up the action menu normally (handled below).
+	if player.is_moving():
+		player.stop()
+		_cancel_pending()
+		get_viewport().set_input_as_handled()
+		return
 
 	var global_pos := _event_global_position(mb)
 	# Resolve the cell under the cursor with the general interaction rule: the
@@ -493,11 +501,11 @@ func _ensure_toast() -> void:
 	if _toast_layer != null and is_instance_valid(_toast_layer):
 		return
 	_toast_layer = CanvasLayer.new()
-	_toast_layer.layer = 100  # below the radial menu's 101
+	_toast_layer.layer = UILayers.TOAST
 	add_child(_toast_layer)
 	_toast_label = Label.new()
-	_toast_label.add_theme_color_override(&"font_color", Color.WHITE)
-	_toast_label.add_theme_color_override(&"font_shadow_color", Color(0, 0, 0, 0.85))
+	_toast_label.add_theme_color_override(&"font_color", Palette.TEXT)
+	_toast_label.add_theme_color_override(&"font_shadow_color", Palette.with_alpha(Palette.SHADOW, 0.85))
 	_toast_label.add_theme_constant_override(&"shadow_offset_x", 1)
 	_toast_label.add_theme_constant_override(&"shadow_offset_y", 1)
 	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
