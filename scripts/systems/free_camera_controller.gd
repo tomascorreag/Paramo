@@ -22,6 +22,8 @@ extends Camera2D
 
 func _ready() -> void:
 	Debug.free_movement_changed.connect(_on_free_movement_changed)
+	# Nothing to poll until free mode is on, and the toggle already signals us.
+	set_process(Debug.free_movement)
 	# Late-arrival safety: if the toggle was already on (e.g. via console)
 	# before this node entered the tree, take over now.
 	if Debug.free_movement:
@@ -29,6 +31,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Kept as the invariant even though set_process() gates this: if the two ever
+	# disagree, not panning is the safe answer.
 	if not Debug.free_movement:
 		return
 	var dir: Vector2 = Input.get_vector(
@@ -43,6 +47,7 @@ func _process(delta: float) -> void:
 # ----------------------------------------------------------------------------
 
 func _on_free_movement_changed(is_enabled: bool) -> void:
+	set_process(is_enabled)
 	if is_enabled:
 		_take_over()
 	else:

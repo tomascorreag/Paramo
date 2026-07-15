@@ -576,10 +576,18 @@ func resolve_click(global_pos: Vector2, accept: Callable = Callable()) -> Vector
 			var net_shift := float(alt) * HALF_STEP_PX + layer.position.y
 			var shifted := local + Vector2(0.0, net_shift) - VISUAL_SURFACE_OFFSET
 			var cell := layer.local_to_map(shifted)
+			# Cheap test first. Both gates are pure predicates and a cell must
+			# pass BOTH, so the order can't change which cell resolves — but
+			# `accept` is the expensive one. The interaction predicate
+			# (walkable OR has_any_action) evaluates the whole action registry:
+			# an ActionContext alloc + a cached BFS + is_offerable on every
+			# action, each scanning a 3x3 block. Probing it for cells that don't
+			# even belong to this layer ran that sweep up to once per altitude
+			# tier, every frame, just to hover.
+			if _grid.layer_of(cell) != layer:
+				continue
 			var ok: bool = accept.call(cell) if accept.is_valid() else _grid.is_terrain_walkable(cell)
 			if not ok:
-				continue
-			if _grid.layer_of(cell) != layer:
 				continue
 			return cell
 	return NO_CELL

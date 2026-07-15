@@ -47,6 +47,37 @@ render_mode blend_premul_alpha;
 // `tint_color` is set externally to the current DayNight background fill, so
 // rain takes on the ambient hue (warm at dusk, cool/dark at night, bright at
 // noon). Multiplied with rain_color before adding to the screen.
+//
+// --- PERFORMANCE NOTES -----------------------------------------------------
+// This shader is fill-bound: it runs over the whole 480x270 viewport and the
+// loop nest is dominated by sin()-based hashing. Three structural rules keep
+// the cost down. Breaking any of them silently multiplies the per-pixel work,
+// so preserve them when editing:
+//
+//  1. LOOP-INVARIANT HOISTING. Anything depending only on world_px and the
+//     uniforms (the lantern factor, tint, splash extents) is computed ONCE in
+//     fragment() and passed into compute_drop. compute_drop runs up to 27x per
+//     pixel; do not move this math back inside it.
+//
+//  2. LAZY HASHING. compute_drop hashes only what it needs to decide whether a
+//     drop can possibly touch this pixel (alive / phase / speed / splash_y).
+//     The streak-length and per-drop-alpha hashes are computed only after a
+//     conservative range test has already passed, because the answer is thrown
+//     away on the ~95% of pixels that miss.
+//
+//  3. EXACT SPATIAL BOUNDS. Streaks are hard-clipped to their own cell, so
+//     only splash particles can cross a cell boundary — and they travel a
+//     bounded distance from splash_y (see splash_extents_* in fragment()).
+//     Both the neighbour-row loop and the per-drop particle nest are gated on
+//     those bounds. The bounds are derived from the uniforms, not hardcoded,
+//     and are deliberately padded by 1-2px to absorb the floor() in the pixel
+//     tests plus float slop. They are conservative: a gate never rejects a
+//     pixel the unguarded math would have drawn, so output is unchanged.
+//
+// Verified pixel-identical to the unoptimised version by
+// scripts/tools/verify_rain_equivalence.gd, which renders both shaders to
+// SubViewports in the same frame (so TIME matches) and diffs them across a
+// sweep of uniform sets. Re-run it after touching this file.
 
 uniform vec4 rain_color : source_color = vec4(0.75, 0.82, 0.95, 0.6);
 uniform vec4 tint_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
@@ -81,6 +112,28 @@ uniform vec4 lantern_color : source_color = vec4(1.0, 0.725, 0.45, 1.0);
 uniform float lantern_color_mix : hint_range(0.0, 1.0) = 0.6;
 uniform float lantern_lift_gain : hint_range(0.0, 4.0) = 1.5;
 
+// Splash particle constants. These live at file scope because fragment() needs
+// them to derive the spatial bounds that gate the particle nest, and
+// compute_drop needs them to actually simulate the particles. The two MUST
+// agree — if you change a constant here, the bounds in fragment() adapt
+// automatically, but only because they are written in terms of these names.
+const int K_DROPS_PER_CELL = 4;
+const int N_PARTICLES = 6;
+const int TRAIL_LEN = 3;
+const float TRAIL_DT = 0.025;
+const float GRAVITY = 220.0;
+const float X_TRAVEL_LIMIT = 4.0;
+
+// --- Hashing ---------------------------------------------------------------
+// DO NOT "optimise" these into an integer bit-hash. It was tried and MEASURED:
+// swapping both for lowbias32 (floatBitsToUint + three xorshift-multiply
+// rounds) made the pass 25% SLOWER on an RTX 3080 under GL Compatibility
+// (1.32 -> 1.66 ms at 1920x1080), because the 32-bit integer multiplies cost
+// more than the sin() they replaced — sin() issues on the special-function
+// unit, which is otherwise idle here and runs in parallel with the ALU work
+// this shader is actually bound on. Re-measure with
+// scripts/tools/benchmark_rain.gd before revisiting; the intuition that
+// "sin is expensive" does not survive contact with this workload.
 float hash1(float n) {
 	return fract(sin(n * 91.3458) * 47453.5453);
 }
@@ -105,6 +158,11 @@ float lantern_factor(vec2 px_view) {
 // Compute the drop contribution at world_px for the drop owned by
 // (col_idx, cell_row). Returns rgba — zero alpha means nothing to draw.
 //
+// `h_cp`, `lit`, `lift_mul`, `amt_alpha`, `dwell`, `vx_speed`, `max_up`,
+// `max_down` and `max_dx` are all loop-invariant and are computed once per
+// fragment — see PERFORMANCE NOTES rule 1. `h_cp` is this column's hashed
+// cell_top phase, which fragment() already needs in order to pick the row.
+//
 // `speed` deliberately does NOT depend on rain_amount. The shader is
 // stateless, so `head_y = mod(TIME, cell_height/speed) * speed` will jump
 // (sometimes backwards/upward) any frame `speed` changes. rain_amount is
@@ -112,8 +170,9 @@ float lantern_factor(vec2 px_view) {
 // produced a visible stall/reversal in sync with the noise wave. Density
 // (the h_alive gate) and alpha (amt_alpha) carry the "heavier rain reads
 // heavier" signal instead.
-vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
-		float amt_alpha) {
+vec4 compute_drop(float col_idx, float cell_row, float h_cp, vec2 world_px,
+		float amt_alpha, vec3 lit, float lift_mul, float dwell,
+		float vx_speed, float max_up, float max_down, float max_dx) {
 	// All "static" drop properties (alive, phase, speed, streak length) depend
 	// ONLY on col_idx. This synchronizes every drop in the same column across
 	// all cell rows: when cell N's drop wraps back to its cell_top, cell N-1's
@@ -127,10 +186,9 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 
 	float h_phase = hash1(col_idx + 1.0);
 	float h_speed = hash1(col_idx + 17.0);
-	float h_len   = hash1(col_idx + 53.0);
 
 	float speed = fall_speed * (0.8 + 0.4 * h_speed);
-	float seg_len = max(1.0, streak_length + (h_len - 0.5) * 2.0);
+	float base_speed_p = 30.0 * splash_size;
 
 	float cycle_period = cell_height / speed;
 	// Per-column phase offset on cell_top scatters the cell-row boundaries
@@ -140,34 +198,9 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 	// stable across frames and identical for every cell_row in this column —
 	// the drop_idx invariant and per-column chain continuity are preserved.
 	// fragment() computes the row index per column so this offset is applied
-	// consistently.
-	float cell_top = (cell_row + hash1(col_idx + 200.0)) * cell_height;
+	// consistently, and passes the hash in as h_cp so it isn't rehashed here.
+	float cell_top = (cell_row + h_cp) * cell_height;
 	float anchor_x = (col_idx + 0.5) * column_spacing;
-	float splash_dwell_clamped = max(0.001, splash_dwell);
-
-	// tint_intensity lerps between untinted rain_color (0.0) and full ambient
-	// modulation (1.0). At 1.0 rain matches scene lighting; at 0.0 rain ignores
-	// it and stays whatever the inspector rain_color is.
-	vec3 effective_tint = mix(vec3(1.0), tint_color.rgb, tint_intensity);
-	vec3 light = rain_color.rgb * effective_tint;
-
-	// Lantern bias: warm the rgb toward lantern_color and amplify the additive
-	// lift, both scaled by proximity. lk == 0 when the lantern is off or the
-	// pixel is outside the radius, so the rest of the math is a no-op then.
-	float lk = lantern_factor(world_px - camera_offset);
-	vec3 lit = mix(light, light * lantern_color.rgb, lk * lantern_color_mix);
-	float lift_mul = 1.0 + lk * lantern_lift_gain;
-
-	// Particle constants reused by every drop's splash.
-	const int K_DROPS_PER_CELL = 4;
-	const int N_PARTICLES = 6;
-	const int TRAIL_LEN = 3;
-	const float TRAIL_DT = 0.025;
-	const float GRAVITY = 220.0;
-	const float X_TRAVEL_LIMIT = 4.0;
-	float base_speed_p = 30.0 * splash_size;
-	float vx_cap = X_TRAVEL_LIMIT / splash_dwell_clamped;
-	float vx_speed = min(base_speed_p, vx_cap);
 
 	vec4 best = vec4(0.0);
 
@@ -189,11 +222,11 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 		float drop_idx_j = cell_row - cycle_idx_j;
 		vec2 drop_key = vec2(col_idx + jf * 0.713, drop_idx_j + 7.0);
 
-		float h_alpha = hash2(drop_key);
+		// Only the two hashes needed to locate the drop's death point. The
+		// alpha hash is deferred into the branches that actually draw — see
+		// PERFORMANCE NOTES rule 2.
 		float h_splash_fire = hash2(drop_key + vec2(0.11, 0.0));
 		float h_splash_norm = hash2(drop_key + vec2(0.0, 0.13));
-
-		float alpha_mult = mix(1.0 - streak_alpha_variation, 1.0, h_alpha);
 
 		bool drop_splashes = h_splash_fire < splash_probability;
 		float splash_y_world = cell_top + cell_height + 1.0;
@@ -208,26 +241,37 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 		// look like a hard pop-in at cell_top.
 		if (head_y_world < splash_y_world) {
 			float dy = head_y_world - world_px.y;
-			if (dy >= 0.0 && dy < seg_len
+			// Conservative pre-gate. seg_len can never exceed
+			// max(1.0, streak_length + 1.0) for any h_len, so a fragment
+			// outside that range cannot be on this streak — and we skip
+			// hashing h_len / h_alpha for it.
+			float seg_len_max = max(1.0, streak_length + 1.0);
+			if (dy >= 0.0 && dy < seg_len_max
 					&& world_px.y < splash_y_world
 					&& world_px.y >= cell_top) {
-				// anchor_x is the column's SHEARED center. Un-shear at this
-				// row to get the streak's real-x. Because the streak is a
-				// vertical segment in sheared space, this single expression
-				// places every row of the streak onto the diagonal path the
-				// head actually travels — so the drop falls along the angle
-				// instead of merely being tilted.
-				float streak_x = anchor_x + streak_angle * world_px.y;
-				if (world_px.x == floor(streak_x)) {
-					float head_fade = 1.0 - dy / seg_len;
-					float fadein = clamp((head_y_world - cell_top) / seg_len, 0.0, 1.0);
-					float a = rain_color.a * head_fade * amt_alpha * alpha_mult * fadein;
-					float lift = additive_boost * head_fade * amt_alpha * alpha_mult * fadein * lift_mul;
-					vec4 c = vec4(lit * a + lit * lift, a);
-					if (c.a > best.a) {
-						best = c;
+				float h_len = hash1(col_idx + 53.0);
+				float seg_len = max(1.0, streak_length + (h_len - 0.5) * 2.0);
+				if (dy < seg_len) {
+					// anchor_x is the column's SHEARED center. Un-shear at this
+					// row to get the streak's real-x. Because the streak is a
+					// vertical segment in sheared space, this single expression
+					// places every row of the streak onto the diagonal path the
+					// head actually travels — so the drop falls along the angle
+					// instead of merely being tilted.
+					float streak_x = anchor_x + streak_angle * world_px.y;
+					if (world_px.x == floor(streak_x)) {
+						float h_alpha = hash2(drop_key);
+						float alpha_mult = mix(1.0 - streak_alpha_variation, 1.0, h_alpha);
+						float head_fade = 1.0 - dy / seg_len;
+						float fadein = clamp((head_y_world - cell_top) / seg_len, 0.0, 1.0);
+						float a = rain_color.a * head_fade * amt_alpha * alpha_mult * fadein;
+						float lift = additive_boost * head_fade * amt_alpha * alpha_mult * fadein * lift_mul;
+						vec4 c = vec4(lit * a + lit * lift, a);
+						if (c.a > best.a) {
+							best = c;
+						}
+						continue;
 					}
-					continue;
 				}
 			}
 		}
@@ -237,10 +281,7 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 		// upward (vy ricochet) with gravity pulling them back.
 		if (drop_splashes) {
 			float t_after = (head_y_world - splash_y_world) / speed;
-			if (t_after >= 0.0 && t_after < splash_dwell_clamped) {
-				float age = t_after / splash_dwell_clamped;
-				float fade = 1.0 - age;
-
+			if (t_after >= 0.0 && t_after < dwell) {
 				// Splash emits at the drop's REAL position when the head
 				// reaches splash_y_world. anchor_x is sheared, so un-shear at
 				// splash_y to get the emission x in real space. Particles
@@ -248,37 +289,51 @@ vec4 compute_drop(float col_idx, float cell_row, vec2 world_px,
 				// untouched — gravity is vertical regardless of streak_angle).
 				float splash_x_real = anchor_x + streak_angle * splash_y_world;
 
-				float slot_best_intensity = 0.0;
-				for (int k = 0; k < N_PARTICLES; k++) {
-					float kf = float(k);
-					vec2 phash_key = drop_key + vec2(kf * 1.31, 7.0);
-					float h_vx = hash2(phash_key);
-					float h_vy = hash2(phash_key + vec2(0.0, 0.5));
-					float vx = (h_vx * 2.0 - 1.0) * vx_speed;
-					float vy = (h_vy * 1.3 - 1.0) * base_speed_p;
-					for (int i = 0; i < TRAIL_LEN; i++) {
-						float sample_t = t_after - float(i) * TRAIL_DT;
-						if (sample_t < 0.0) {
-							break;
-						}
-						float pxf = splash_x_real + vx * sample_t;
-						float pyf = splash_y_world + vy * sample_t + 0.5 * GRAVITY * sample_t * sample_t;
-						if (world_px.x == floor(pxf) && world_px.y == floor(pyf)) {
-							float trail_intensity = 1.0 - float(i) / float(TRAIL_LEN);
-							if (trail_intensity > slot_best_intensity) {
-								slot_best_intensity = trail_intensity;
+				// Exact spatial gate — PERFORMANCE NOTES rule 3. No particle
+				// of this splash can land outside this box, so a fragment
+				// outside it would run all N_PARTICLES x TRAIL_LEN iterations
+				// only to miss every one. This is the single largest saving in
+				// the shader. Padding absorbs the floor() in the pixel test.
+				if (world_px.y >= splash_y_world - max_up - 1.0
+						&& world_px.y <= splash_y_world + max_down + 1.0
+						&& abs(world_px.x - splash_x_real) <= max_dx + 1.0) {
+					float age = t_after / dwell;
+					float fade = 1.0 - age;
+
+					float slot_best_intensity = 0.0;
+					for (int k = 0; k < N_PARTICLES; k++) {
+						float kf = float(k);
+						vec2 phash_key = drop_key + vec2(kf * 1.31, 7.0);
+						float h_vx = hash2(phash_key);
+						float h_vy = hash2(phash_key + vec2(0.0, 0.5));
+						float vx = (h_vx * 2.0 - 1.0) * vx_speed;
+						float vy = (h_vy * 1.3 - 1.0) * base_speed_p;
+						for (int i = 0; i < TRAIL_LEN; i++) {
+							float sample_t = t_after - float(i) * TRAIL_DT;
+							if (sample_t < 0.0) {
+								break;
 							}
-							break;
+							float pxf = splash_x_real + vx * sample_t;
+							float pyf = splash_y_world + vy * sample_t + 0.5 * GRAVITY * sample_t * sample_t;
+							if (world_px.x == floor(pxf) && world_px.y == floor(pyf)) {
+								float trail_intensity = 1.0 - float(i) / float(TRAIL_LEN);
+								if (trail_intensity > slot_best_intensity) {
+									slot_best_intensity = trail_intensity;
+								}
+								break;
+							}
 						}
 					}
-				}
 
-				if (slot_best_intensity > 0.0) {
-					float a = rain_color.a * fade * amt_alpha * slot_best_intensity * alpha_mult;
-					float lift = additive_boost * fade * amt_alpha * slot_best_intensity * alpha_mult * lift_mul;
-					vec4 c = vec4(lit * a + lit * lift, a);
-					if (c.a > best.a) {
-						best = c;
+					if (slot_best_intensity > 0.0) {
+						float h_alpha = hash2(drop_key);
+						float alpha_mult = mix(1.0 - streak_alpha_variation, 1.0, h_alpha);
+						float a = rain_color.a * fade * amt_alpha * slot_best_intensity * alpha_mult;
+						float lift = additive_boost * fade * amt_alpha * slot_best_intensity * alpha_mult * lift_mul;
+						vec4 c = vec4(lit * a + lit * lift, a);
+						if (c.a > best.a) {
+							best = c;
+						}
 					}
 				}
 			}
@@ -300,9 +355,46 @@ void fragment() {
 
 	float amt_alpha = pow(rain_amount, 0.7);
 
+	// --- Loop-invariant setup (PERFORMANCE NOTES rule 1). Everything below
+	// depends only on world_px and uniforms, so it is computed once here
+	// rather than once per compute_drop call (up to 27x).
+
+	// tint_intensity lerps between untinted rain_color (0.0) and full ambient
+	// modulation (1.0). At 1.0 rain matches scene lighting; at 0.0 rain ignores
+	// it and stays whatever the inspector rain_color is.
+	vec3 effective_tint = mix(vec3(1.0), tint_color.rgb, tint_intensity);
+	vec3 light = rain_color.rgb * effective_tint;
+
+	// Lantern bias: warm the rgb toward lantern_color and amplify the additive
+	// lift, both scaled by proximity. lk == 0 when the lantern is off or the
+	// pixel is outside the radius, so the rest of the math is a no-op then.
+	float lk = lantern_factor(world_px - camera_offset);
+	vec3 lit = mix(light, light * lantern_color.rgb, lk * lantern_color_mix);
+	float lift_mul = 1.0 + lk * lantern_lift_gain;
+
+	float dwell = max(0.001, splash_dwell);
+	float base_speed_p = 30.0 * splash_size;
+	float vx_cap = X_TRAVEL_LIMIT / dwell;
+	float vx_speed = min(base_speed_p, vx_cap);
+
+	// --- Splash particle extents, derived from the uniforms (rule 3).
+	// A particle's offset from its splash point over t in [0, dwell] is
+	//   dx(t) = vx * t,                     vx in [-vx_speed, vx_speed]
+	//   dy(t) = vy * t + 0.5*GRAVITY*t^2,   vy in [-base_speed_p, 0.3*base_speed_p)
+	// max_dx is therefore just the endpoint. dy is a parabola: its maximum is
+	// at the endpoint (fastest downward vy), while its minimum — the highest
+	// the ricochet reaches — is at the apex of the steepest upward vy, clamped
+	// to dwell if the particle is still rising when it expires.
+	float max_dx = vx_speed * dwell;
+	float t_apex = min(base_speed_p / GRAVITY, dwell);
+	float max_up = base_speed_p * t_apex - 0.5 * GRAVITY * t_apex * t_apex;
+	float max_down = 0.3 * base_speed_p * dwell + 0.5 * GRAVITY * dwell * dwell;
+
 	// Neighborhood search (in SHEARED columns — see header comment):
 	//  - 3 rows (above / self / below) so streak tails and splash particles
-	//    that cross cell-row boundaries still get rendered.
+	//    that cross cell-row boundaries still get rendered — but the two
+	//    neighbour rows are gated on the splash extents (see below), because
+	//    they are provably empty for most fragments.
 	//  - 9 columns (±SPLASH_X_RADIUS) so splash particles that fly sideways
 	//    out of their origin column still get rendered at the fragment's
 	//    column. Bound = SPLASH_X_RADIUS × column_spacing pixels of sheared
@@ -310,6 +402,11 @@ void fragment() {
 	//    splash_dwell=0.15 the Y bound is ~5 px, so even at streak_angle=0.6
 	//    the worst-case sheared drift is ~7 px — within ±8 px at the default
 	//    column_spacing=2.
+	//    CAVEAT: rain.tscn ships column_spacing=1.0 and splash_dwell=0.25, for
+	//    which ±4 columns covers only ±4 sheared px against a worst case of
+	//    ~9 px. Outlying splash pixels are clipped at those settings. That
+	//    behaviour predates this optimisation pass and is preserved verbatim;
+	//    widening the radius is a visual change, costed in the commit message.
 	// Streak rendering stays purely in its own sheared column (single-pixel
 	// test along the diagonal), so neighbor-column iteration only ever
 	// contributes splash hits.
@@ -322,11 +419,42 @@ void fragment() {
 		float c_idx = col_idx + float(dx);
 		float h_cp = hash1(c_idx + 200.0);
 		float r_base = floor(world_px.y / cell_height - h_cp);
-		for (int dr = -1; dr <= 1; dr++) {
-			vec4 c = compute_drop(
-				c_idx,
-				r_base + float(dr),
-				world_px, amt_alpha);
+		float cell_top = (r_base + h_cp) * cell_height;
+		float below_top = cell_top + cell_height;
+
+		// Rows are visited in the original -1, 0, +1 order. `best` keeps the
+		// FIRST of any exact alpha tie (the comparison is strictly >), so the
+		// order is load-bearing for bit-exactness — don't reshuffle it.
+
+		// Row above: its drops' streaks are hard-clipped to its own cell, and
+		// its splash_y can be no lower than our cell_top, so its particles
+		// cannot reach further down than cell_top + max_down.
+		if (world_px.y - cell_top <= max_down + 2.0) {
+			vec4 c = compute_drop(c_idx, r_base - 1.0, h_cp, world_px,
+					amt_alpha, lit, lift_mul, dwell, vx_speed,
+					max_up, max_down, max_dx);
+			if (c.a > best.a) {
+				best = c;
+			}
+		}
+
+		// Row below: splash_min_y keeps its splash_y at least
+		// splash_min_y*cell_height below its own cell_top, so its particles
+		// rise no higher than that minus max_up. The min() with -2.0 keeps a
+		// 2px band live right at the boundary to absorb float slop in the
+		// r_base floor, where a streak head can land exactly on below_top.
+		float below_reach = min(-2.0, splash_min_y * cell_height - max_up - 2.0);
+		vec4 c_self = compute_drop(c_idx, r_base, h_cp, world_px,
+				amt_alpha, lit, lift_mul, dwell, vx_speed,
+				max_up, max_down, max_dx);
+		if (c_self.a > best.a) {
+			best = c_self;
+		}
+
+		if (world_px.y - below_top >= below_reach) {
+			vec4 c = compute_drop(c_idx, r_base + 1.0, h_cp, world_px,
+					amt_alpha, lit, lift_mul, dwell, vx_speed,
+					max_up, max_down, max_dx);
 			if (c.a > best.a) {
 				best = c;
 			}

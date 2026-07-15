@@ -255,12 +255,28 @@ func _apply_grading(t: float) -> void:
 	var shadow_length_base: float = (
 		profile.shadow_length_curve.sample(t) if has_shadow_length else 0.0)
 	for node: Node in _shadow_nodes:
-		var mat := (node as CanvasItem).material as ShaderMaterial
+		var item := node as CanvasItem
+		var mat := item.material as ShaderMaterial
 		if mat == null:
 			continue
 		var scale: float = node.get_meta(&"shadow_scale", 1.0)
 		if has_shadow_opacity:
 			mat.set_shader_parameter(&"shadow_opacity", shadow_opacity_val)
+			# A zero-opacity shadow blends to nothing — shadow_oval declares no
+			# render_mode (so default blend_mix) and writes
+			# shadow_color.a * shadow_opacity — so hiding the CanvasItem is
+			# pixel-identical to shading a fully transparent quad, and skips the
+			# fragment shader instead. The opacity curve sits at exactly 0 for
+			# ~40% of the cycle (tileset_test_profile: 0 at t<=0.2 and t>=0.8).
+			#
+			# Guarded on has_shadow_opacity: with no curve driving it the
+			# material keeps its authored opacity and must stay visible.
+			#
+			# The uniform writes above/below deliberately still run while hidden.
+			# player.gd reads shadow_length back off this material to place its
+			# cutoff; skipping the write would feed it a stale value on the frame
+			# the shadow reappears, depending on node order.
+			item.visible = shadow_opacity_val > 0.0
 		if has_shadow_length:
 			# Round to integer so the tail grows/shrinks in whole-pixel steps
 			# instead of having taper-edge pixels toggle at close fractional
