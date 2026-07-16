@@ -1,6 +1,6 @@
-[gd_resource type="ShaderMaterial" format=3]
+[gd_resource type="ShaderMaterial" format=3 uid="uid://daimdlywcvct2"]
 
-[ext_resource type="Shader" path="res://assets/shaders/fire_blobs.gdshader" id="1_fire_blobs"]
+[ext_resource type="Shader" uid="uid://bp7i2288l3lh6" path="res://assets/shaders/fire_blobs.gdshader" id="1_fire_blobs"]
 
 [resource]
 shader = ExtResource("1_fire_blobs")
@@ -9,9 +9,24 @@ shader_parameter/col_yellow = Color(0.99215686, 0.81960785, 0.4745098, 1)
 shader_parameter/col_orange = Color(0.92156863, 0.5882353, 0.38039216, 1)
 shader_parameter/col_red = Color(0.70980394, 0.34901962, 0.27058825, 1)
 shader_parameter/col_char = Color(0.23921569, 0.2, 0.2, 1)
-shader_parameter/radial_bias = 0.5
-shader_parameter/rise_curve = 0.7
-shader_parameter/turb_freq_min = 1.5
-shader_parameter/turb_freq_max = 4.0
-shader_parameter/shape_evolve = 2.0
+shader_parameter/cell_seed = 0.0
+shader_parameter/slot_count = 3
+shader_parameter/k_active = 5.0
+shader_parameter/base_half_width = 6.0
+shader_parameter/column_height = 56.0
+shader_parameter/blob_max_radius = 4.0
+shader_parameter/blob_min_radius = 0.6
+shader_parameter/heat_ceiling = 1.0
+shader_parameter/rise_speed_jitter = 0.3
+shader_parameter/blob_phase = 0.0
+shader_parameter/lifetime = 1.2
+shader_parameter/turb_amp = 4.0
+shader_parameter/stretch = 2.0000000475
+shader_parameter/noise_amp = 0.6
+shader_parameter/noise_scale = 0.5
+shader_parameter/radial_bias = 1.0000000475
+shader_parameter/rise_curve = 0.850000040375
+shader_parameter/turb_freq_min = 1.00000004424012
+shader_parameter/turb_freq_max = 3.0000001392401203
+shader_parameter/shape_evolve = 4.00000019
 shader_parameter/smoke_dither = 1.0

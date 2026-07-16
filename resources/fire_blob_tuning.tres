@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="FireBlobTuningData" format=3 uid="uid://cbrqmj8j5i0q0"]
+
+[ext_resource type="Script" uid="uid://pfegqknx41c8" path="res://scripts/data/fire_blob_tuning_data.gd" id="1_data"]
+
+[resource]
+script = ExtResource("1_data")
+column_height_min = 4.0
+column_height_max = 80.0
+lifetime_max = 2.0
+turb_amp_min = 1.0
+turb_amp_max = 4.0
+rise_speed_jitter = 0.6
+blob_max_radius_min = 4.0
+blob_max_radius_max = 16.0
+blob_min_radius_max = 5.0
+stretch_min = 1.25
+noise_scale_min = 0.15
+noise_scale_max = 0.5
+half_width_max = 4.0

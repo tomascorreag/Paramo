@@ -21,6 +21,8 @@ extends SceneTree
 ##   --frames <n>       how many PNGs to save (default 3)
 ##   --interval <n>     engine frames between saves (default 20)
 ##   --ceiling <f>      heat_ceiling: 1.0 fire, 0.55 burning down, 0.2 smoke only
+##   --wind <f>         sets the wind_lean global; +/-0.18 (MAX_WIND_LEAN) is a full
+##                      storm. Pair with --debug 3 to confirm leaning tips stay in-quad.
 ##   --debug <n>        sets the shader_debug global (1 stages, 2 world snap, 3 quad)
 
 const COLUMN_SCRIPT: GDScript = preload("res://scripts/vfx/fire_blob_column.gd")
@@ -51,16 +53,19 @@ func _initialize() -> void:
 
 	var argv := OS.get_cmdline_user_args()
 	var debug_mode := 0
+	var wind_lean := 0.0
 	for i in argv.size() - 1:
 		match argv[i]:
 			"--out": _out_dir = argv[i + 1]
 			"--frames": _want_frames = int(argv[i + 1])
 			"--interval": _interval = int(argv[i + 1])
 			"--ceiling": _ceiling = float(argv[i + 1])
+			"--wind": wind_lean = float(argv[i + 1])
 			"--debug": debug_mode = int(argv[i + 1])
 	if not _out_dir.ends_with("/"):
 		_out_dir += "/"
 	RenderingServer.global_shader_parameter_set(&"shader_debug", debug_mode)
+	RenderingServer.global_shader_parameter_set(&"wind_lean", wind_lean)
 
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
@@ -92,6 +97,7 @@ func _initialize() -> void:
 	print("  device:      %s" % RenderingServer.get_video_adapter_name())
 	print("  columns:     %d, intensity 0.0 -> 1.0 left to right" % COLUMN_COUNT)
 	print("  heat_ceiling: %.2f" % _ceiling)
+	print("  wind_lean:    %.3f" % wind_lean)
 	print("  shader_debug: %d" % debug_mode)
 	print("  out:         %s (%dx upscaled, NEAREST)" % [_out_dir, PIXEL_SCALE])
 	print("")

@@ -1,108 +1,59 @@
 class_name FireBlobTuning
 extends RefCounted
 
-# Pure tuning math for the procedural blob fire (assets/shaders/fire_blobs.gdshader).
+# Tuning math for the procedural blob fire (assets/shaders/fire_blobs.gdshader).
+# The VALUES live in an inspector-editable resource (FireBlobTuningData /
+# resources/fire_blob_tuning.tres); this file is the MATH that turns them into
+# shader uniforms and a quad bound. Split that way so the values are tunable in
+# the editor while the bound logic — which fails silently if wrong — stays in
+# code with tests.
 #
 # Everything here is static and side-effect free, which is deliberate: this is
-# where the *spec* lives ("an isolated ignition stays kindling", "kindling is a
-# couple of lit pixels"), and it is the only part of the effect that can be
-# unit-tested. The shader itself can only be verified by looking at it. See
-# tests/test_fire_blob_tuning.gd.
+# where the shader-mapping *spec* lives ("kindling is a couple of lit pixels",
+# "the quad always contains the drawable field"), and it is the only part of the
+# effect that can be unit-tested. The shader itself can only be verified by
+# looking at it. See tests/test_fire_blob_tuning.gd.
+#
+# NOTE: the fire's DYNAMICS (how intensity grows, spread, fuel) moved to
+# FireDynamics — this file is now purely intensity -> shader uniforms + quad
+# bound. There is no longer an isolated-fire ceiling; a lone fire grows too.
+#
+# Every method takes `data` defaulting to DATA, the one shared resource the game
+# and the preview both use. Editing that .tres in the inspector is live in
+# scenes/tools/fire_blob_test.tscn (the preview re-reads every frame) and ships
+# to the game unchanged. Pass a different resource only to preview an alternative.
 #
 # Two contracts this file owns, both of which fail SILENTLY if broken — hence
 # the tests:
 #
 #  1. quad_size(i) must strictly contain every blob the shader can draw at
 #     intensity i. The shader has NO neighbourhood search: the quad IS the
-#     bound (this is rain.gdshader's rule 3, moved to the CPU where it's paid
-#     once per intensity change instead of once per fragment). Undersize it and
-#     blobs get clipped at the quad edge with no error. shader_debug == 3 draws
-#     the rect so the failure is visible.
-#
+#     bound (rain.gdshader's rule 3, moved to the CPU). Undersize it and blobs
+#     get clipped at the quad edge with no error. shader_debug == 3 draws the
+#     rect so the failure is visible.
 #  2. The uniform names returned by uniforms_for() must match the shader's.
 #     A typo'd name is silently ignored by set_shader_parameter.
 
-# --- Intensity ---------------------------------------------------------------
+# The shared, inspector-editable tuning. preload() returns the same cached
+# instance the inspector mutates, so edits are live everywhere that reads DATA.
+const DATA: FireBlobTuningData = preload("res://resources/fire_blob_tuning.tres")
 
-# An isolated ignition can NEVER exceed this intensity, at any burn amount. This
-# single constant is what makes "a lone fire stays kindling, a spreading front
-# makes wildfires" true rather than aspirational.
-const ISOLATED_CAP: float = 0.22
+# --- Structural constants. NOT in the resource on purpose ---------------------
+# These are not "look" knobs; they are code/shader invariants a designer must not
+# be able to desync by dragging a slider.
 
-# Loop bounds in the shader. Must match SLOT_MAX / K_MAX in fire_blobs.gdshader.
+# Loop bounds in the shader. Must match SLOT_MAX / K_MAX in fire_blobs.gdshader,
+# and they clamp the resource's slot_count / k_active so a bad .tres value can't
+# exceed what the shader's unrolled loops will actually run.
 const SLOT_MAX: int = 3
 const K_MAX: int = 8
 
-# --- Endpoints. Every row is lerped from kindling (i=0) to wildfire (i=1).
-# Named constants rather than inline numbers because these are the escape
-# hatches if the web build measures badly — COLUMN_HEIGHT is the biggest lever
-# (quad area is linear in it), then K_ACTIVE (loop length).
-const COLUMN_HEIGHT_MIN: float = 24.0
-const COLUMN_HEIGHT_MAX: float = 200.0
-const SLOT_COUNT_MIN: int = 1
-const SLOT_COUNT_MAX: int = 3
-const K_ACTIVE_MIN: float = 2.0
-const K_ACTIVE_MAX: float = 8.0
-const HALF_WIDTH_MIN: float = 0.5
-const HALF_WIDTH_MAX: float = 12.0
-# Blobs must be big enough to MEET their neighbours up the column. At k_active=8
-# over COLUMN_HEIGHT_MAX the mean spacing is ~25px, so a max radius much under
-# ~10 leaves visible gaps and the plume reads as floating embers rather than
-# fire. Growing the blobs is much cheaper than raising K_ACTIVE_MAX (which is a
-# loop bound); rise_curve does the rest by bunching them at the base.
-const BLOB_MAX_RADIUS_MIN: float = 1.2
-const BLOB_MAX_RADIUS_MAX: float = 10.0
-const BLOB_MIN_RADIUS_MIN: float = 0.4
-const BLOB_MIN_RADIUS_MAX: float = 1.2
-const LIFETIME_MIN: float = 0.5
-const LIFETIME_MAX: float = 2.2
-const TURB_AMP_MIN: float = 0.5
-const TURB_AMP_MAX: float = 8.0
-const STRETCH_MIN: float = 1.3
-const STRETCH_MAX: float = 2.0
-const NOISE_AMP_MIN: float = 0.3
-const NOISE_AMP_MAX: float = 0.65
-const NOISE_SCALE_MIN: float = 0.7
-const NOISE_SCALE_MAX: float = 0.45
-
-# Per-blob rise speed spread: each blob rises at 1 +/- this, fixed for its life
-# and re-rolled on rebirth. Constant across intensity, but owned HERE and not in
-# the .tres because it is bound-relevant — the fastest blob reaches
-# column_height * (1 + this), and quad_size has to know. See the rule at the top.
-# 0.0 = every blob rises in lockstep (reads mechanical); 0.3 = a natural spread.
-# Raising it makes the quad taller and costs fill, so it is not free.
-const RISE_SPEED_JITTER: float = 0.3
-
-# --- WHERE DOES A KNOB LIVE? -------------------------------------------------
-# The rule is BOUND-RELEVANCE, not "is it constant":
-#
-#   Does quad_size() depend on it?
-#     YES -> it belongs HERE, and uniforms_for() pushes it. The quad is the
-#            shader's ONLY spatial bound, so a value the quad depends on must be
-#            somewhere quad_size can read. Put it in the .tres and an inspector
-#            edit silently pushes blobs outside the quad and clips them.
-#     NO  -> it belongs in resources/materials/fire_blobs.tres, and this file
-#            must never push it (a per-frame push would stomp the inspector and
-#            the .tres would stop being the tuning surface).
-#
-# Bound-relevant, owned here: column_height, blob_*_radius, noise_amp, stretch,
-# turb_amp, base_half_width, rise_speed_jitter, plus the SWAY_PEAK /
-# SIZE_JITTER_MAX mirrors below.
-#
-# Look-only, owned by the .tres: the five ramp colours, radial_bias, turb_freq_min
-# /max, shape_evolve, rise_curve, smoke_dither, heat_ceiling.
-#   - rise_curve is safe there because it only reshapes the rise, it does not
-#     lengthen it: rise_t = an*mix(1,an,rc) is exactly 1.0 at an=1 for ANY rc.
-#   - turb_freq is safe because tx is bounded by turb_amp regardless of frequency,
-#     and the per-fragment stretch bound is computed from the actual velocity.
-
 # --- Mirrors of shader internals. quad_size() is only correct while these match
 # fire_blobs.gdshader; nothing but a human keeps them in sync, because the tests
-# below derive BOTH sides of the containment assert from these same constants and
-# therefore cannot catch a drift from the shader. If you change the sway, the size
-# jitter, or the stretch in the shader, change these too and re-check with
-# `preview_fire_blobs.gd --debug 3` (which renders the real quad against the real
-# blobs, and is the only check that would actually notice).
+# derive BOTH sides of the containment assert from these same constants and so
+# cannot catch a drift from the shader. If you change the sway, the size jitter,
+# or the stretch in the shader, change these too and re-check with
+# `preview_fire_blobs.gd --debug 3` (the only check that would actually notice).
 #
 # Peak |s1 + 0.5*s2| in the shader's two-harmonic sway; turbulence reach is
 # turb_amp * this.
@@ -114,94 +65,89 @@ const SIZE_JITTER_MAX: float = 1.3
 # Same role as rain.gdshader's 1-2px bound padding.
 const QUAD_PAD: float = 2.0
 
-
-## Size envelope over burn amount: kindling -> established -> dying back to
-## embers. Deliberately shaped like BurningCellVFX._burn_envelope (which drives
-## the light) so size and glow rise and fall together.
-static func size_envelope(amount: float) -> float:
-	var a: float = clampf(amount, 0.0, 1.0)
-	if a < 0.20:
-		return (a / 0.20) * 0.55
-	if a < 0.80:
-		return lerpf(0.55, 1.0, (a - 0.20) / 0.60)
-	return lerpf(1.0, 0.35, (a - 0.80) / 0.20)
-
-
-## Combined intensity in [0, 1]. Burning neighbours raise the CEILING; burn
-## amount drives the envelope toward it. Amount alone can never make an isolated
-## fire big — that asymmetry is the whole point.
-static func intensity(amount: float, burning_neighbours: int) -> float:
-	var n: float = float(clampi(burning_neighbours, 0, 4)) / 4.0
-	var cap: float = lerpf(ISOLATED_CAP, 1.0, n)
-	return clampf(size_envelope(amount) * cap, 0.0, 1.0)
+# Conservative cap on the wind lean the shader's `wind_lean` global may reach.
+# DayNightSceneController clamps the pushed value to +/- this; the shader itself
+# does not clamp (a global uniform has no enforced hint_range), so THIS is the
+# only thing keeping a gust from pushing a leaning blob outside the quad. The
+# quad is the shader's sole spatial bound, so max_horizontal_reach below MUST
+# fold in the worst-case lean or leaning tips clip silently — the same failure
+# rise_speed_jitter is guarded against. Kept low because the lean displaces the
+# blob CENTRE by wind_lean * rise height, and the tallest column is ~128px, so
+# each 0.01 of lean is ~1.3px of extra quad half-width (pure transparent fill on
+# the fill-bound web build). ~10 degrees at a full storm; raise only against
+# benchmark_fire.gd's area ratio, not desktop ms (see [[desktop-cannot-measure-fill]]).
+const MAX_WIND_LEAN: float = 0.18
 
 
 ## Shader uniform values for an intensity in [0, 1]. Keys are shader uniform
 ## names — see contract 2 above.
-static func uniforms_for(i: float) -> Dictionary:
+static func uniforms_for(i: float, data: FireBlobTuningData = DATA) -> Dictionary:
 	var t: float = clampf(i, 0.0, 1.0)
 	return {
-		&"slot_count": _slot_count(t),
-		&"k_active": lerpf(K_ACTIVE_MIN, K_ACTIVE_MAX, t),
-		&"base_half_width": lerpf(HALF_WIDTH_MIN, HALF_WIDTH_MAX, t),
-		&"column_height": lerpf(COLUMN_HEIGHT_MIN, COLUMN_HEIGHT_MAX, t),
-		&"blob_max_radius": lerpf(BLOB_MAX_RADIUS_MIN, BLOB_MAX_RADIUS_MAX, t),
-		&"blob_min_radius": lerpf(BLOB_MIN_RADIUS_MIN, BLOB_MIN_RADIUS_MAX, t),
-		&"lifetime": lerpf(LIFETIME_MIN, LIFETIME_MAX, t),
-		&"turb_amp": lerpf(TURB_AMP_MIN, TURB_AMP_MAX, t),
-		&"stretch": lerpf(STRETCH_MIN, STRETCH_MAX, t),
-		&"noise_amp": lerpf(NOISE_AMP_MIN, NOISE_AMP_MAX, t),
-		&"noise_scale": lerpf(NOISE_SCALE_MIN, NOISE_SCALE_MAX, t),
-		&"rise_speed_jitter": RISE_SPEED_JITTER,
+		&"slot_count": _slot_count(t, data),
+		&"k_active": lerpf(data.k_active_min, data.k_active_max, t),
+		&"base_half_width": lerpf(data.half_width_min, data.half_width_max, t),
+		&"column_height": lerpf(data.column_height_min, data.column_height_max, t),
+		&"blob_max_radius": lerpf(data.blob_max_radius_min, data.blob_max_radius_max, t),
+		&"blob_min_radius": lerpf(data.blob_min_radius_min, data.blob_min_radius_max, t),
+		&"lifetime": lerpf(data.lifetime_min, data.lifetime_max, t),
+		&"turb_amp": lerpf(data.turb_amp_min, data.turb_amp_max, t),
+		&"stretch": lerpf(data.stretch_min, data.stretch_max, t),
+		&"noise_amp": lerpf(data.noise_amp_min, data.noise_amp_max, t),
+		&"noise_scale": lerpf(data.noise_scale_min, data.noise_scale_max, t),
+		&"rise_speed_jitter": data.rise_speed_jitter,
 	}
 
 
 ## Quad size in world px for an intensity in [0, 1]. See contract 1 — this MUST
 ## strictly contain the drawable field, because the shader has no other bound.
-static func quad_size(i: float) -> Vector2:
+static func quad_size(i: float, data: FireBlobTuningData = DATA) -> Vector2:
 	var t: float = clampf(i, 0.0, 1.0)
-	# Largest half-extent a blob can reach in any direction: its radius, inflated
-	# by the noise carve, then by the stretch (which elongates along flow — the
-	# flow is mostly vertical, so bounding both axes by it is conservative).
-	var r_out: float = _blob_reach(t)
-	var half_w: float = lerpf(HALF_WIDTH_MIN, HALF_WIDTH_MAX, t) \
-			+ lerpf(TURB_AMP_MIN, TURB_AMP_MAX, t) * SWAY_PEAK \
-			+ r_out + QUAD_PAD
-	var h: float = lerpf(COLUMN_HEIGHT_MIN, COLUMN_HEIGHT_MAX, t) * (1.0 + RISE_SPEED_JITTER) \
-			+ r_out + QUAD_PAD
+	# Derive both half-extents from the reach helpers (+ QUAD_PAD) rather than
+	# re-deriving the formulae here — that way the wind-lean term added to
+	# max_horizontal_reach can't be present in the bound the tests check while
+	# missing from the quad the shader actually gets.
+	var half_w: float = max_horizontal_reach(t, data) + QUAD_PAD
+	var h: float = max_rise(t, data) + QUAD_PAD
 	return Vector2(half_w * 2.0, h)
 
 
 ## Max horizontal distance a blob centre can travel from the column axis, plus
-## its own extent. Exposed so the tests can assert quad_size contains it.
-static func max_horizontal_reach(i: float) -> float:
+## its own extent. Exposed so the tests can assert quad_size contains it. Folds in
+## the worst-case wind lean: the shader displaces the centre by wind_lean * rise
+## height (see `centre` in fire_blobs.gdshader), maxed at MAX_WIND_LEAN * the
+## tallest a blob centre reaches — otherwise a leaning tip clips at the quad edge.
+static func max_horizontal_reach(i: float, data: FireBlobTuningData = DATA) -> float:
 	var t: float = clampf(i, 0.0, 1.0)
-	return lerpf(HALF_WIDTH_MIN, HALF_WIDTH_MAX, t) \
-			+ lerpf(TURB_AMP_MIN, TURB_AMP_MAX, t) * SWAY_PEAK \
-			+ _blob_reach(t)
+	var max_centre_rise: float = lerpf(data.column_height_min, data.column_height_max, t) \
+			* (1.0 + data.rise_speed_jitter)
+	return lerpf(data.half_width_min, data.half_width_max, t) \
+			+ lerpf(data.turb_amp_min, data.turb_amp_max, t) * SWAY_PEAK \
+			+ MAX_WIND_LEAN * max_centre_rise \
+			+ _blob_reach(t, data)
 
 
 ## Max height a blob centre reaches, plus its own extent. column_height is the
-## NOMINAL rise — the fastest blob overshoots it by RISE_SPEED_JITTER, and that
+## NOMINAL rise — the fastest blob overshoots it by rise_speed_jitter, and that
 ## overshoot is real quad height, not a rounding allowance.
-static func max_rise(i: float) -> float:
+static func max_rise(i: float, data: FireBlobTuningData = DATA) -> float:
 	var t: float = clampf(i, 0.0, 1.0)
-	return lerpf(COLUMN_HEIGHT_MIN, COLUMN_HEIGHT_MAX, t) * (1.0 + RISE_SPEED_JITTER) \
-			+ _blob_reach(t)
+	return lerpf(data.column_height_min, data.column_height_max, t) \
+			* (1.0 + data.rise_speed_jitter) + _blob_reach(t, data)
 
 
 # Max half-extent of a single blob, in any direction. Mirrors the shader's
 # r_eff_max: full radius x size jitter x noise carve x stretch. All four factors
 # are required — see SIZE_JITTER_MAX.
-static func _blob_reach(t: float) -> float:
-	return lerpf(BLOB_MAX_RADIUS_MIN, BLOB_MAX_RADIUS_MAX, t) \
+static func _blob_reach(t: float, data: FireBlobTuningData) -> float:
+	return lerpf(data.blob_max_radius_min, data.blob_max_radius_max, t) \
 			* SIZE_JITTER_MAX \
-			* (1.0 + lerpf(NOISE_AMP_MIN, NOISE_AMP_MAX, t)) \
-			* lerpf(STRETCH_MIN, STRETCH_MAX, t)
+			* (1.0 + lerpf(data.noise_amp_min, data.noise_amp_max, t)) \
+			* lerpf(data.stretch_min, data.stretch_max, t)
 
 
-static func _slot_count(t: float) -> int:
+static func _slot_count(t: float, data: FireBlobTuningData) -> int:
 	return clampi(
-		int(round(lerpf(float(SLOT_COUNT_MIN), float(SLOT_COUNT_MAX), t))),
-		SLOT_COUNT_MIN,
+		int(round(lerpf(float(data.slot_count_min), float(data.slot_count_max), t))),
+		data.slot_count_min,
 		SLOT_MAX)

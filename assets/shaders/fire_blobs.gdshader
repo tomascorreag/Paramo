@@ -131,21 +131,20 @@ uniform vec3 col_char   : source_color = vec3(0.239, 0.200, 0.200); // P07 #3D33
 // FireBlobColumn sets it from a hash of the cell coord.
 uniform float cell_seed = 0.0;
 
-// --- CODE-DRIVEN. DO NOT TUNE THESE IN THE INSPECTOR — you will not see any
-// effect. FireBlobColumn._apply() overwrites every one of them from
-// FireBlobTuning on each intensity change, so an inspector edit is silently
-// discarded on the next frame. They are deliberately absent from
-// resources/materials/fire_blobs.tres for that reason; Godot still lists them
-// here because it lists every uniform.
+// --- CODE-DRIVEN. Editing these on the MATERIAL (fire_blobs.tres) does nothing:
+// FireBlobColumn._apply() overwrites every one of them each intensity change, so
+// an inspector edit to the material is discarded next frame. (The material still
+// LISTS them because Godot lists every shader uniform — ignore them there.)
 //
-// Tune them in scripts/vfx/fire_blob_tuning.gd instead, where they are MIN/MAX
-// pairs lerped kindling -> wildfire (a ShaderMaterial cannot author a lerp
-// endpoint pair, which is the whole reason for the split). FireBlobTuning also
-// derives the quad size from those same constants, and the quad is this shader's
-// only spatial bound — so the values and the bound MUST move together, which is
-// exactly what an inspector override would break.
+// Tune them in resources/fire_blob_tuning.tres (FireBlobTuningData) — the ONE
+// resource the game and the editor preview both read. They are MIN/MAX pairs
+// lerped kindling -> wildfire (a single material uniform cannot hold a pair,
+// which is the whole reason they are a separate resource). FireBlobTuning
+// derives the quad bound from the same values, and the quad is this shader's
+// only spatial limit — so the values and the bound move together, which an
+// unchecked material override would break.
 //
-// The knobs you CAN tune in the .tres are the ones below this block: the ramp
+// The knobs you tune ON THE MATERIAL are the ones below this block: the ramp
 // colours, radial_bias, rise_curve, turb_freq_*, shape_evolve, smoke_dither.
 // Defaults here are the mid-intensity look, for previewing the raw shader.
 uniform int   slot_count      : hint_range(1, 3) = 2;
@@ -167,11 +166,28 @@ uniform float heat_ceiling    : hint_range(0.05, 1.0) = 1.0;
 // editing it would silently push the tallest blobs outside the quad and clip
 // them, because the shader has no bound of its own.
 uniform float rise_speed_jitter : hint_range(0.0, 0.6) = 0.3;
+// Global blob-cycle phase, in CYCLES, accumulated on the CPU as the running
+// integral of dt/lifetime (FireBlobColumn._advance). This is the age CLOCK, and
+// it REPLACES TIME/lifetime.
+//
+// Why: lifetime scales with intensity, and intensity changes every burn tick and
+// every time a neighbour ignites. Deriving age as fract(TIME/lifetime) meant a
+// change of Δlifetime shifted every blob's age by −TIME/lifetime²·Δlifetime — a
+// term proportional to absolute TIME, so it grew through a session and teleported
+// all blobs on each intensity change (plus re-rolled their hashes via birth_idx).
+// Invisible at the fixed intensities of scenes/tools/fire_blob_test.tscn, a
+// glitch in game. blob_phase integrates dt/lifetime instead, so it is CONTINUOUS
+// across lifetime changes and the age never jumps. Pushed every frame by the
+// column (game, via _process) or the preview (editor, via advance_phase).
+uniform float blob_phase = 0.0;
 // How long a blob lives. Also sets rise SPEED: a blob traverses the column over
 // exactly one lifetime, so speed = column_height / lifetime. There is no
 // separate speed uniform, and adding one would just over-determine the same
 // number. To make fire rise faster, raise COLUMN_HEIGHT_* or lower LIFETIME_*
-// in FireBlobTuning.
+// in FireBlobTuning. NOTE: it no longer sets the age CLOCK (blob_phase does) —
+// it only scales age to seconds (a = age_norm·lifetime) for the turbulence and
+// the rise. That decoupling is exactly what makes an intensity-driven lifetime
+// change smooth instead of a teleport.
 uniform float lifetime : hint_range(0.2, 8.0) = 1.2;
 // How far blobs wander sideways, in px. (How FAST they wiggle is turb_freq_*,
 // which IS .tres-tunable — this one is bound-relevant and so lives in code.)
@@ -209,6 +225,15 @@ uniform float shape_evolve : hint_range(0.0, 8.0) = 2.0;
 uniform float smoke_dither : hint_range(0.0, 1.0) = 1.0;
 
 global uniform int shader_debug;
+// Wind lean, sharing rain's wind DIRECTION (both set by DayNightSceneController
+// from the same signed source, so a gust bends flame and rain the same way).
+// Signed; its magnitude is a conservative cap (FireBlobTuning.MAX_WIND_LEAN)
+// applied CPU-side, and the quad bound (FireBlobTuning.quad_size) is sized for
+// that MAX, so a gust can never push a blob outside the quad and clip it. It is
+// an X-ONLY displacement (see `centre` below) for the same reason turbulence is —
+// so the y-first gate stays exact. A global uniform, like shader_debug, not a
+// per-material push: a busy fire has ~160 duplicated blob materials.
+global uniform float wind_lean;
 
 const int N_STAGES = 5;
 // Loop bounds. The ACTUAL counts are the slot_count / k_active uniforms; these
@@ -284,18 +309,24 @@ void fragment() {
 		for (int k = 0; k < K_MAX; k++) {
 			if (float(k) >= ka) { break; }
 
-			// Stagger by k/k_active so the slot's live blobs stay evenly spread
-			// up the column whatever the count is.
-			float t_off = TIME + (slot_phase + float(k) / ka) * life;
-			float a = mod(t_off, life);
-			float an = a / life;
+			// Age from the CPU phase clock, NOT TIME/life (see blob_phase). The clock
+			// advances at 1/life cycles/sec and is continuous when life changes, so
+			// intensity can vary without re-scrambling blobs. slot_phase + k/k_active
+			// staggers the slot's live blobs evenly up the column at any count.
+			float phase = blob_phase + slot_phase + float(k) / ka;
+			float an = fract(phase);
+			// Age in seconds. an is the clock; life only SCALES it, so a lifetime
+			// change stretches the seconds smoothly instead of jumping the normalised
+			// age. dan/dt is still exactly 1/life, which keeps the analytic velocity
+			// below correct.
+			float a = an * life;
 
-			// birth_idx is the invariant across the wrap: when a blob dies and
-			// respawns, t_off crosses a lifetime boundary and this increments,
-			// so per-blob hashes change exactly once per birth instead of
-			// flickering. (Same role as rain's drop_idx.) Cheap: a divide and a
-			// floor, no hash.
-			float birth_idx = floor(t_off / life);
+			// birth_idx increments once each time a blob respawns, so per-blob hashes
+			// change exactly once per birth instead of flickering. (Same role as
+			// rain's drop_idx.) floor() of the SAME continuous phase, so it is stable
+			// under lifetime changes — the old floor(TIME/life) re-rolled every hash
+			// on every intensity tick.
+			float birth_idx = floor(phase);
 			vec2 key = vec2(sf * 1.37 + float(k) * 0.713 + cell_seed, birth_idx + 7.0);
 
 			// Per-blob rise speed. This is the ONE hash paid BEFORE the gate, and
@@ -332,7 +363,11 @@ void fragment() {
 			float s1 = sin(a * w1 + ph1);
 			float s2 = sin(a * w2 + ph2);
 			float sway = s1 + 0.5 * s2;
-			vec2 centre = vec2(slot_x + turb_amp * an * sway, y);
+			// Wind lean: shear the rise about the cell base — 0 at the base, full
+			// at the tip (-y is height above base, so -wind_lean*y pushes +X for
+			// positive wind). X-only, so the y-gate above stays exact; the CPU quad
+			// bound is sized for the max lean so leaning tips never clip.
+			vec2 centre = vec2(slot_x + turb_amp * an * sway - wind_lean * y, y);
 
 			// Radius grows from the kindling dot to the full blob, per spec.
 			float radius = mix(blob_min_radius, blob_max_radius, an) * (0.7 + 0.6 * hB.y);
@@ -347,13 +382,16 @@ void fragment() {
 			// stop short of the degenerate value), so vel is never zero and
 			// normalize() is always safe.
 			float dsway = w1 * cos(a * w1 + ph1) + 0.5 * w2 * cos(a * w2 + ph2);
-			float dtx = turb_amp * (sway / life + an * dsway);
-			// speed_mult scales vy but not dtx, so a slow blob's velocity is
-			// relatively MORE horizontal and it leans into its sway harder. That
-			// falls out of the maths and is correct — it is the same reason a
+			// vy first: the wind-lean term of dtx needs it. speed_mult scales vy
+			// but not the sway term of dtx, so a slow blob's velocity is relatively
+			// MORE horizontal and it leans into its sway harder — the same reason a
 			// slow-rising ember drifts more than a fast one.
 			float vy = -(column_height / life)
 					* ((1.0 - rise_curve) + 2.0 * rise_curve * an) * speed_mult;
+			// Wind lean adds -wind_lean*y to centre.x; d/da of that is -wind_lean*vy,
+			// so folding it into dtx tilts vdir and the flame stretches ALONG its
+			// lean with no extra sampling.
+			float dtx = turb_amp * (sway / life + an * dsway) - wind_lean * vy;
 			vec2 vdir = normalize(vec2(dtx, vy));
 			vec2 perp = vec2(-vdir.y, vdir.x);
 

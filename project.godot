@@ -97,3 +97,7 @@ shader_debug={
 "type": "int",
 "value": 0
 }
+wind_lean={
+"type": "float",
+"value": 0.0
+}

@@ -8,8 +8,10 @@ extends Node2D
 # dirt tile FireManager painted on the underlying TileMapLayer at ignition time.
 #
 # TWO FLAME VISUALS, selected by Debug.fire_blob_flames:
-#   blob   (default) — one FireBlobColumn quad running fire_blobs.gdshader.
-#                      Fully procedural; fire and smoke are one system.
+#   blob   (default) — 1–MAX_FLAMES_PER_CELL FireBlobColumn quads running
+#                      fire_blobs.gdshader, scattered off-centre inside the
+#                      diamond. The count scales with intensity (see set_state /
+#                      FireDynamics.flame_count). Fully procedural.
 #   sprite (legacy)  — 1–3 AnimatedSprite2D children jittered inside the
 #                      diamond, running fire.gdshader.
 # The grass overlay and the PointLight2D are SHARED by both paths and untouched
@@ -20,9 +22,12 @@ extends Node2D
 #
 # Lifecycle:
 #   1. FireManager.new() instance, sets `cell`, calls setup(layer, atlas_src,
-#      vfx_parent), then adds to tree.
+#      atlas_coords), then adds to tree.
 #   2. _ready spawns the overlay + flames and positions self on the layer.
-#   3. FireManager calls set_burn_state(amount, burning_neighbours) each tick.
+#   3. FireManager calls set_state(intensity, fuel_frac) each tick: intensity
+#      drives the flames + light, fuel_frac drives the grass dissolve. This node
+#      is a pure renderer — the sim (age, fuel, spread) lives in FireManager /
+#      FireDynamics.
 #   4. On burn complete FireManager calls begin_smoulder(); the node outlives
 #      the burn by SMOULDER_SECONDS emitting only char blobs, then frees itself.
 #      Rain-extinguish instead queue_free()s immediately — nothing smoulders
@@ -44,12 +49,27 @@ const FLAME_JITTER_X: int = 7
 const FLAME_JITTER_Y_LOW: int = -4
 const FLAME_JITTER_Y_HIGH: int = 2
 
+# --- Scattered blob flames ---------------------------------------------------
+# The blob path draws 1–MAX_FLAMES_PER_CELL columns, each at a deterministic
+# INTEGER sub-tile offset so they read as scattered flames rather than one
+# grid-locked column. Integer keeps the shader's world-snapped faux-pixels
+# aligned to the terrain lattice (see fire_blob_column's geometry note). Box is
+# tighter than the 32×16 diamond's ±16/±8 half-extents so flames stay on-tile.
+const SCATTER_X: int = 9
+const SCATTER_Y_LOW: int = -5
+const SCATTER_Y_HIGH: int = 3
+# Soft cap on flame quads BEYOND the first, summed across every burning cell. The
+# primary flame always spawns (so a fire is never invisible); the 2nd/3rd are
+# budgeted, bounding worst-case additive blob overdraw on WebGL2 the same way
+# LIGHT_BUDGET bounds the lights. Charged per-instance via _extras_charged.
+const EXTRA_FLAME_BUDGET: int = 40
+
 # --- Burn-down + smoulder tail -----------------------------------------------
-# The fire loses its hot stages as the cell exhausts itself: heat_ceiling ramps
-# from 1.0 down to BURNOUT_HEAT_CEILING between BURNOUT_STARTS_AT and burn
-# completion, so it visibly runs down through the palette (white drops out
-# first, then yellow) instead of burning white-hot until the instant it dies.
-const BURNOUT_STARTS_AT: float = 0.7
+# The fire loses its hot stages as the cell exhausts its FUEL: heat_ceiling ramps
+# from 1.0 down to BURNOUT_HEAT_CEILING as fuel_frac enters the ember band
+# (FireDynamics.EMBER_FUEL_FRAC), so it visibly runs down through the palette
+# (white drops out first, then yellow) instead of burning white-hot until the
+# instant it dies. See _burnout_t.
 const BURNOUT_HEAT_CEILING: float = 0.55
 
 # After completion the cell smokes for this long, then frees itself. Only the
@@ -62,6 +82,13 @@ const SMOULDER_HEAT_CEILING: float = 0.2
 # The plume is thinner than the fire that made it, and decays to nothing over
 # the tail.
 const SMOULDER_INTENSITY_SCALE: float = 0.6
+
+# --- Douse fade --------------------------------------------------------------
+# When a fire is EXTINGUISHED early (rain or a player douse) rather than burning
+# out, it fades its intensity to 0 over this long instead of vanishing on a
+# frame boundary — a doused flame shrinks out. Shorter than SMOULDER_SECONDS: a
+# burnout lingers as smoke, a douse just dies. See begin_douse.
+const DOUSE_SECONDS: float = 0.7
 
 # --- Fire light --------------------------------------------------------------
 # Each burning cell casts a warm flickering PointLight2D so fire reads as a real
@@ -104,6 +131,12 @@ static var _falloff_tex: GradientTexture2D = null
 # The two can't double-count: begin_smoulder nulls _light, which is what
 # _notification gates on.
 static var _active_lights: int = 0
+# Count of EXTRA flame quads (slots beyond the first) live across all cells, vs
+# EXTRA_FLAME_BUDGET. Each instance tracks its own charge in _extras_charged and
+# releases exactly that on shrink / smoulder / free — never derived from
+# _columns.size(), so the live A/B toggle's despawn→respawn can't leak it. Same
+# sentinel discipline as _active_lights.
+static var _active_flames: int = 0
 # Shared per-frame cache of the day/night dim factor: the up-to-40 lit cells all
 # want the same value, so compute it once per frame, not once per cell.
 static var _dn_controller: Node = null
@@ -116,18 +149,31 @@ var _layer: TileMapLayer
 var _atlas_src: TileSetAtlasSource
 var _atlas_coords: Vector2i
 var _overlay_mat: ShaderMaterial
-var _burn_amount: float = 0.0
+# Fraction of the tile's fuel REMAINING, in [0, 1] (1 = untouched grass, 0 =
+# consumed). Drives the grass dissolve (burn_amount = 1 - _fuel_frac) and the
+# heat-ceiling burn-down (_burnout_t). Replaces the old raw burn `amount`:
+# FireManager now integrates fuel, not a timer. Starts full so a just-spawned
+# cell shows intact grass before the first set_state.
+var _fuel_frac: float = 1.0
 var _light: PointLight2D = null
 var _flicker_phase: float = 0.0
-var _neighbours: int = 0
 var _intensity: float = 0.0
-# The blob path's single quad (null on the sprite path); the sprite path's
+# The blob path's scattered quads (empty on the sprite path); the sprite path's
 # flames (empty on the blob path). Exactly one is populated at a time.
-var _column: FireBlobColumn = null
+var _columns: Array[FireBlobColumn] = []
 var _flames: Array[AnimatedSprite2D] = []
+# How many of this instance's columns are charged against _active_flames (i.e.
+# how many extras beyond the first it currently holds). Released in exactly one
+# place per lifetime — see _release_extra_flames.
+var _extras_charged: int = 0
 var _smouldering: bool = false
 var _smoulder_left: float = 0.0
 var _smoulder_intensity: float = 0.0
+# Douse fade (extinguish path). Mutually exclusive with _smouldering — a fire
+# either burns out (smoulder) or is put out (douse), never both.
+var _dousing: bool = false
+var _douse_left: float = 0.0
+var _douse_from: float = 0.0
 
 
 # Called by FireManager before add_child. `layer` is the TileMapLayer the
@@ -177,9 +223,13 @@ func _on_flame_style_changed(_use_blobs: bool) -> void:
 
 
 func _despawn_flames() -> void:
-	if _column != null and is_instance_valid(_column):
-		_column.queue_free()
-	_column = null
+	for col: FireBlobColumn in _columns:
+		if is_instance_valid(col):
+			col.queue_free()
+	_columns.clear()
+	# Release whatever this instance held; _spawn_flames re-charges from scratch.
+	# Without this the live A/B toggle would leak the global counter every flip.
+	_release_extra_flames()
 	for f: AnimatedSprite2D in _flames:
 		if is_instance_valid(f):
 			f.queue_free()
@@ -228,17 +278,70 @@ func _spawn_flames() -> void:
 
 
 func _spawn_flames_blob() -> void:
+	# Seed the primary flame; set_state grows/shrinks the scattered extras as
+	# intensity moves. flame_count(0) == 1, so this spawns exactly the primary.
+	_reconcile_columns(FireDynamics.flame_count(_intensity))
+
+
+# Grow or shrink the scattered blob columns toward `target`, respecting the
+# global EXTRA_FLAME_BUDGET for every column beyond the first. The primary (slot
+# 0) always exists; extras appear only while there is budget and drop out again
+# as intensity falls. Each column sits at a deterministic integer sub-tile offset
+# with its own per-slot seed, so the shader draws distinct, world-locked flames.
+func _reconcile_columns(target: int) -> void:
+	target = clampi(target, 1, FireDynamics.MAX_FLAMES_PER_CELL)
+
+	# Shrink: free trailing columns (always extras, since target >= 1) and hand
+	# their budget back.
+	while _columns.size() > target:
+		var col: FireBlobColumn = _columns.pop_back()
+		if is_instance_valid(col):
+			col.queue_free()
+		if _extras_charged > 0:
+			_extras_charged -= 1
+			_active_flames -= 1
+
+	# Grow: slot 0 is free; each extra needs a budget slot or we stop early.
+	while _columns.size() < target:
+		var slot: int = _columns.size()
+		if slot >= 1:
+			if _active_flames >= EXTRA_FLAME_BUDGET:
+				break
+			_active_flames += 1
+			_extras_charged += 1
+		_columns.append(_make_column(slot))
+
+
+func _make_column(slot: int) -> FireBlobColumn:
 	var column := FireBlobColumn.new()
-	column.name = "FireBlobColumn"
-	# The shader's blob math is relative to MODEL_MATRIX[3], which must land on
-	# the cell centre — this node is already there, so the column sits at zero
-	# and grows via offset/scale. See fire_blob_column.gd.
-	column.position = Vector2.ZERO
-	# Without this every burning cell renders the identical fire — the shader's
-	# blob hashes are a function of (slot, birth) and nothing else.
-	column.set_cell_seed(FireBlobColumn.seed_for_cell(cell))
+	column.name = "FireBlobColumn%d" % slot
+	# Scatter off cell-centre. The shader's blob field is relative to
+	# MODEL_MATRIX[3] (the node origin), so an offset just moves the whole flame
+	# and it still world-snaps — this is the intended scatter mechanism.
+	column.position = _slot_offset(slot)
+	# Distinct per-slot seed, or two flames on one cell render pixel-identical.
+	column.set_cell_seed(FireBlobColumn.seed_for_cell_slot(cell, slot))
 	add_child(column)
-	_column = column
+	return column
+
+
+# Deterministic integer offset for a flame slot within the diamond. Hashed off
+# (cell, slot) so it is stable across frames and across an A/B re-spawn — a
+# swimming anchor would break the world-snap.
+func _slot_offset(slot: int) -> Vector2:
+	var h: int = hash(Vector3i(cell.x, cell.y, slot * 7 + 1))
+	var ox: int = (h & 0xff) % (2 * SCATTER_X + 1) - SCATTER_X
+	var oy: int = ((h >> 8) & 0xff) % (SCATTER_Y_HIGH - SCATTER_Y_LOW + 1) + SCATTER_Y_LOW
+	return Vector2(float(ox), float(oy))
+
+
+# Hand this instance's entire flame-budget charge back to the global counter and
+# zero it. Idempotent — calling it twice releases nothing the second time, which
+# is what makes the smoulder/PREDELETE double-path safe.
+func _release_extra_flames() -> void:
+	if _extras_charged > 0:
+		_active_flames -= _extras_charged
+		_extras_charged = 0
 
 
 func _spawn_flames_sprite() -> void:
@@ -306,9 +409,24 @@ func _process(delta: float) -> void:
 			return
 		# Thin the plume out over the tail so the cell stops smoking gradually
 		# instead of the column vanishing on a frame boundary.
-		if _column != null and is_instance_valid(_column):
-			var t: float = 1.0 - clampf(_smoulder_left / SMOULDER_SECONDS, 0.0, 1.0)
-			_column.set_intensity(lerpf(_smoulder_intensity, 0.0, t))
+		var t: float = 1.0 - clampf(_smoulder_left / SMOULDER_SECONDS, 0.0, 1.0)
+		for col: FireBlobColumn in _columns:
+			if is_instance_valid(col):
+				col.set_intensity(lerpf(_smoulder_intensity, 0.0, t))
+	elif _dousing:
+		_douse_left -= delta
+		if _douse_left <= 0.0:
+			queue_free()
+			return
+		# Fade intensity from where the fire was toward 0 — the flame shrinks out
+		# rather than popping. The light block below reads _intensity, so the glow
+		# fades in lockstep with no extra work. heat_ceiling is left as it was, so
+		# the shrinking flame keeps its colour instead of turning to smoke.
+		var dt: float = 1.0 - clampf(_douse_left / DOUSE_SECONDS, 0.0, 1.0)
+		_intensity = lerpf(_douse_from, 0.0, dt)
+		for col: FireBlobColumn in _columns:
+			if is_instance_valid(col):
+				col.set_intensity(_intensity)
 
 	if _light == null:
 		return
@@ -346,11 +464,14 @@ func _day_night_factor() -> float:
 
 
 func _notification(what: int) -> void:
-	# Release the budget slot when this cell dies (rain-extinguish or the
+	# Release the budget slots when this cell dies (rain-extinguish or the
 	# en-masse wipe on graph_changed). Burn-completion instead releases early via
-	# begin_smoulder(), which nulls _light — so this cannot double-decrement.
-	if what == NOTIFICATION_PREDELETE and _light != null:
-		_active_lights -= 1
+	# begin_smoulder(), which nulls _light and zeroes _extras_charged — so neither
+	# counter can double-decrement.
+	if what == NOTIFICATION_PREDELETE:
+		if _light != null:
+			_active_lights -= 1
+		_release_extra_flames()
 
 
 # Builds the radial falloff once and caches it on the class — every fire light
@@ -393,29 +514,25 @@ static func _shared_falloff() -> GradientTexture2D:
 	return _falloff_tex
 
 
-## Called by FireManager every tick. `burning_neighbours` is how many of the
-## cell's 4-neighbours are also on fire (0-4) — it raises the intensity ceiling,
-## which is what keeps an isolated ignition at kindling scale forever while a
-## cell inside a spreading front grows to full wildfire. See FireBlobTuning.
-func set_burn_state(t: float, burning_neighbours: int) -> void:
-	_burn_amount = clampf(t, 0.0, 1.0)
-	_neighbours = clampi(burning_neighbours, 0, 4)
+## Called by FireManager every tick. `fire_intensity` (0-1, from FireDynamics)
+## drives the flames and the light; `fuel_frac` (0-1, fuel REMAINING on the tile)
+## drives the grass dissolve and the heat-ceiling burn-down. This node is a pure
+## renderer — it holds no sim state of its own.
+func set_state(fire_intensity: float, fuel_frac: float) -> void:
+	_fuel_frac = clampf(fuel_frac, 0.0, 1.0)
 	if _overlay_mat != null:
-		_overlay_mat.set_shader_parameter(&"burn_amount", _burn_amount)
-	if _smouldering:
-		# The tail owns intensity from here; don't let a late tick resurrect it.
+		# Grass chars as fuel is consumed: full grass at fuel_frac 1, dirt at 0.
+		_overlay_mat.set_shader_parameter(&"burn_amount", 1.0 - _fuel_frac)
+	if _smouldering or _dousing:
+		# The tail/fade owns intensity from here; don't let a late tick resurrect it.
 		return
-	_intensity = FireBlobTuning.intensity(_burn_amount, _neighbours)
-	_push_flame_state()
-
-
-## Back-compat shim: treats the cell as isolated. Prefer set_burn_state.
-func set_burn_amount(t: float) -> void:
-	set_burn_state(t, 0)
-
-
-func get_burn_amount() -> float:
-	return _burn_amount
+	_intensity = clampf(fire_intensity, 0.0, 1.0)
+	# Blob path only. The sprite path has no intensity concept (fixed flames); it
+	# still gets _intensity above for the shared light. Debug.fire_blob_flames is
+	# the live selector — a toggle re-spawns via _on_flame_style_changed.
+	if Debug.fire_blob_flames:
+		_reconcile_columns(FireDynamics.flame_count(_intensity))
+		_push_flame_state()
 
 
 ## Current blob intensity in [0, 1]. Drives the flame size AND the light energy,
@@ -424,24 +541,24 @@ func get_intensity() -> float:
 	return _intensity
 
 
-# Pushes the current intensity to whichever flame visual is up. The sprite path
-# has no intensity concept — its flames are fixed at spawn — so it only affects
-# the light, which reads _intensity directly in _process.
+# Pushes the current intensity + heat-ceiling to every scattered blob column.
+# The sprite path has no _columns (and no intensity concept — its flames are
+# fixed at spawn), so this is a no-op there; the light reads _intensity in
+# _process regardless.
 func _push_flame_state() -> void:
-	if _column == null or not is_instance_valid(_column):
-		return
-	_column.set_intensity(_intensity)
-	# Burn-down: as the cell exhausts itself the fire loses its hot stages, so it
-	# runs white->yellow->orange early and orange->red->char late, before the
-	# smoulder tail takes over entirely.
-	_column.set_heat_ceiling(lerpf(1.0, BURNOUT_HEAT_CEILING, _burnout_t()))
+	var ceiling: float = lerpf(1.0, BURNOUT_HEAT_CEILING, _burnout_t())
+	for col: FireBlobColumn in _columns:
+		if is_instance_valid(col):
+			col.set_intensity(_intensity)
+			# Burn-down: as the tile's fuel exhausts the fire loses its hot stages,
+			# running white->yellow->orange->char before the smoulder tail.
+			col.set_heat_ceiling(ceiling)
 
 
-# 0 until BURNOUT_STARTS_AT, ramping to 1 at burn completion.
+# 0 while fuel is plentiful, ramping to 1 as the last EMBER_FUEL_FRAC of fuel
+# burns — so the fire cools as it runs out of grass, not on a fixed timer.
 func _burnout_t() -> float:
-	return clampf(
-		(_burn_amount - BURNOUT_STARTS_AT) / maxf(1.0 - BURNOUT_STARTS_AT, 0.0001),
-		0.0, 1.0)
+	return 1.0 - smoothstep(0.0, FireDynamics.EMBER_FUEL_FRAC, _fuel_frac)
 
 
 ## The cell finished burning. Instead of dying instantly, keep the column alive
@@ -465,12 +582,40 @@ func begin_smoulder() -> void:
 		_light.queue_free()
 		_light = null
 
-	# The sprite path has no smoulder equivalent — its flames can't be reduced to
-	# smoke — so it keeps the old behaviour and just dies.
-	if _column == null or not is_instance_valid(_column):
+	# The sprite path has no _columns and no smoulder equivalent — its flames
+	# can't be reduced to smoke — so it keeps the old behaviour and just dies.
+	if _columns.is_empty():
 		queue_free()
 		return
 
+	# Drop to a single smoke column, freeing the scattered extras and releasing
+	# their budget now (a thinning smoulder tail shouldn't sit on flame slots the
+	# live fires need).
+	_reconcile_columns(1)
+
 	_smoulder_intensity = _intensity * SMOULDER_INTENSITY_SCALE
-	_column.set_intensity(_smoulder_intensity)
-	_column.set_heat_ceiling(SMOULDER_HEAT_CEILING)
+	for col: FireBlobColumn in _columns:
+		if is_instance_valid(col):
+			col.set_intensity(_smoulder_intensity)
+			col.set_heat_ceiling(SMOULDER_HEAT_CEILING)
+
+
+## The fire was EXTINGUISHED early (rain or a player douse) rather than burning
+## out. Fade the flame's intensity to 0 over DOUSE_SECONDS instead of freeing on
+## the spot, so it visibly shrinks out. Called by FireManager._extinguish INSTEAD
+## OF queue_free(). Like begin_smoulder, the node has already left
+## FireManager._burning, so nothing drives it again — the fade is self-driving in
+## _process. The light + scattered flames are KEPT (unlike smoulder, which drops
+## to one smoke column): a douse is short, so they simply fade with the intensity,
+## and their budget slots release together at PREDELETE when the node frees.
+func begin_douse() -> void:
+	if _dousing or _smouldering:
+		return
+	# The sprite path's flames are fixed-size and can't shrink, so keep its old
+	# instant behaviour — mirrors begin_smoulder.
+	if _columns.is_empty():
+		queue_free()
+		return
+	_dousing = true
+	_douse_left = DOUSE_SECONDS
+	_douse_from = maxf(_intensity, 0.0)

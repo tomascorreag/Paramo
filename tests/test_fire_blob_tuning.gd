@@ -1,66 +1,19 @@
 extends GutTest
 
-# Guards FireBlobTuning — the pure math behind the procedural blob fire. The
-# shader itself can only be verified by looking at it (see
-# scripts/tools/benchmark_fire.gd and the shader_debug modes), so this file is
-# where the SPEC gets held:
+# Guards FireBlobTuning — the pure intensity -> shader-uniform + quad-bound math
+# behind the procedural blob fire. The shader itself can only be verified by
+# looking at it (see scripts/tools/benchmark_fire.gd and the shader_debug modes),
+# so this file is where the shader-mapping SPEC gets held:
 #
-#   - an isolated ignition never outgrows kindling, at any burn amount;
 #   - kindling is literally a couple of lit pixels;
 #   - the quad always contains the field the shader can draw (fire_blobs.gdshader
 #     has NO spatial bound of its own — the quad IS the bound, so undersizing it
 #     clips blobs silently).
+#
+# The fire's DYNAMICS (intensity growth, spread, fuel) are FireDynamics' spec —
+# see tests/test_fire_dynamics.gd. FireBlobTuning no longer computes intensity.
 
 const RAMP_MATERIAL: String = "res://resources/materials/fire_blobs.tres"
-
-
-# --- Intensity ---------------------------------------------------------------
-
-func test_no_fire_at_zero_burn() -> void:
-	assert_eq(FireBlobTuning.intensity(0.0, 0), 0.0, "a just-lit cell has no blobs yet")
-	assert_eq(FireBlobTuning.intensity(0.0, 4), 0.0, "neighbours don't fake a burn that hasn't started")
-
-
-func test_isolated_fire_never_outgrows_kindling() -> void:
-	# THE load-bearing spec claim: burn amount alone must never make a lone
-	# ignition big. If this ever fails, a single fire on an empty hillside grows
-	# a full wildfire plume.
-	for i: int in range(0, 101):
-		var a: float = float(i) / 100.0
-		assert_lte(
-			FireBlobTuning.intensity(a, 0),
-			FireBlobTuning.ISOLATED_CAP,
-			"isolated fire at amount %.2f exceeded ISOLATED_CAP" % a)
-
-
-func test_spreading_front_is_always_bigger_than_isolated() -> void:
-	# Sample inside the envelope's live range; at amount 0 both are 0.
-	for i: int in range(1, 101):
-		var a: float = float(i) / 100.0
-		assert_gt(
-			FireBlobTuning.intensity(a, 4),
-			FireBlobTuning.intensity(a, 0),
-			"a surrounded cell must out-burn an isolated one at amount %.2f" % a)
-
-
-func test_intensity_is_monotonic_in_neighbours() -> void:
-	for n: int in range(0, 4):
-		assert_lte(
-			FireBlobTuning.intensity(0.5, n),
-			FireBlobTuning.intensity(0.5, n + 1),
-			"intensity must not drop as neighbour count rises (%d -> %d)" % [n, n + 1])
-
-
-func test_intensity_clamps_out_of_range_inputs() -> void:
-	assert_eq(FireBlobTuning.intensity(5.0, 99), FireBlobTuning.intensity(1.0, 4))
-	assert_eq(FireBlobTuning.intensity(-5.0, -99), FireBlobTuning.intensity(0.0, 0))
-
-
-func test_size_envelope_peaks_mid_burn_and_falls_to_embers() -> void:
-	var peak: float = FireBlobTuning.size_envelope(0.5)
-	assert_gt(peak, FireBlobTuning.size_envelope(0.05), "should be ramping up early")
-	assert_gt(peak, FireBlobTuning.size_envelope(1.0), "should be dying back at burn-out")
-	assert_lt(FireBlobTuning.size_envelope(1.0), 0.5, "embers, not a full fire")
 
 
 # --- Kindling read -----------------------------------------------------------
@@ -71,7 +24,10 @@ func test_kindling_is_a_couple_of_lit_pixels() -> void:
 	# ~1.5px lights 1-3 texels. This is the "kindling" requirement, in numbers.
 	assert_lte(float(u[&"blob_max_radius"]), 1.5, "kindling blobs must be pixel-scale")
 	assert_eq(int(u[&"slot_count"]), 1, "kindling is a single blob stream")
-	assert_lte(float(u[&"k_active"]), 3.0, "kindling column must stay sparse")
+	# Kindling density = k_active_min, a tuned look value (fire_blob_tuning.tres).
+	# The bound is "still a small cluster, not a plume"; raise it only alongside a
+	# deliberate retune of that field.
+	assert_lte(float(u[&"k_active"]), 4.0, "kindling column must stay sparse")
 
 
 func test_wildfire_is_substantially_bigger_than_kindling() -> void:
@@ -130,33 +86,135 @@ func test_uniform_names_all_exist_on_the_shader() -> void:
 			"uniforms_for() pushes '%s', which fire_blobs.gdshader does not declare" % name)
 
 
-func test_tres_does_not_author_code_driven_uniforms() -> void:
-	# The knob-location rule (see fire_blob_tuning.gd's header): anything
-	# uniforms_for() pushes is overwritten every intensity change, so authoring it
-	# in the .tres creates a knob that looks tunable in the inspector and silently
-	# does nothing. This catches that drift — without it the rule is just a comment.
-	var mat: ShaderMaterial = load(RAMP_MATERIAL) as ShaderMaterial
-	assert_not_null(mat, "fire_blobs.tres must load")
-	for name: StringName in FireBlobTuning.uniforms_for(0.5):
-		assert_null(
-			mat.get_shader_parameter(name),
-			"fire_blobs.tres authors '%s', but uniforms_for() overwrites it — " % name
-			+ "the .tres value is dead. Remove it, or stop pushing it.")
+# NOTE: there is deliberately no "the material must not author code-driven
+# uniforms" test. Godot re-serializes EVERY shader uniform into fire_blobs.tres
+# the instant it is touched in the inspector, so that invariant is unenforceable.
+# The guarantee that actually matters — a code-driven value in the material is
+# IGNORED, FireBlobTuning wins — is enforced below by
+# test_editor_refresh_syncs_look_params_but_not_code_driven (it sets
+# column_height=999 in the material and asserts the column uses the resource's
+# value). That is the enforceable form of the same intent.
+
+
+func test_editor_refresh_syncs_look_params_but_not_code_driven() -> void:
+	# The preview holds a frozen .duplicate() of fire_blobs.tres per column, so
+	# inspector edits only reach it via FireBlobColumn.editor_refresh. This guards
+	# that path: look params must sync from the live .tres, code-driven ones must
+	# stay FireBlobTuning-driven (a .tres value for them is dead), and the ceiling
+	# comes from the caller, not the .tres. Without this, "edit the .tres and watch
+	# it update" silently reverts to the freeze bug it was written to fix.
+	var col: FireBlobColumn = load("res://scripts/vfx/fire_blob_column.gd").new()
+	col.set_intensity(1.0)  # column_height should be the FireBlobTuning MAX
+	var mat: ShaderMaterial = col.material
+	var src: ShaderMaterial = load(RAMP_MATERIAL) as ShaderMaterial
+
+	var saved_rb: Variant = src.get_shader_parameter(&"radial_bias")
+	var saved_ch: Variant = src.get_shader_parameter(&"column_height")
+	src.set_shader_parameter(&"radial_bias", 1.9)      # a LOOK param
+	src.set_shader_parameter(&"column_height", 999.0)  # a CODE-DRIVEN param
+
+	col.editor_refresh(0.4)
+
+	assert_almost_eq(float(mat.get_shader_parameter(&"radial_bias")), 1.9, 0.001,
+		"look param edited in the .tres did not reach the column")
+	assert_almost_eq(float(mat.get_shader_parameter(&"column_height")),
+		FireBlobTuning.DATA.column_height_max, 0.001,
+		"a .tres value stomped a FireBlobTuning-driven uniform")
+	assert_almost_eq(float(mat.get_shader_parameter(&"heat_ceiling")), 0.4, 0.001,
+		"heat_ceiling must come from the caller, not the .tres")
+
+	# Leave the shared resource as we found it — other tests load the same instance.
+	src.set_shader_parameter(&"radial_bias", saved_rb)
+	src.set_shader_parameter(&"column_height", saved_ch)
+	col.free()
+
+
+func test_max_horizontal_reach_includes_wind_lean() -> void:
+	# The shader leans a blob's centre by wind_lean * rise height, capped CPU-side
+	# at MAX_WIND_LEAN. The quad is the shader's ONLY spatial bound, so
+	# max_horizontal_reach (which quad_size widens by) MUST fold that in, or a gust
+	# clips leaning tips with no error — the same failure mode rise_speed_jitter is
+	# guarded against. The neighbouring quad-contains test can't catch a dropped
+	# lean term (blob_reach alone dwarfs it), so recompute the expected reach from
+	# raw tuning data here, independently of the function under test.
+	assert_gt(FireBlobTuning.MAX_WIND_LEAN, 0.0, "wind lean must be a real cap")
+	var d: FireBlobTuningData = FireBlobTuning.DATA
+	for i: int in range(0, 101):
+		var t: float = float(i) / 100.0
+		var base_half: float = lerpf(d.half_width_min, d.half_width_max, t)
+		var turb: float = lerpf(d.turb_amp_min, d.turb_amp_max, t) * FireBlobTuning.SWAY_PEAK
+		var centre_rise: float = lerpf(d.column_height_min, d.column_height_max, t) \
+				* (1.0 + d.rise_speed_jitter)
+		var blob: float = lerpf(d.blob_max_radius_min, d.blob_max_radius_max, t) \
+				* FireBlobTuning.SIZE_JITTER_MAX \
+				* (1.0 + lerpf(d.noise_amp_min, d.noise_amp_max, t)) \
+				* lerpf(d.stretch_min, d.stretch_max, t)
+		var expected: float = base_half + turb + FireBlobTuning.MAX_WIND_LEAN * centre_rise + blob
+		assert_almost_eq(FireBlobTuning.max_horizontal_reach(t), expected, 0.001,
+			"max_horizontal_reach dropped a term at intensity %.2f" % t)
 
 
 func test_rise_speed_jitter_is_reflected_in_the_quad() -> void:
 	# Per-blob rise speed is BOUND-RELEVANT: the fastest blob overshoots the
 	# nominal column_height, and the quad is the shader's only bound. If the two
 	# ever disagree the tallest blobs get clipped with no error.
-	assert_gt(FireBlobTuning.RISE_SPEED_JITTER, 0.0, "blobs should not rise in lockstep")
+	assert_gt(FireBlobTuning.DATA.rise_speed_jitter, 0.0, "blobs should not rise in lockstep")
 	for i: int in range(0, 101):
 		var t: float = float(i) / 100.0
 		var nominal: float = lerpf(
-			FireBlobTuning.COLUMN_HEIGHT_MIN, FireBlobTuning.COLUMN_HEIGHT_MAX, t)
+			FireBlobTuning.DATA.column_height_min, FireBlobTuning.DATA.column_height_max, t)
 		assert_gte(
 			FireBlobTuning.max_rise(t),
-			nominal * (1.0 + FireBlobTuning.RISE_SPEED_JITTER),
+			nominal * (1.0 + FireBlobTuning.DATA.rise_speed_jitter),
 			"max_rise ignores the rise-speed overshoot at intensity %.2f" % t)
+
+
+func test_blob_phase_advances_at_one_over_lifetime() -> void:
+	# The blob age clock is a CPU accumulator (blob_phase), NOT the shader's
+	# TIME/lifetime — that decoupling is what stops an intensity change from
+	# teleporting every blob (age used to shift by ~TIME*Δlifetime). This guards the
+	# rate: phase must gain 1/lifetime per second, or blobs rise at the wrong speed.
+	var col: FireBlobColumn = load("res://scripts/vfx/fire_blob_column.gd").new()
+	col.set_cell_seed(0.0)  # deterministic: _phase seed = 0
+	var mat: ShaderMaterial = col.material
+
+	col.set_intensity(0.0)  # lifetime = lifetime_min
+	var life0: float = FireBlobTuning.DATA.lifetime_min
+	var p0: float = float(mat.get_shader_parameter(&"blob_phase"))
+	for _i: int in 10:
+		col.advance_phase(0.1)  # 1.0s total
+	var gained: float = float(mat.get_shader_parameter(&"blob_phase")) - p0
+	assert_almost_eq(gained, 1.0 / life0, 0.002,
+		"phase must advance 1/lifetime per second")
+
+	col.free()
+
+
+func test_blob_phase_is_continuous_across_an_intensity_change() -> void:
+	# THE fix, in a test: changing intensity changes lifetime, but the phase VALUE
+	# must not jump — it just changes RATE. A discontinuity here is exactly the
+	# glitch this whole clock was built to remove.
+	var col: FireBlobColumn = load("res://scripts/vfx/fire_blob_column.gd").new()
+	col.set_cell_seed(0.0)
+	var mat: ShaderMaterial = col.material
+
+	col.set_intensity(0.0)
+	for _i: int in 5:
+		col.advance_phase(0.1)
+	var before: float = float(mat.get_shader_parameter(&"blob_phase"))
+
+	col.set_intensity(1.0)  # lifetime jumps min -> max; phase must be untouched
+	var after: float = float(mat.get_shader_parameter(&"blob_phase"))
+	assert_almost_eq(after, before, 0.0001,
+		"set_intensity moved the phase — the age clock is not continuous")
+
+	# ...and it now advances at the NEW lifetime's rate.
+	col.advance_phase(0.1)
+	var step: float = float(mat.get_shader_parameter(&"blob_phase")) - after
+	assert_almost_eq(step, 0.1 / FireBlobTuning.DATA.lifetime_max, 0.002,
+		"phase rate did not follow the new lifetime")
+
+	col.free()
 
 
 func test_ramp_colours_are_exact_palette_entries() -> void:

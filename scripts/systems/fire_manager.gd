@@ -14,9 +14,9 @@ extends Node
 # clears its state whenever Pathfinder.graph_changed fires (a map reload or
 # rebuild starts the simulation over with a fresh grid).
 #
-# Tuning sits at the top of the file. Current preset: "aggressive" — frequent
-# ignitions, fast burns, fast spread. Drop BASE_IGNITION_RATE / SPREAD_RATE
-# for a calmer slice.
+# Ignition tuning sits at the top of this file (BASE_IGNITION_RATE, day/altitude/
+# water falloff). Burn/intensity/spread/fuel tuning lives in FireDynamics. Drop
+# BASE_IGNITION_RATE (here) or FireDynamics.SPREAD_RATE for a calmer slice.
 #
 # Public signal:
 #   tile_burned(cell)   emitted after a cell completes its burn.
@@ -32,9 +32,19 @@ const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.04
 const K_IGNITION_SAMPLES: int = 4 # per ignition tick
 const IGNITION_TICK_SECONDS: float = 0.25
 
-const BURN_RATE_PER_SECOND: float = 0.10 # ~10s for a full burn
-const SPREAD_RATE_PER_NEIGHBOUR_PER_SECOND: float = 0.2
-const SPREAD_THRESHOLD: float = 0.25 # only spread once the source is well established
+# Burn progression, intensity, spread chance, and fuel consumption all live in
+# FireDynamics now (the testable sim math). What remains here is ignition
+# rolling, terrain gating, and the grass↔dirt swaps. A fire GROWS on its own
+# from kindling and spreads BECAUSE it grew (intensity >= FireDynamics.SPREAD_MIN)
+# — there is no isolated-cap ceiling anymore.
+
+# Fuel a freshly-lit tile carries, before per-tile variety. FireDynamics is
+# calibrated against FUEL_DEFAULT; a tile with more fuel simply burns longer.
+const FUEL_DEFAULT: float = 1.0
+# +/- fraction of hashed per-tile variation on FUEL_DEFAULT, so adjacent tiles
+# don't burn in lockstep. Deterministic per cell. This is also the seam where a
+# real long-vs-short-grass fuel value would come from later (see _fuel_for_cell).
+const FUEL_VARIANCE: float = 0.35
 
 const WATER_SEARCH_R: int = 6 # max bounded BFS radius (cells)
 const ALTITUDE_FALLOFF_SCALE: float = 4.0 # exp(-alt / scale)
@@ -85,7 +95,12 @@ var _vfx_container: Node2D = null
 var _time_manager: Node = null
 var _day_night: Node = null # DayNightSceneController, for rain query
 
-# cell -> { "vfx": BurningCellVFX, "amount": float, "frailejon": Node2D (or null) }
+# cell -> { "vfx": BurningCellVFX, "age": float, "fuel": float, "fuel_max": float,
+#           "max_intensity": float, "frailejon": Node2D (or null),
+#           "grass_coord": Vector2i, "grass_layer": TileMapLayer }
+# age = seconds since ignition (drives the intensity ramp); fuel/fuel_max = the
+# tile's grass being consumed (drives the dissolve and burnout); max_intensity =
+# this fire's own random ceiling (some fires stay small). See FireDynamics.
 var _burning: Dictionary = {}
 
 var _water_dist_cache: Dictionary[Vector2i, int] = {}
@@ -116,22 +131,6 @@ func is_burning(cell: Vector2i) -> bool:
 	return _burning.has(cell)
 
 
-## How many of `cell`'s 4-neighbours are currently burning (0-4). Drives the VFX
-## blob scale: an isolated ignition stays kindling-sized, a cell inside a
-## spreading front grows to a full wildfire plume. See FireBlobTuning.intensity.
-##
-## Cheap enough to call per burning cell per frame — 4 Dictionary probes, so 320
-## at MAX_CONCURRENT_BURNING, which is immeasurable against the ~0.4ms noise
-## floor. Deliberately not cached: a cache would need invalidating on every
-## ignite/extinguish/complete, which is a bug surface for no measurable gain.
-func burning_neighbour_count(cell: Vector2i) -> int:
-	var n: int = 0
-	for d: Vector2i in _NEIGHBOR_DIRS:
-		if _burning.has(cell + d):
-			n += 1
-	return n
-
-
 ## True iff `cell` could be set alight right now. Public because callers outside
 ## the natural-ignition path (the debug ignite action) have no other way to ask.
 ##
@@ -153,7 +152,7 @@ func can_ignite(cell: Vector2i) -> bool:
 	return _is_grass(cell)
 
 
-## Light a fire at `cell`: a fresh kindling at amount 0, identical to what a
+## Light a fire at `cell`: a fresh kindling at age 0, identical to what a
 ## random ignition produces — same spread, same burn, same VFX. Returns true if a
 ## fire actually started. Mirrors `extinguish`.
 func ignite(cell: Vector2i) -> bool:
@@ -267,22 +266,33 @@ func _advance_burns(delta: float, rain: float) -> void:
 			extinguished.append(cell)
 			continue
 
-		var amount: float = float(entry.get("amount", 0.0))
-		amount += BURN_RATE_PER_SECOND * delta
-		entry["amount"] = amount
+		# Age drives the intensity ramp; fuel drives the dissolve + burnout. The
+		# fire grows on its own (no neighbour term) and eats the tile's fuel at a
+		# rate set by how hot it is.
+		var age: float = float(entry.get("age", 0.0)) + delta
+		entry["age"] = age
+		var fuel: float = float(entry.get("fuel", FUEL_DEFAULT))
+		var fuel_max: float = float(entry.get("fuel_max", FUEL_DEFAULT))
+		var fuel_frac: float = clampf(fuel / maxf(fuel_max, 0.0001), 0.0, 1.0)
+
+		var max_i: float = float(entry.get("max_intensity", 1.0))
+		var intensity: float = FireDynamics.intensity(age, fuel_frac, max_i)
+		fuel -= FireDynamics.fuel_consumed(intensity, delta)
+		entry["fuel"] = fuel
 
 		var vfx: BurningCellVFX = entry.get("vfx") as BurningCellVFX
 		if vfx != null and is_instance_valid(vfx):
-			vfx.set_burn_state(amount, burning_neighbour_count(cell))
+			vfx.set_state(intensity, fuel_frac)
 
 		var frj: Node = entry.get("frailejon") as Node
 		if frj != null and is_instance_valid(frj) and frj.has_method(&"set_burn_amount"):
-			frj.call(&"set_burn_amount", amount)
+			# Char the plant as its tile's fuel is consumed (reaches 1 at burnout).
+			frj.call(&"set_burn_amount", 1.0 - fuel_frac)
 
-		if amount >= SPREAD_THRESHOLD and spread_mult > 0.0:
-			_roll_spread(cell, delta, spread_mult)
+		if intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
+			_roll_spread(cell, intensity, delta, spread_mult)
 
-		if amount >= 1.0:
+		if fuel <= 0.0:
 			completed.append(cell)
 
 	for cell: Vector2i in extinguished:
@@ -291,8 +301,10 @@ func _advance_burns(delta: float, rain: float) -> void:
 		_complete_burn(cell)
 
 
-func _roll_spread(from_cell: Vector2i, delta: float, rain_mult: float) -> void:
-	var p_per_neighbour: float = SPREAD_RATE_PER_NEIGHBOUR_PER_SECOND * delta * rain_mult
+func _roll_spread(from_cell: Vector2i, intensity: float, delta: float, rain_mult: float) -> void:
+	# Spread chance rises with the source fire's intensity (quadratic above the
+	# gate) — slow just over SPREAD_MIN, aggressive once hot. See FireDynamics.
+	var p_per_neighbour: float = FireDynamics.spread_probability(intensity, delta, rain_mult)
 	if p_per_neighbour <= 0.0:
 		return
 	# Strict elevation rule: a burning slope can't propagate, and spread only
@@ -385,15 +397,35 @@ func _ignite(cell: Vector2i) -> void:
 		occ.call(&"apply_burn_material")
 		frailejon = occ
 
+	var fuel: float = _fuel_for_cell(cell, cd)
 	_burning[cell] = {
 		"vfx": vfx,
-		"amount": 0.0,
+		"age": 0.0,
+		"fuel": fuel,
+		"fuel_max": fuel,
+		# This fire's own intensity ceiling, rolled uniformly — some fires stay
+		# small, some grow to full. See FireDynamics.intensity.
+		"max_intensity": randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
 		"frailejon": frailejon,
 		# Cached for the extinguish-restore path: re-paint these on the source
 		# layer to undo the ignition-time grass→dirt swap.
 		"grass_coord": atlas_coords,
 		"grass_layer": layer,
 	}
+
+
+# How much fuel a tile carries when it ignites. Uniform FUEL_DEFAULT today, with
+# deterministic per-cell variance so burn durations differ tile-to-tile. This is
+# the seam for real per-tile fuel later (long vs short grass): read it off
+# cd.tile_kind or a future grass-length field instead of the flat default.
+func _fuel_for_cell(cell: Vector2i, _cd) -> float:
+	# Hash the cell to a stable [-1, 1] and scale by FUEL_VARIANCE. `_cd` carries
+	# the cell's kind/altitude if a richer rule is ever wanted; unused for now.
+	# posmod, not %: hash() can be negative and GDScript's % keeps the sign, which
+	# would push jitter below -1 and starve some tiles to near-zero fuel.
+	var h: int = posmod(hash(cell), 2000)
+	var jitter: float = (float(h) / 1000.0 - 1.0) * FUEL_VARIANCE
+	return maxf(FUEL_DEFAULT * (1.0 + jitter), 0.05)
 
 
 func _extinguish(cell: Vector2i) -> void:
@@ -406,9 +438,13 @@ func _extinguish(cell: Vector2i) -> void:
 	if entry.is_empty():
 		return
 
-	var vfx: Node = entry.get("vfx") as Node
+	# Fade the flame out over DOUSE_SECONDS instead of vanishing on the spot. The
+	# node has left _burning, so nothing drives it again — begin_douse self-drives
+	# the fade in _process, like the smoulder tail. The grass is repainted below
+	# now; the shrinking flame + its overlay cover the swap until it frees.
+	var vfx: BurningCellVFX = entry.get("vfx") as BurningCellVFX
 	if is_instance_valid(vfx):
-		vfx.queue_free()
+		vfx.begin_douse()
 
 	var grass_layer: TileMapLayer = entry.get("grass_layer") as TileMapLayer
 	var grass_coord: Vector2i = entry.get("grass_coord", Vector2i(-1, -1))
