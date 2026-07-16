@@ -8,5 +8,6 @@ base_width = 480
 base_height = 270
 fullscreen_in_exports = true
 editor_window_scale = 3
+stretch_mode = 2
 stretch_aspect = 4
 scale_round_bias = 0.5

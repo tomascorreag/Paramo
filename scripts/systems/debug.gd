@@ -48,8 +48,21 @@ var free_movement: bool = false:
 		free_movement_changed.emit(free_movement)
 
 
+func _ready() -> void:
+	# Web release builds report is_debug_build() == false, so F3 alone can't reach
+	# the overlay there. Opening the page at `...index.html#debug` auto-enables it,
+	# which is safe to ship (normal players never append the fragment) and is how
+	# the fill A/B is driven on the deployed web build. Desktop is unaffected.
+	if OS.has_feature("web"):
+		var frag := str(JavaScriptBridge.eval("window.location.hash", true))
+		if "debug" in frag:
+			enabled = true
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if not OS.is_debug_build():
+	# F3 toggles in editor/debug runs, and also on web so the overlay can be hidden
+	# again after `#debug` opened it (browsers may swallow F3, hence the fragment).
+	if not OS.is_debug_build() and not OS.has_feature("web"):
 		return
 	if event.is_action_pressed(&"ui_toggle_debug"):
 		enabled = not enabled

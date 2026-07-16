@@ -15,8 +15,21 @@ const _SLIDER_MAX: float = 0.999
 @onready var _indices_toggle: CheckButton = %IndicesToggle
 @onready var _altitudes_toggle: CheckButton = %AltitudesToggle
 @onready var _free_move_toggle: CheckButton = %FreeMoveToggle
+@onready var _pixel_toggle: CheckButton = %PixelToggle
 @onready var _rain_slider: HSlider = %RainSlider
 @onready var _rain_label: Label = %RainLabel
+@onready var _perf_label: Label = %PerfLabel
+
+# Rolling wall-clock frame-time window (ms). Wall clock, not TIME_FPS, matches
+# profile_scene.gd — TIME_FPS is smoothed and published once/second. On web the
+# main loop is requestAnimationFrame-driven, so these samples are vsync-capped:
+# the number is only meaningful once the GPU drops the frame BELOW refresh. If it
+# sits pinned at your refresh rate, that mode has GPU headroom at this resolution
+# and the fill delta is invisible here — read the DevTools GPU track instead.
+const _PERF_WINDOW: int = 90
+var _dt_samples: Array[float] = []
+var _last_usec: int = 0
+var _perf_refresh: int = 0
 
 var _dragging: bool = false
 var _prev_paused: bool = false
@@ -49,6 +62,7 @@ func _ready() -> void:
 	_indices_toggle.toggled.connect(_on_indices_toggled)
 	_altitudes_toggle.toggled.connect(_on_altitudes_toggled)
 	_free_move_toggle.toggled.connect(_on_free_move_toggled)
+	_pixel_toggle.toggled.connect(_on_pixel_toggled)
 	_rain_slider.drag_started.connect(_on_rain_drag_started)
 	_rain_slider.drag_ended.connect(_on_rain_drag_ended)
 	_rain_slider.value_changed.connect(_on_rain_slider_changed)
@@ -61,6 +75,10 @@ func _ready() -> void:
 func _on_debug_enabled_changed(is_enabled: bool) -> void:
 	visible = is_enabled
 	if is_enabled:
+		# Drop stale timing so the first frame after re-showing isn't logged as a
+		# multi-second "frame" (_last_usec == 0 skips the first sample).
+		_last_usec = 0
+		_dt_samples.clear()
 		_sync_from_time_manager()
 
 
@@ -71,6 +89,8 @@ func _sync_from_time_manager() -> void:
 	_indices_toggle.set_pressed_no_signal(Debug.show_tile_indices)
 	_altitudes_toggle.set_pressed_no_signal(Debug.show_tile_altitudes)
 	_free_move_toggle.set_pressed_no_signal(Debug.free_movement)
+	var spv := _get_smooth_pixel_viewport()
+	_pixel_toggle.set_pressed_no_signal(spv != null and spv.smoothing_enabled)
 
 
 func _on_indices_toggled(button_pressed: bool) -> void:
@@ -83,6 +103,21 @@ func _on_altitudes_toggled(button_pressed: bool) -> void:
 
 func _on_free_move_toggled(button_pressed: bool) -> void:
 	Debug.free_movement = button_pressed
+
+
+# ON = subpixel-smooth camera (world snaps to texels, display slides by the
+# sub-texel remainder). OFF = the old choppy, per-texel-jump camera. Toggle it
+# WHILE THE CAMERA MOVES — a still frame is identical either way; the whole point
+# is the motion. (The world always rasterizes low-res now via the SubViewport;
+# this only governs whether the smooth scroll is re-added on top.)
+func _on_pixel_toggled(button_pressed: bool) -> void:
+	var spv := _get_smooth_pixel_viewport()
+	if spv != null:
+		spv.smoothing_enabled = button_pressed
+
+
+func _get_smooth_pixel_viewport() -> SmoothPixelViewport:
+	return get_tree().get_first_node_in_group(&"smooth_pixel_viewport") as SmoothPixelViewport
 
 
 func _on_rain_drag_started() -> void:
@@ -130,11 +165,49 @@ func _resolve_rain_refs() -> void:
 # slider, mirror the controller's current rain intensity into the slider so
 # the user can SEE the event system working without having to read the shader.
 func _process(_delta: float) -> void:
-	if not visible or _rain_dragging or _controller == null:
+	if not visible:
+		return
+	_update_perf()
+	if _rain_dragging or _controller == null:
 		return
 	var v: float = _controller.get_rain_current_intensity()
 	_rain_slider.set_value_no_signal(v)
 	_rain_label.text = "%.2f" % v
+
+
+# fps / median+p95 frame time / draw calls / current stretch mode, sampled every
+# frame and shown while the overlay is open. This is the readout for the fill A/B:
+# force worst-case fill (rain slider -> 1.0), then flip "Pixel Grid" and compare.
+# VIEWPORT recovering frames that CANVAS drops == fill-bound. See _dt_samples note
+# on the web vsync cap — below refresh is the only regime this readout can see.
+func _update_perf() -> void:
+	var now := Time.get_ticks_usec()
+	if _last_usec != 0:
+		_dt_samples.append(float(now - _last_usec) / 1000.0)
+		if _dt_samples.size() > _PERF_WINDOW:
+			_dt_samples.remove_at(0)
+	_last_usec = now
+
+	# Refresh text a few times a second, not every frame — the string format is
+	# far dearer than the sample and would itself perturb a fill measurement.
+	_perf_refresh += 1
+	if _perf_refresh < 6:
+		return
+	_perf_refresh = 0
+	if _dt_samples.size() < 8:
+		return
+	var s := _dt_samples.duplicate()
+	s.sort()
+	var med: float = s[s.size() / 2]
+	var p95: float = s[clampi(int(0.95 * float(s.size())), 0, s.size() - 1)]
+	var draws: int = int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	var mode: String = (
+		"VIEWPORT" if DisplayManager.get_stretch_mode() == Window.CONTENT_SCALE_MODE_VIEWPORT
+		else "CANVAS"
+	)
+	_perf_label.text = "%.0f fps  %.1fms  p95 %.1fms\ndraws %d   %s" % [
+		1000.0 / maxf(med, 0.001), med, p95, draws, mode
+	]
 
 
 func _on_passage_toggled(button_pressed: bool) -> void:

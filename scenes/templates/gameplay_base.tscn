@@ -33,6 +33,7 @@
 [ext_resource type="PackedScene" uid="uid://b0r4inv1xpara" path="res://scenes/vfx/rain.tscn" id="31_rain"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="32_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
+[ext_resource type="Script" path="res://scripts/systems/smooth_pixel_viewport.gd" id="34_spv"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -48,10 +49,24 @@ shader_parameter/tint_strength = 0.0
 [node name="GameplayBase" type="Node2D" unique_id=1948839837]
 y_sort_enabled = true
 
-[node name="BackgroundLayer" type="CanvasLayer" parent="." unique_id=1504797704]
+[node name="WorldViewportContainer" type="SubViewportContainer" parent="." node_paths=PackedStringArray("world_viewport") unique_id=1000000001 groups=["smooth_pixel_viewport"]]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("34_spv")
+world_viewport = NodePath("WorldViewport")
+
+[node name="WorldViewport" type="SubViewport" parent="WorldViewportContainer" unique_id=1000000002]
+disable_3d = true
+audio_listener_enable_2d = true
+render_target_update_mode = 4
+
+[node name="BackgroundLayer" type="CanvasLayer" parent="WorldViewportContainer/WorldViewport" unique_id=1504797704]
 layer = -1
 
-[node name="BG" type="ColorRect" parent="BackgroundLayer" unique_id=889943980]
+[node name="BG" type="ColorRect" parent="WorldViewportContainer/WorldViewport/BackgroundLayer" unique_id=889943980]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -64,13 +79,13 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0, 0, 0, 1)
 
-[node name="AmbientModulate" type="CanvasModulate" parent="." unique_id=2136978843 groups=["ambient_modulate"]]
+[node name="AmbientModulate" type="CanvasModulate" parent="WorldViewportContainer/WorldViewport" unique_id=2136978843 groups=["ambient_modulate"]]
 
-[node name="World" type="Node2D" parent="." unique_id=1390293971]
+[node name="World" type="Node2D" parent="WorldViewportContainer/WorldViewport" unique_id=1390293971]
 y_sort_enabled = true
 position = Vector2(145, 99)
 
-[node name="Ground_n1" type="TileMapLayer" parent="World" unique_id=101024365]
+[node name="Ground_n1" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=101024365]
 y_sort_enabled = true
 position = Vector2(0, 16)
 tile_set = ExtResource("1_tileset")
@@ -78,13 +93,13 @@ y_sort_origin = -16
 rendering_quadrant_size = 32
 metadata/altitude = -2
 
-[node name="Ground0" type="TileMapLayer" parent="World" unique_id=610442016]
+[node name="Ground0" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=610442016]
 y_sort_enabled = true
 tile_set = ExtResource("1_tileset")
 rendering_quadrant_size = 32
 metadata/altitude = 0
 
-[node name="Ground1" type="TileMapLayer" parent="World" unique_id=1929465695]
+[node name="Ground1" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=1929465695]
 y_sort_enabled = true
 position = Vector2(0, -16)
 tile_set = ExtResource("1_tileset")
@@ -92,7 +107,7 @@ y_sort_origin = 16
 rendering_quadrant_size = 32
 metadata/altitude = 2
 
-[node name="Ground2" type="TileMapLayer" parent="World" unique_id=840223098]
+[node name="Ground2" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=840223098]
 y_sort_enabled = true
 position = Vector2(0, -32)
 tile_set = ExtResource("1_tileset")
@@ -100,7 +115,7 @@ y_sort_origin = 32
 rendering_quadrant_size = 32
 metadata/altitude = 4
 
-[node name="Ground3" type="TileMapLayer" parent="World" unique_id=1622259109]
+[node name="Ground3" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=1622259109]
 y_sort_enabled = true
 position = Vector2(0, -48)
 tile_set = ExtResource("1_tileset")
@@ -108,7 +123,7 @@ y_sort_origin = 48
 rendering_quadrant_size = 32
 metadata/altitude = 6
 
-[node name="Ground4" type="TileMapLayer" parent="World" unique_id=941775185]
+[node name="Ground4" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=941775185]
 y_sort_enabled = true
 position = Vector2(0, -64)
 tile_set = ExtResource("1_tileset")
@@ -116,7 +131,7 @@ y_sort_origin = 64
 rendering_quadrant_size = 32
 metadata/altitude = 8
 
-[node name="Ground5" type="TileMapLayer" parent="World" unique_id=1826627031]
+[node name="Ground5" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=1826627031]
 y_sort_enabled = true
 position = Vector2(0, -80)
 tile_set = ExtResource("1_tileset")
@@ -124,7 +139,7 @@ y_sort_origin = 80
 rendering_quadrant_size = 32
 metadata/altitude = 10
 
-[node name="Ground6" type="TileMapLayer" parent="World" unique_id=396333150]
+[node name="Ground6" type="TileMapLayer" parent="WorldViewportContainer/WorldViewport/World" unique_id=396333150]
 y_sort_enabled = true
 position = Vector2(0, -96)
 tile_set = ExtResource("1_tileset")
@@ -132,41 +147,41 @@ y_sort_origin = 96
 rendering_quadrant_size = 32
 metadata/altitude = 12
 
-[node name="Player" parent="World" unique_id=119520760 instance=ExtResource("2_player")]
+[node name="Player" parent="WorldViewportContainer/WorldViewport/World" unique_id=119520760 instance=ExtResource("2_player")]
 up_direction = Vector2(1, 0)
 
-[node name="VFXContainer" type="Node2D" parent="World" unique_id=1948391821 groups=["vfx_container"]]
+[node name="VFXContainer" type="Node2D" parent="WorldViewportContainer/WorldViewport/World" unique_id=1948391821 groups=["vfx_container"]]
 y_sort_enabled = true
 
-[node name="UILayer" type="CanvasLayer" parent="." unique_id=2006076017]
+[node name="UILayer" type="CanvasLayer" parent="WorldViewportContainer/WorldViewport" unique_id=2006076017]
 
-[node name="DebugLabel" type="Label" parent="UILayer" unique_id=530945562]
+[node name="DebugLabel" type="Label" parent="WorldViewportContainer/WorldViewport/UILayer" unique_id=530945562]
 offset_right = 320.0
 offset_bottom = 48.0
 
-[node name="Pathfinder" type="Node" parent="." unique_id=976782755 node_paths=PackedStringArray("tile_map_layers")]
+[node name="Pathfinder" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=976782755 node_paths=PackedStringArray("tile_map_layers")]
 script = ExtResource("3_pathfinder")
 tile_map_layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
 
-[node name="ClickToMoveController" type="Node" parent="." unique_id=1755352299 node_paths=PackedStringArray("pathfinder", "player")]
+[node name="ClickToMoveController" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=1755352299 node_paths=PackedStringArray("pathfinder", "player")]
 script = ExtResource("4_click")
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
 
-[node name="StructureLayerManager" type="Node" parent="." unique_id=766474776 node_paths=PackedStringArray("pathfinder", "world")]
+[node name="StructureLayerManager" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=766474776 node_paths=PackedStringArray("pathfinder", "world")]
 script = ExtResource("23_slm")
 pathfinder = NodePath("../Pathfinder")
 world = NodePath("../World")
 structures_tileset = ExtResource("1_tileset")
 
-[node name="TileInteractionController" type="Node" parent="." unique_id=1408926348 node_paths=PackedStringArray("pathfinder", "player", "world", "traversal_placement_controller")]
+[node name="TileInteractionController" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=1408926348 node_paths=PackedStringArray("pathfinder", "player", "world", "traversal_placement_controller")]
 script = ExtResource("14_tilei")
 pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
 world = NodePath("../World")
 traversal_placement_controller = NodePath("../TraversalPlacementController")
 
-[node name="TraversalPlacementController" type="Node" parent="." unique_id=728370663 node_paths=PackedStringArray("pathfinder", "structure_layer_manager", "world", "ux_overlay")]
+[node name="TraversalPlacementController" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=728370663 node_paths=PackedStringArray("pathfinder", "structure_layer_manager", "world", "ux_overlay")]
 script = ExtResource("24_tpc")
 pathfinder = NodePath("../Pathfinder")
 structure_layer_manager = NodePath("../StructureLayerManager")
@@ -175,7 +190,7 @@ ux_overlay = NodePath("../UXOverlay")
 bridge_scene = ExtResource("25_brscn")
 ladder_scene = ExtResource("26_ldscn")
 
-[node name="TileDebugOverlay" type="Node2D" parent="." unique_id=1330998519 node_paths=PackedStringArray("pathfinder", "debug_label")]
+[node name="TileDebugOverlay" type="Node2D" parent="WorldViewportContainer/WorldViewport" unique_id=1330998519 node_paths=PackedStringArray("pathfinder", "debug_label")]
 z_index = 100
 z_as_relative = false
 script = ExtResource("5_tdovl")
@@ -183,32 +198,32 @@ pathfinder = NodePath("../Pathfinder")
 debug_label = NodePath("../UILayer/DebugLabel")
 editor_show_tile_altitudes = true
 
-[node name="UXOverlay" type="Node2D" parent="." unique_id=749867415 node_paths=PackedStringArray("pathfinder", "tile_interaction_controller")]
+[node name="UXOverlay" type="Node2D" parent="WorldViewportContainer/WorldViewport" unique_id=749867415 node_paths=PackedStringArray("pathfinder", "tile_interaction_controller")]
 z_index = 1
 script = ExtResource("6_uxovr")
 pathfinder = NodePath("../Pathfinder")
 tile_interaction_controller = NodePath("../TileInteractionController")
 reticle_fade_duration = 0.2
 
-[node name="BaseX" type="AnimatedSprite2D" parent="UXOverlay" unique_id=768799790]
+[node name="BaseX" type="AnimatedSprite2D" parent="WorldViewportContainer/WorldViewport/UXOverlay" unique_id=768799790]
 sprite_frames = ExtResource("7_curanx")
 autoplay = "default"
 
-[node name="Circle" type="Sprite2D" parent="UXOverlay" unique_id=1478618525]
+[node name="Circle" type="Sprite2D" parent="WorldViewportContainer/WorldViewport/UXOverlay" unique_id=1478618525]
 visible = false
 texture = ExtResource("8_curcir")
 
-[node name="LockedSquare" type="Sprite2D" parent="UXOverlay" unique_id=133334024]
+[node name="LockedSquare" type="Sprite2D" parent="WorldViewportContainer/WorldViewport/UXOverlay" unique_id=133334024]
 visible = false
 texture = ExtResource("9_cursq")
 
-[node name="LockedX" type="Sprite2D" parent="UXOverlay" unique_id=333932188]
+[node name="LockedX" type="Sprite2D" parent="WorldViewportContainer/WorldViewport/UXOverlay" unique_id=333932188]
 visible = false
 texture = ExtResource("10_curx0")
 
-[node name="Candidates" type="Node2D" parent="UXOverlay" unique_id=1226892888]
+[node name="Candidates" type="Node2D" parent="WorldViewportContainer/WorldViewport/UXOverlay" unique_id=1226892888]
 
-[node name="DayNightController" type="Node" parent="." unique_id=480862931 node_paths=PackedStringArray("canvas_modulate", "post_process_rect", "background_rect")]
+[node name="DayNightController" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=480862931 node_paths=PackedStringArray("canvas_modulate", "post_process_rect", "background_rect")]
 script = ExtResource("11_dnctrl")
 profile = ExtResource("12_dnprof")
 canvas_modulate = NodePath("../AmbientModulate")
@@ -217,10 +232,10 @@ background_rect = NodePath("../BackgroundLayer/BG")
 wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
 water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
 
-[node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=156444878]
+[node name="PostProcessLayer" type="CanvasLayer" parent="WorldViewportContainer/WorldViewport" unique_id=156444878]
 layer = 100
 
-[node name="PostProcessRect" type="ColorRect" parent="PostProcessLayer" unique_id=1334357627]
+[node name="PostProcessRect" type="ColorRect" parent="WorldViewportContainer/WorldViewport/PostProcessLayer" unique_id=1334357627]
 material = SubResource("SubResource_pp_mat")
 anchors_preset = 15
 anchor_right = 1.0
@@ -229,22 +244,22 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="LayerConfigurator" type="Node" parent="." unique_id=1961331091 node_paths=PackedStringArray("layers")]
+[node name="LayerConfigurator" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=1961331091 node_paths=PackedStringArray("layers")]
 script = ExtResource("27_glcfg")
 layers = [NodePath("../World/Ground0"), NodePath("../World/Ground1"), NodePath("../World/Ground2"), NodePath("../World/Ground3"), NodePath("../World/Ground4"), NodePath("../World/Ground5"), NodePath("../World/Ground6")]
 altitudes = Array[int]([0, 2, 4, 6, 8, 10, 12])
 
-[node name="FreeCamera" type="Camera2D" parent="." unique_id=1834212989]
+[node name="FreeCamera" type="Camera2D" parent="WorldViewportContainer/WorldViewport" unique_id=1834212989]
 script = ExtResource("28_fcam")
 
-[node name="AltitudeFogController" type="Node" parent="." unique_id=1242523295 node_paths=PackedStringArray("world", "player")]
+[node name="AltitudeFogController" type="Node" parent="WorldViewportContainer/WorldViewport" unique_id=1242523295 node_paths=PackedStringArray("world", "player")]
 script = ExtResource("29_afog")
 world = NodePath("../World")
 player = NodePath("../World/Player")
 max_darkness = 0.15
 falloff = 0.1
 
-[node name="RainLayer" parent="." instance=ExtResource("31_rain")]
+[node name="RainLayer" parent="WorldViewportContainer/WorldViewport" instance=ExtResource("31_rain")]
 
 [node name="HUD" parent="." instance=ExtResource("32_hud")]
 
