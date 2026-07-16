@@ -27,6 +27,7 @@ const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/ac
 const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
 const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
+const _ACTION_IGNITE_FIRE: GDScript = preload("res://scripts/systems/actions/action_ignite_fire.gd")
 
 # Visuals for submenu group nodes — rendered as parent items on the wheel
 # whose submenu children are the individual TileActions in that group.
@@ -99,6 +100,9 @@ func _ready() -> void:
 	_registry.register(_ACTION_REMOVE_LADDER.new())
 	_registry.register(_ACTION_REMOVE_ROCK.new())
 	_registry.register(_ACTION_EXTINGUISH_FIRE.new())
+	# Debug-only (self-gates on Debug.enabled); registered unconditionally so the
+	# F3 toggle works live rather than being baked in at _ready.
+	_registry.register(_ACTION_IGNITE_FIRE.new())
 
 	# General interaction-target rule, shared by the right-click handler and
 	# UXOverlay hover: resolve the topmost cell that is walkable OR has an
@@ -211,7 +215,7 @@ func has_meaningful_action(cell: Vector2i) -> bool:
 	if _registry == null:
 		return false
 	for action in _registry.available_for(_build_context(cell)):
-		if action.id != &"inspect":
+		if action.id != &"inspect" and not action.debug_only:
 			return true
 	return false
 

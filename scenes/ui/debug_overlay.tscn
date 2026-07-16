@@ -132,3 +132,19 @@ text = "Free Move (WASD)"
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 8
+
+[node name="BlobFireRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Label" type="Label" parent="Panel/VBox/BlobFireRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 8
+text = "Blob Fire"
+
+[node name="BlobFireToggle" type="CheckButton" parent="Panel/VBox/BlobFireRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 8
+button_pressed = true

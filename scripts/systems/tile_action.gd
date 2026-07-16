@@ -26,6 +26,13 @@ var icon: Texture2D
 ## under a submenu identified by this StringName.
 var group: StringName = &""
 
+## Marks a dev affordance rather than real gameplay. Such actions still open the
+## menu, but are excluded from TileInteractionController.has_meaningful_action,
+## so they don't promote a tile from "movable" to "actionable" in the hover
+## reticle. Without this a debug action that applies broadly (e.g. "ignite any
+## grass") would light up the reticle on half the map.
+var debug_only: bool = false
+
 
 ## "Can I act on this cell from where I stand RIGHT NOW?" gate. Combines the
 ## proximity rule with the subclass predicate. Unchanged contract: the controller

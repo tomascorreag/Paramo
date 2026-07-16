@@ -15,6 +15,7 @@ const _SLIDER_MAX: float = 0.999
 @onready var _indices_toggle: CheckButton = %IndicesToggle
 @onready var _altitudes_toggle: CheckButton = %AltitudesToggle
 @onready var _free_move_toggle: CheckButton = %FreeMoveToggle
+@onready var _blob_fire_toggle: CheckButton = %BlobFireToggle
 @onready var _rain_slider: HSlider = %RainSlider
 @onready var _rain_label: Label = %RainLabel
 
@@ -49,6 +50,7 @@ func _ready() -> void:
 	_indices_toggle.toggled.connect(_on_indices_toggled)
 	_altitudes_toggle.toggled.connect(_on_altitudes_toggled)
 	_free_move_toggle.toggled.connect(_on_free_move_toggled)
+	_blob_fire_toggle.toggled.connect(_on_blob_fire_toggled)
 	_rain_slider.drag_started.connect(_on_rain_drag_started)
 	_rain_slider.drag_ended.connect(_on_rain_drag_ended)
 	_rain_slider.value_changed.connect(_on_rain_slider_changed)
@@ -71,6 +73,7 @@ func _sync_from_time_manager() -> void:
 	_indices_toggle.set_pressed_no_signal(Debug.show_tile_indices)
 	_altitudes_toggle.set_pressed_no_signal(Debug.show_tile_altitudes)
 	_free_move_toggle.set_pressed_no_signal(Debug.free_movement)
+	_blob_fire_toggle.set_pressed_no_signal(Debug.fire_blob_flames)
 
 
 func _on_indices_toggled(button_pressed: bool) -> void:
@@ -83,6 +86,13 @@ func _on_altitudes_toggled(button_pressed: bool) -> void:
 
 func _on_free_move_toggled(button_pressed: bool) -> void:
 	Debug.free_movement = button_pressed
+
+
+# ON = the procedural blob fire, OFF = the legacy sprite flames. Live: burning
+# cells swap their flame visual in place, so the same fire can be A/B'd without
+# waiting for it to burn out.
+func _on_blob_fire_toggled(button_pressed: bool) -> void:
+	Debug.fire_blob_flames = button_pressed
 
 
 func _on_rain_drag_started() -> void:

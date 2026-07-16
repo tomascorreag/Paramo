@@ -20,4 +20,3 @@
 - [ ] when creating `export_presets.cfg`, set Export Filter to exclude `addons/gut/*`, `tests/*`, `scripts/tools/*`, `*.md`, `design/*`
 - [ ] ensure web preset is Release (not Debug) and has no `--remote-debug` flag
 - [x] pick a web host that supports COOP/COEP headers (itch.io, Netlify, Cloudflare Pages) — GitHub Pages won't work because Godot 4 threaded builds need `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` for `SharedArrayBuffer`. Alternative: disable threads in the export.
-- [ ] re-run security review if adding save-file import, modding, networking, telemetry, or IAP

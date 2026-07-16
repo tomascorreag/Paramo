@@ -116,6 +116,55 @@ func is_burning(cell: Vector2i) -> bool:
 	return _burning.has(cell)
 
 
+## How many of `cell`'s 4-neighbours are currently burning (0-4). Drives the VFX
+## blob scale: an isolated ignition stays kindling-sized, a cell inside a
+## spreading front grows to a full wildfire plume. See FireBlobTuning.intensity.
+##
+## Cheap enough to call per burning cell per frame — 4 Dictionary probes, so 320
+## at MAX_CONCURRENT_BURNING, which is immeasurable against the ~0.4ms noise
+## floor. Deliberately not cached: a cache would need invalidating on every
+## ignite/extinguish/complete, which is a bug surface for no measurable gain.
+func burning_neighbour_count(cell: Vector2i) -> int:
+	var n: int = 0
+	for d: Vector2i in _NEIGHBOR_DIRS:
+		if _burning.has(cell + d):
+			n += 1
+	return n
+
+
+## True iff `cell` could be set alight right now. Public because callers outside
+## the natural-ignition path (the debug ignite action) have no other way to ask.
+##
+## The grass test is the load-bearing one. `_ignite` does NOT check it — the
+## random-ignition and spread paths are only safe because THEY pre-filter on
+## `_is_grass` before calling it. Ignite a non-grass cell directly and `_ignite`
+## caches whatever atlas coord happened to be there as `grass_coord`, so a later
+## extinguish repaints that foreign coord from SOURCE_GRASS and corrupts the
+## tile. Any new caller must go through here rather than `_ignite`.
+func can_ignite(cell: Vector2i) -> bool:
+	if _grid == null:
+		return false
+	if _burning.has(cell):
+		return false
+	# Respect the same safety cap the random rolls do — a debug tool shouldn't be
+	# able to walk past the bound the whole VFX budget is sized against.
+	if _burning.size() >= MAX_CONCURRENT_BURNING:
+		return false
+	return _is_grass(cell)
+
+
+## Light a fire at `cell`: a fresh kindling at amount 0, identical to what a
+## random ignition produces — same spread, same burn, same VFX. Returns true if a
+## fire actually started. Mirrors `extinguish`.
+func ignite(cell: Vector2i) -> bool:
+	if not can_ignite(cell):
+		return false
+	_ignite(cell)
+	# _ignite can still bail (no grass source on the tileset, null CellData), so
+	# report what actually happened rather than assuming it took.
+	return _burning.has(cell)
+
+
 ## Put out the fire at `cell` (e.g. a player extinguish action). Rolls the cell
 ## back to its pre-ignition grass — same path rain uses, so no tile_burned
 ## fires. Returns true if a fire was actually extinguished.
@@ -166,8 +215,12 @@ func _refresh_grid_and_vfx() -> void:
 
 func _on_graph_changed() -> void:
 	# A new grid is in town. Burn-in-flight references go stale — wipe.
-	for entry: Dictionary in _burning.values():
-		var v: Node = entry.get("vfx") as Node
+	#
+	# Wipe by GROUP, not by _burning.values(). Smouldering cells have already
+	# been erased from _burning (see _complete_burn) but their VFX node is still
+	# alive running its tail — a dictionary-based wipe would leave those orphaned
+	# over the new grid. The group covers both live and smouldering fires.
+	for v: Node in get_tree().get_nodes_in_group(BurningCellVFX.FIRE_VFX_GROUP):
 		if is_instance_valid(v):
 			v.queue_free()
 	_burning.clear()
@@ -220,7 +273,7 @@ func _advance_burns(delta: float, rain: float) -> void:
 
 		var vfx: BurningCellVFX = entry.get("vfx") as BurningCellVFX
 		if vfx != null and is_instance_valid(vfx):
-			vfx.set_burn_amount(amount)
+			vfx.set_burn_state(amount, burning_neighbour_count(cell))
 
 		var frj: Node = entry.get("frailejon") as Node
 		if frj != null and is_instance_valid(frj) and frj.has_method(&"set_burn_amount"):
@@ -374,9 +427,13 @@ func _complete_burn(cell: Vector2i) -> void:
 	if entry.is_empty():
 		return
 
-	var vfx: Node = entry.get("vfx") as Node
+	# Hand the VFX off to its smoulder tail rather than freeing it: a burnt-out
+	# tile keeps smoking for a few seconds, then frees itself. It leaves _burning
+	# now, so nothing here will drive it again — the tail is self-driving, and
+	# _on_graph_changed wipes it by group if the map reloads mid-smoulder.
+	var vfx: BurningCellVFX = entry.get("vfx") as BurningCellVFX
 	if is_instance_valid(vfx):
-		vfx.queue_free()
+		vfx.begin_smoulder()
 
 	var frj: Node = entry.get("frailejon") as Node
 	if is_instance_valid(frj):

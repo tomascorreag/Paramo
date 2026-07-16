@@ -1,0 +1,15 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" uid="uid://c0pf43cw1sq7g" path="res://scripts/debug/fire_blob_preview.gd" id="1_preview"]
+
+[node name="FireBlobTest" type="Node2D"]
+
+[node name="BG" type="ColorRect" parent="."]
+offset_left = -224.0
+offset_top = -300.0
+offset_right = 224.0
+offset_bottom = 24.0
+color = Color(0.078431375, 0.13725491, 0.22745098, 1)
+
+[node name="Preview" type="Node2D" parent="."]
+script = ExtResource("1_preview")
