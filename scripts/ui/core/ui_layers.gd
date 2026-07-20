@@ -13,6 +13,8 @@ extends RefCounted
 ## those collisions.
 
 const POST_PROCESS := 100  ## color grade + vignette; all screen UI sits ABOVE this
+const FIRE_AURA := 105     ## off-screen-fire edge glow; ABOVE the grade (so the
+                           ## vignette can't cancel it), BELOW the HUD
 const HUD := 110           ## gameplay HUD (season gauge, item slot). Ungraded.
 const TOAST := 120         ## inspect/info messages (was 100)
 const RADIAL_MENU := 130   ## right-click action wheel + dim overlay (was 101)

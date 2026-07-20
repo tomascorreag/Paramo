@@ -234,18 +234,25 @@ func _apply_grading(t: float) -> void:
 		for mat: ShaderMaterial in wind_materials:
 			mat.set_shader_parameter(&"wind_intensity", _last_wind_val)
 
-	# Blob fire leans downwind, sharing RAIN's wind DIRECTION so a gust bends
-	# flame and rain the same way. rain_max_angle is the only signed wind signal
-	# in the profile (its sign IS the wind direction, per _push_rain_to_shader);
-	# fire takes just that sign and supplies its own conservative magnitude
-	# (FireBlobTuning.MAX_WIND_LEAN). Driven by wind INTENSITY, not rain amount, so
-	# flames lean on a dry windy day too. Pushed once to the fire_blobs global
-	# uniform (like shader_debug) rather than per-material — a busy fire has ~160
-	# duplicated blob materials. The magnitude is clamped here; the shader does not
-	# clamp, and the quad bound is sized for exactly this cap (FireBlobTuning).
-	var wind_lean: float = FireBlobTuning.MAX_WIND_LEAN \
-			* signf(profile.rain_max_angle) * _last_wind_val
-	RenderingServer.global_shader_parameter_set(&"wind_lean", wind_lean)
+	# Blob fire leans downwind in two parts, both scaled by wind INTENSITY (not
+	# rain amount, so flames lean on a dry windy day too) and pushed once to the
+	# fire_blobs global uniforms (like shader_debug) rather than per-material — a
+	# busy fire has ~160 duplicated blob materials:
+	#   wind_lean  the STEADY mean, sharing RAIN's wind DIRECTION. rain_max_angle
+	#              is the only signed wind signal in the profile (its sign IS the
+	#              wind direction, per _push_rain_to_shader); fire takes just that
+	#              sign and its own conservative magnitude.
+	#   wind_gust  the amplitude of a zero-mean gust the shader rides on the same
+	#              scrolling noise the grass sways on (unsigned — the shader noise
+	#              carries the oscillation's sign).
+	# mean + gust peak is MAX_WIND_LEAN, which the quad bound is sized for; the
+	# shader does not clamp, so keeping the pushed magnitudes within these caps is
+	# what stops a gust clipping a leaning blob at the quad edge.
+	var wind_dir: float = signf(profile.rain_max_angle)
+	RenderingServer.global_shader_parameter_set(&"wind_lean",
+			FireBlobTuning.MAX_WIND_MEAN * wind_dir * _last_wind_val)
+	RenderingServer.global_shader_parameter_set(&"wind_gust",
+			FireBlobTuning.MAX_WIND_GUST * _last_wind_val)
 
 	# --- Water ---
 	if profile.water_intensity_curve and not water_materials.is_empty():

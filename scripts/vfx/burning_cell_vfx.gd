@@ -114,13 +114,27 @@ const LIGHT_BUDGET: int = 40
 # CanvasModulate ambient brightness — full strength at night, dimmed to
 # LIGHT_DAY_FACTOR in daylight, with a smooth ramp through dawn/dusk.
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
-# Energy fraction in full daylight (vs 1.0 at night).
+# Energy fraction in full daylight (vs LIGHT_NIGHT_FACTOR at night).
 const LIGHT_DAY_FACTOR: float = 0.08
+# Energy fraction at night — the fire's peak strength against the dark. Below 1.0
+# on purpose: a wildfire cell is a small source, so a slightly muted glow reads
+# more like living flame than a full-blast lantern. This is the night ceiling the
+# dim ramp lerps DOWN from toward LIGHT_DAY_FACTOR as day breaks.
+const LIGHT_NIGHT_FACTOR: float = 0.75
 # Ambient HSV-value thresholds for the dim ramp. At/below NIGHT_VALUE_HI the fire
 # is full strength; at/above DAY_VALUE_LO it's dimmed to LIGHT_DAY_FACTOR. Tuned to
-# default_profile's ambient gradient (night v≈0.2–0.39, dusk≈0.48, day v≈0.77–0.92).
-const NIGHT_VALUE_HI: float = 0.45
-const DAY_VALUE_LO: float = 0.8
+# tileset_test_profile's ambient gradient — the profile gameplay_base.tscn actually
+# ships, so this is what the game uses. Its night value is a flat 0.6 (a bright
+# saturated blue, NOT a dark night), rising through dawn to ~1.0 at midday and ~1.08
+# at dusk. NIGHT_VALUE_HI sits just above the 0.6 night floor so fire stays
+# full-strength all night; DAY_VALUE_LO near the daytime plateau lets it fade
+# gradually across the dawn/dusk band.
+# NOTE: an earlier version tuned these to default_profile (night v≈0.2), which is
+# NOT the shipped profile — at the real 0.6 night value that put the fire at ~64%
+# strength all night ("fire doesn't light up at night"). If you switch the profile
+# (e.g. to default_profile), retune these to that gradient's night value.
+const NIGHT_VALUE_HI: float = 0.62
+const DAY_VALUE_LO: float = 0.95
 
 # Shared radial falloff texture — baked once, reused by every fire light. Never
 # mutated (texture_scale is per-node), so sharing is safe.
@@ -443,9 +457,9 @@ func _process(delta: float) -> void:
 	_light.energy = e
 
 
-# Dim factor in [LIGHT_DAY_FACTOR, 1.0] derived inversely from the day/night
-# ambient brightness: 1.0 at night, LIGHT_DAY_FACTOR in daylight. Cached per frame
-# and shared across all lit cells (the value is identical for every fire).
+# Dim factor in [LIGHT_DAY_FACTOR, LIGHT_NIGHT_FACTOR] derived inversely from the
+# day/night ambient brightness: LIGHT_NIGHT_FACTOR at night, LIGHT_DAY_FACTOR in
+# daylight. Cached per frame and shared across all lit cells (identical for every fire).
 func _day_night_factor() -> float:
 	var frame: int = Engine.get_process_frames()
 	if frame == _night_factor_frame:
@@ -459,7 +473,7 @@ func _day_night_factor() -> float:
 		v = _dn_controller.call(&"get_ambient_value")
 	# smoothstep → 0 below NIGHT_VALUE_HI (full strength), 1 above DAY_VALUE_LO.
 	var day_t: float = smoothstep(NIGHT_VALUE_HI, DAY_VALUE_LO, v)
-	_night_factor = lerpf(1.0, LIGHT_DAY_FACTOR, day_t)
+	_night_factor = lerpf(LIGHT_NIGHT_FACTOR, LIGHT_DAY_FACTOR, day_t)
 	return _night_factor
 
 

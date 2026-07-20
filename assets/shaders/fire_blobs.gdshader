@@ -225,15 +225,28 @@ uniform float shape_evolve : hint_range(0.0, 8.0) = 2.0;
 uniform float smoke_dither : hint_range(0.0, 1.0) = 1.0;
 
 global uniform int shader_debug;
-// Wind lean, sharing rain's wind DIRECTION (both set by DayNightSceneController
-// from the same signed source, so a gust bends flame and rain the same way).
-// Signed; its magnitude is a conservative cap (FireBlobTuning.MAX_WIND_LEAN)
-// applied CPU-side, and the quad bound (FireBlobTuning.quad_size) is sized for
-// that MAX, so a gust can never push a blob outside the quad and clip it. It is
-// an X-ONLY displacement (see `centre` below) for the same reason turbulence is —
-// so the y-first gate stays exact. A global uniform, like shader_debug, not a
-// per-material push: a busy fire has ~160 duplicated blob materials.
+// Wind lean has two parts (both set by DayNightSceneController, both X-ONLY so
+// the y-first gate stays exact, both global uniforms like shader_debug rather
+// than per-material pushes — a busy fire has ~160 duplicated blob materials):
+//
+//   wind_lean  the STEADY mean lean, sharing rain's wind DIRECTION (signed from
+//              the same source, so flame and rain lean the same way).
+//   wind_gust  the amplitude of a zero-mean GUST added on top (unsigned; the
+//              noise below carries the oscillation's sign).
+//
+// The instantaneous lean is `wind_lean + wind_gust * gust_n`, gust_n in [-1,1].
+// Its peak magnitude is capped CPU-side at FireBlobTuning.MAX_WIND_LEAN
+// (= MAX_WIND_MEAN + MAX_WIND_GUST); the quad bound (FireBlobTuning.quad_size) is
+// sized for exactly that, so a gust can never push a blob outside the quad.
 global uniform float wind_lean;
+global uniform float wind_gust;
+// Gust noise field — MIRRORS assets/shaders/wind.gdshader (the grass sway), so a
+// gust bends grass and flame IN PHASE. Grass samples _noise at
+// round(world/2) * wind_scale*wind_tiling + wind_scroll_per_second*TIME; these
+// are that scale (0.02 * (1.5,0.75)) and scroll, from wind_light/medium.tres.
+// Keep in sync if the grass wind is retuned — nothing but this comment links them.
+const vec2 WIND_GUST_SCALE = vec2(0.03, 0.015);
+const vec2 WIND_GUST_SCROLL = vec2(0.894, 0.447);
 
 const int N_STAGES = 5;
 // Loop bounds. The ACTUAL counts are the slot_count / k_active uniforms; these
@@ -255,6 +268,10 @@ const float SIZE_JITTER_MAX = 1.3;
 // the check.
 varying highp vec2 v_world;
 varying flat highp vec2 v_origin;
+// Total wind lean this frame (steady mean + gust), computed in vertex() because it
+// is constant across the whole quad — see the note there. flat: no interpolation,
+// one provoking-vertex value; highp matches v_world/v_origin.
+varying flat highp float v_lean_coeff;
 
 vec3 stage_color(int stage) {
 	if (stage <= 0) { return col_white; }
@@ -269,8 +286,26 @@ void vertex() {
 	// lives in CANVAS_MATRIX, so this is camera-independent and world-locked.
 	// The transform is affine, so linear interpolation of v_world is exact —
 	// no perspective divide, no noperspective qualifier needed.
+	vec2 origin = MODEL_MATRIX[3].xy;
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
-	v_origin = MODEL_MATRIX[3].xy;
+	v_origin = origin;
+
+	// Total wind lean this frame = steady mean + a gust riding the SAME scrolling
+	// noise the grass sways on (WIND_GUST_*), sampled at THIS column's origin so a
+	// gust wave crosses grass and flame together. gust_n is zero-mean in [-1,1], so
+	// it oscillates the lean around wind_lean; |v_lean_coeff| <= MAX_WIND_MEAN +
+	// MAX_WIND_GUST, which the quad is sized for. Used everywhere wind_lean was —
+	// see `centre` and `dtx` in fragment().
+	//
+	// Evaluated HERE, not per-fragment: origin is flat and TIME is per-frame, so
+	// this is constant across the whole quad. Computing it at the 4 verts and
+	// carrying it in a flat varying is bit-identical to the old per-fragment eval
+	// (all verts see identical inputs -> the provoking-vertex value is exact), and
+	// drops one _noise (4 hashes) off every covered fragment on the fill-bound web
+	// path — where the per-blob shape carve (fragment(), the r += _noise line) is
+	// the only noise that genuinely has to stay per-fragment.
+	float gust_n = _noise(round(origin / 2.0) * WIND_GUST_SCALE + WIND_GUST_SCROLL * TIME);
+	v_lean_coeff = wind_lean + wind_gust * gust_n;
 }
 
 void fragment() {
@@ -289,6 +324,12 @@ void fragment() {
 	// Slots are spread across the emitter width. With slot_count == 1 the lone
 	// slot sits dead centre, which is the kindling case.
 	float slot_denom = max(float(slot_count), 1.0);
+
+	// Total wind lean this frame (steady mean + gust), computed once per quad in
+	// vertex() — it is constant across the quad, so it rides a flat varying rather
+	// than paying a per-fragment _noise. Aliased here so the `centre`/`dtx` uses
+	// below read unchanged. See vertex().
+	float lean_coeff = v_lean_coeff;
 
 	float best_heat = -1.0;
 	int best_stage = N_STAGES;
@@ -363,11 +404,11 @@ void fragment() {
 			float s1 = sin(a * w1 + ph1);
 			float s2 = sin(a * w2 + ph2);
 			float sway = s1 + 0.5 * s2;
-			// Wind lean: shear the rise about the cell base — 0 at the base, full
-			// at the tip (-y is height above base, so -wind_lean*y pushes +X for
-			// positive wind). X-only, so the y-gate above stays exact; the CPU quad
-			// bound is sized for the max lean so leaning tips never clip.
-			vec2 centre = vec2(slot_x + turb_amp * an * sway - wind_lean * y, y);
+			// Wind lean (mean + gust, see lean_coeff): shear the rise about the cell
+			// base — 0 at the base, full at the tip (-y is height above base, so
+			// -lean_coeff*y pushes +X for positive lean). X-only, so the y-gate above
+			// stays exact; the CPU quad bound is sized for the max lean so tips never clip.
+			vec2 centre = vec2(slot_x + turb_amp * an * sway - lean_coeff * y, y);
 
 			// Radius grows from the kindling dot to the full blob, per spec.
 			float radius = mix(blob_min_radius, blob_max_radius, an) * (0.7 + 0.6 * hB.y);
@@ -388,10 +429,10 @@ void fragment() {
 			// slow-rising ember drifts more than a fast one.
 			float vy = -(column_height / life)
 					* ((1.0 - rise_curve) + 2.0 * rise_curve * an) * speed_mult;
-			// Wind lean adds -wind_lean*y to centre.x; d/da of that is -wind_lean*vy,
-			// so folding it into dtx tilts vdir and the flame stretches ALONG its
-			// lean with no extra sampling.
-			float dtx = turb_amp * (sway / life + an * dsway) - wind_lean * vy;
+			// Wind lean adds -lean_coeff*y to centre.x; d/da of that is
+			// -lean_coeff*vy, so folding it into dtx tilts vdir and the flame
+			// stretches ALONG its lean with no extra sampling.
+			float dtx = turb_amp * (sway / life + an * dsway) - lean_coeff * vy;
 			vec2 vdir = normalize(vec2(dtx, vy));
 			vec2 perp = vec2(-vdir.y, vdir.x);
 

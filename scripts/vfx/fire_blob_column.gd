@@ -35,15 +35,19 @@ extends Sprite2D
 # because that is the origin all its blob math is relative to. So the node sits
 # at Vector2.ZERO relative to BurningCellVFX (which is already at
 # map_to_local(cell)) and the quad is grown around it via `offset` + `scale`
-# instead of by moving the node:
+# instead of by moving the node. _apply sets both per intensity:
 #
 #   texture   1x1 white, shared
-#   centered  false          -> rect = Rect2(offset, Vector2.ONE)
-#   offset    (-0.5, -1.0)   -> rect spans (-0.5,-1)..(0.5,0) in unscaled local
-#   scale     (w, h)         -> rect spans (-w/2,-h)..(w/2,0) in parent space
+#   centered  false            -> rect = Rect2(offset, Vector2.ONE)
+#   scale     (w, h+b)         -> total quad: width w, height h ABOVE the base
+#                                 (quad_size) plus b BELOW it (quad_bottom)
+#   offset    (-0.5,           -> top edge lands at -h, bottom edge at +b in
+#              -1 + b/(h+b))      parent space
 #
-# i.e. a column of size w x h rising from the cell centre. `offset` and `scale`
-# do not touch the node's transform origin, so MODEL_MATRIX[3] stays put.
+# i.e. a column rising h above the cell centre, plus a b-px skirt below it so
+# base-born blobs (centred on the base) aren't sliced flat by the quad edge.
+# `offset` and `scale` do not touch the node's transform origin, so
+# MODEL_MATRIX[3] stays put on the cell centre.
 
 const BLOB_MATERIAL: ShaderMaterial = preload("res://resources/materials/fire_blobs.tres")
 
@@ -195,7 +199,15 @@ func _apply(i: float, force: bool) -> void:
 	# the same dict rather than recomputing — keeps _advance in sync with the value
 	# the shader actually got.
 	_lifetime = float(uniforms[&"lifetime"])
-	scale = FireBlobTuning.quad_size(i, data)
+	# Quad geometry. quad_size is the extent ABOVE the base; quad_bottom drops the
+	# bottom edge below the base by a base-born blob's downward reach, so those
+	# blobs (centred on the base) aren't sliced flat (see GEOMETRY). offset.y is
+	# derived from the total scale so the TOP edge stays at -above.y (unchanged)
+	# while the bottom reaches +bottom past the base.
+	var above: Vector2 = FireBlobTuning.quad_size(i, data)
+	var bottom: float = FireBlobTuning.quad_bottom(i, data)
+	scale = Vector2(above.x, above.y + bottom)
+	offset = Vector2(-0.5, -1.0 + bottom / scale.y)
 	_intensity = i
 
 

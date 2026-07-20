@@ -33,6 +33,8 @@
 [ext_resource type="PackedScene" uid="uid://b0r4inv1xpara" path="res://scenes/vfx/rain.tscn" id="31_rain"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="32_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
+[ext_resource type="Script" path="res://scripts/vfx/fire_aura_overlay.gd" id="34_aura_scr"]
+[ext_resource type="Material" path="res://resources/materials/fire_aura.tres" id="35_aura_mat"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -245,6 +247,20 @@ max_darkness = 0.15
 falloff = 0.1
 
 [node name="RainLayer" parent="." instance=ExtResource("31_rain")]
+
+[node name="FireAuraLayer" type="CanvasLayer" parent="." unique_id=1055501001]
+layer = 105
+
+[node name="FireAuraRect" type="ColorRect" parent="FireAuraLayer" unique_id=1055501002]
+material = ExtResource("35_aura_mat")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0)
+script = ExtResource("34_aura_scr")
 
 [node name="HUD" parent="." instance=ExtResource("32_hud")]
 

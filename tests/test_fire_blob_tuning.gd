@@ -20,9 +20,15 @@ const RAMP_MATERIAL: String = "res://resources/materials/fire_blobs.tres"
 
 func test_kindling_is_a_couple_of_lit_pixels() -> void:
 	var u: Dictionary = FireBlobTuning.uniforms_for(0.0)
-	# The shader samples the blob field at integer pixels, so a max radius under
-	# ~1.5px lights 1-3 texels. This is the "kindling" requirement, in numbers.
-	assert_lte(float(u[&"blob_max_radius"]), 1.5, "kindling blobs must be pixel-scale")
+	# Kindling is a SMALL EMBER, not a plume. The retune reshaped it from a thin
+	# tall wisp of ~1px dots into a short compact glow: a stubby column
+	# (column_height_min) with a chunkier blob (blob_max_radius_min). Both stay
+	# small — the shader samples at integer pixels, so a few-px blob in a few-px
+	# column still lights only a small cluster. Guard BOTH extents so a future
+	# retune can't quietly balloon kindling into a full flame (wildfire is 16px
+	# blobs / 80px column — roughly 4x these bounds).
+	assert_lte(float(u[&"blob_max_radius"]), 5.0, "kindling blobs stay a few px, not plume-scale")
+	assert_lte(float(u[&"column_height"]), 8.0, "kindling barely rises")
 	assert_eq(int(u[&"slot_count"]), 1, "kindling is a single blob stream")
 	# Kindling density = k_active_min, a tuned look value (fire_blob_tuning.tres).
 	# The bound is "still a small cluster, not a plume"; raise it only alongside a
@@ -70,6 +76,27 @@ func test_quad_contains_every_blob_the_shader_can_draw() -> void:
 			q.y,
 			FireBlobTuning.max_rise(t),
 			"quad height clips blobs at intensity %.2f" % t)
+
+
+func test_quad_bottom_covers_base_born_blobs() -> void:
+	# Blobs are born centred on the base (shader y = 0) at blob_min_radius, so
+	# their lower half falls below it. The quad's bottom edge sits on the base, so
+	# quad_bottom must clear a born blob or the base is sliced flat — the "cut off
+	# at the bottom" bug. Lower bound: it must exceed at least the bare birth radius
+	# at every intensity (the real reach folds jitter/noise/stretch on top, so this
+	# is conservative and can't false-pass).
+	for i: int in range(0, 101):
+		var t: float = float(i) / 100.0
+		var born_radius: float = float(FireBlobTuning.uniforms_for(t)[&"blob_min_radius"])
+		assert_gte(
+			FireBlobTuning.quad_bottom(t),
+			born_radius,
+			"quad bottom slices base blobs at intensity %.2f" % t)
+	# And it must scale with fire size — a wildfire's base blobs dwarf kindling's.
+	assert_gt(
+		FireBlobTuning.quad_bottom(1.0),
+		FireBlobTuning.quad_bottom(0.0),
+		"quad bottom must grow with intensity")
 
 
 func test_uniform_names_all_exist_on_the_shader() -> void:
@@ -127,6 +154,18 @@ func test_editor_refresh_syncs_look_params_but_not_code_driven() -> void:
 	src.set_shader_parameter(&"radial_bias", saved_rb)
 	src.set_shader_parameter(&"column_height", saved_ch)
 	col.free()
+
+
+func test_wind_lean_budget_splits_into_mean_plus_gust() -> void:
+	# The quad bound is sized for MAX_WIND_LEAN, but the shader's instantaneous lean
+	# is wind_lean + wind_gust*noise (|noise|<=1), peaking at MAX_WIND_MEAN +
+	# MAX_WIND_GUST. If that sum ever exceeds MAX_WIND_LEAN, a full gust pushes a
+	# blob past the quad and clips it. Pin the invariant so a retune of either part
+	# can't silently break the bound.
+	assert_gt(FireBlobTuning.MAX_WIND_GUST, 0.0, "the gust must be a real oscillation")
+	assert_almost_eq(FireBlobTuning.MAX_WIND_MEAN + FireBlobTuning.MAX_WIND_GUST,
+		FireBlobTuning.MAX_WIND_LEAN, 0.0001,
+		"mean + gust must equal the lean the quad is sized for")
 
 
 func test_max_horizontal_reach_includes_wind_lean() -> void:

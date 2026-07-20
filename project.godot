@@ -101,3 +101,7 @@ wind_lean={
 "type": "float",
 "value": 0.0
 }
+wind_gust={
+"type": "float",
+"value": 0.0
+}

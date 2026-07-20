@@ -65,18 +65,28 @@ const SIZE_JITTER_MAX: float = 1.3
 # Same role as rain.gdshader's 1-2px bound padding.
 const QUAD_PAD: float = 2.0
 
-# Conservative cap on the wind lean the shader's `wind_lean` global may reach.
-# DayNightSceneController clamps the pushed value to +/- this; the shader itself
-# does not clamp (a global uniform has no enforced hint_range), so THIS is the
-# only thing keeping a gust from pushing a leaning blob outside the quad. The
-# quad is the shader's sole spatial bound, so max_horizontal_reach below MUST
-# fold in the worst-case lean or leaning tips clip silently — the same failure
-# rise_speed_jitter is guarded against. Kept low because the lean displaces the
-# blob CENTRE by wind_lean * rise height, and the tallest column is ~128px, so
-# each 0.01 of lean is ~1.3px of extra quad half-width (pure transparent fill on
-# the fill-bound web build). ~10 degrees at a full storm; raise only against
-# benchmark_fire.gd's area ratio, not desktop ms (see [[desktop-cannot-measure-fill]]).
-const MAX_WIND_LEAN: float = 0.18
+# The fire's lean has two parts that SHARE one fill budget:
+#   - MEAN: the steady downwind lean (global `wind_lean`), set from wind intensity.
+#   - GUST: a zero-mean oscillation on top (global `wind_gust`), riding the same
+#     scrolling noise field the grass sways on — see WIND_GUST_* in
+#     fire_blobs.gdshader — so a gust bends grass and flame in phase.
+# The shader's instantaneous lean is `wind_lean + wind_gust * noise`, with the
+# noise in [-1, 1], so its peak magnitude is MAX_WIND_MEAN + MAX_WIND_GUST. That
+# sum is MAX_WIND_LEAN, which the quad bound is sized for (max_horizontal_reach) —
+# the quad is the shader's ONLY spatial bound, so a lean past it clips leaning
+# tips silently (the same failure rise_speed_jitter is guarded against). Splitting
+# the budget rather than adding to it means the gust costs ZERO extra quad fill.
+#
+# Kept low because the lean displaces the blob CENTRE by lean * rise height, and
+# the tallest column is ~128px, so each 0.01 of total lean is ~1.3px of extra quad
+# half-width (pure transparent fill on the fill-bound web build). ~10 degrees at a
+# full storm; re-split or raise only against benchmark_fire.gd's area ratio, not
+# desktop ms (see [[desktop-cannot-measure-fill]]).
+const MAX_WIND_MEAN: float = 0.11
+const MAX_WIND_GUST: float = 0.07
+# Peak total lean = mean + gust (noise in [-1,1]). Derived, so the quad bound and
+# the budget split can never drift apart.
+const MAX_WIND_LEAN: float = MAX_WIND_MEAN + MAX_WIND_GUST
 
 
 ## Shader uniform values for an intensity in [0, 1]. Keys are shader uniform
@@ -134,6 +144,28 @@ static func max_rise(i: float, data: FireBlobTuningData = DATA) -> float:
 	var t: float = clampf(i, 0.0, 1.0)
 	return lerpf(data.column_height_min, data.column_height_max, t) \
 			* (1.0 + data.rise_speed_jitter) + _blob_reach(t, data)
+
+
+## How far below the cell base the quad must extend, in world px. Blobs are BORN
+## with their centre exactly on the base (shader y = 0) at radius blob_min_radius,
+## so their lower half falls below it. The quad's bottom edge sits on the base, so
+## without this skirt every base blob is sliced flat and the fire reads as cut off
+## along the tile line. Mirrors _blob_reach but off blob_min_radius — the BIRTH
+## radius — since the freshly-born base blobs are the only thing the field reaches
+## below the base. + QUAD_PAD, like the other extents.
+static func quad_bottom(i: float, data: FireBlobTuningData = DATA) -> float:
+	var t: float = clampf(i, 0.0, 1.0)
+	return _born_blob_reach(t, data) + QUAD_PAD
+
+
+# Max downward extent of a base-born blob (centre on the base, radius
+# blob_min_radius). Same jitter x noise x stretch factors as _blob_reach: a
+# newborn blob rises nearly vertically, so its stretch elongates it downward too.
+static func _born_blob_reach(t: float, data: FireBlobTuningData) -> float:
+	return lerpf(data.blob_min_radius_min, data.blob_min_radius_max, t) \
+			* SIZE_JITTER_MAX \
+			* (1.0 + lerpf(data.noise_amp_min, data.noise_amp_max, t)) \
+			* lerpf(data.stretch_min, data.stretch_max, t)
 
 
 # Max half-extent of a single blob, in any direction. Mirrors the shader's

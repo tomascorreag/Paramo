@@ -1,21 +1,24 @@
 class_name ActionExtinguishFire
 extends TileAction
 
-# Put out a burning cell by spending water from the ResourceLedger. Available
-# when the clicked cell is on fire AND the player can afford the cost. A burning
-# cell is grass→dirt-swapped (walkable), so the standard interaction gate reaches
-# it with no special-casing.
+# Put out fire in a 3×3 block centred on the clicked cell — the target tile and
+# all 8 neighbours. Always available (no resource cost, no inventory gate):
+# firefighting is a free, unlimited player verb. Offered whenever ANY of the 9
+# cells is on fire, and extinguishes every burning cell in that block at once.
 #
-# FireManager and ResourceLedger are autoloads (referenced by their global
-# names). Water is the firefighting resource: every extinguish ticks the ledger
-# down, so fire is a drain on the same pool planting will draw from — triage has
-# a cost.
+# A burning cell is grass→dirt-swapped (walkable), so the standard interaction
+# gate reaches the clicked tile with no special-casing.
+#
+# FireManager is an autoload (referenced by its global name); extinguish() is a
+# no-op on a cell that isn't burning, so execute() can blanket the whole 3×3
+# without pre-checking each cell.
 #
 # Uses the bucket glyph as a stand-in "water" icon; a dedicated extinguish glyph
 # can replace it later.
 
-## Water spent per extinguish. Tunable; migrate to data with the balance pass.
-const WATER_COST: float = 10.0
+## Chebyshev radius of the extinguish footprint. 1 = the clicked cell + its 8
+## neighbours (3×3). Bump to widen the splash.
+const RADIUS: int = 1
 
 
 func _init() -> void:
@@ -25,13 +28,25 @@ func _init() -> void:
 
 
 func _applies(ctx: ActionContext) -> bool:
-	if not ResourceLedger.has(&"water", WATER_COST):
-		return false
-	return FireManager.is_burning(ctx.cell)
+	# Available if any cell in the footprint is burning — you can douse a fire by
+	# clicking the tile next to it, not only the tile that's alight.
+	for cell in _footprint(ctx.cell):
+		if FireManager.is_burning(cell):
+			return true
+	return false
 
 
 func execute(ctx: ActionContext) -> void:
-	if not FireManager.is_burning(ctx.cell):
-		return
-	if ResourceLedger.try_spend(&"water", WATER_COST, &"extinguish_fire"):
-		FireManager.extinguish(ctx.cell)
+	# extinguish() no-ops on non-burning cells, so blanket the whole block.
+	for cell in _footprint(ctx.cell):
+		FireManager.extinguish(cell)
+
+
+## The clicked cell plus every cell within RADIUS (Chebyshev). RADIUS 1 → the 3×3
+## block. Side-effect free.
+func _footprint(center: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for dy in range(-RADIUS, RADIUS + 1):
+		for dx in range(-RADIUS, RADIUS + 1):
+			out.append(center + Vector2i(dx, dy))
+	return out

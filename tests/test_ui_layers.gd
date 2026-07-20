@@ -33,6 +33,7 @@ func test_authored_scene_layers_match_registry() -> void:
 func test_no_two_layers_collide() -> void:
 	var layers: Array[int] = [
 		UILayers.POST_PROCESS,
+		UILayers.FIRE_AURA,
 		UILayers.HUD,
 		UILayers.TOAST,
 		UILayers.RADIAL_MENU,
