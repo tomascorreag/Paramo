@@ -12,6 +12,7 @@ const HUD_SCENE: PackedScene = preload("res://scenes/ui/hud.tscn")
 const DEBUG_SCENE: PackedScene = preload("res://scenes/ui/debug_overlay.tscn")
 const TITLE_SCENE: PackedScene = preload("res://scenes/ui/title_intro.tscn")
 const PAUSE_SCENE: PackedScene = preload("res://scenes/ui/pause_menu.tscn")
+const JOURNAL_SCENE: PackedScene = preload("res://scenes/ui/field_journal.tscn")
 
 
 # --- Layer registry ------------------------------------------------------------
@@ -29,6 +30,9 @@ func test_authored_scene_layers_match_registry() -> void:
 	var pause: CanvasLayer = autofree(PAUSE_SCENE.instantiate())
 	assert_eq(pause.layer, UILayers.PAUSE, "pause_menu.tscn layer must match UILayers.PAUSE")
 
+	var journal: CanvasLayer = autofree(JOURNAL_SCENE.instantiate())
+	assert_eq(journal.layer, UILayers.JOURNAL, "field_journal.tscn layer must match UILayers.JOURNAL")
+
 
 func test_no_two_layers_collide() -> void:
 	var layers: Array[int] = [
@@ -37,6 +41,7 @@ func test_no_two_layers_collide() -> void:
 		UILayers.HUD,
 		UILayers.TOAST,
 		UILayers.RADIAL_MENU,
+		UILayers.JOURNAL,
 		UILayers.PAUSE,
 		UILayers.LOADING,
 		UILayers.TITLE,

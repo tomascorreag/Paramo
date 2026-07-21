@@ -1,0 +1,134 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/field_journal.gd" id="1_fj"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/Panels/Book.png" id="2_book"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/season_wheel.tres" id="3_wheel"]
+
+; Stepped (constant-interpolation) glow rising from the slit, behind the wheel.
+; Single palette colour (index 30 #14233A) fading to transparent over 4 hard
+; bands. interpolation_mode 1 = CONSTANT. (Moved from hud.tscn with the gauge.)
+[sub_resource type="Gradient" id="Gradient_glow"]
+interpolation_mode = 1
+offsets = PackedFloat32Array(0, 0.33, 0.66, 1)
+colors = PackedColorArray(0.078431, 0.137255, 0.227451, 0.85, 0.078431, 0.137255, 0.227451, 0.5, 0.078431, 0.137255, 0.227451, 0.22, 0.078431, 0.137255, 0.227451, 0)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_glow"]
+gradient = SubResource("Gradient_glow")
+width = 8
+height = 32
+fill_from = Vector2(0, 1)
+fill_to = Vector2(0, 0)
+
+; layer 140 (UILayers.JOURNAL) sits above the HUD (110) and below PAUSE (220).
+; PROCESS_MODE_ALWAYS + the layer are set in _ready so the slide + input run while
+; the game is paused.
+[node name="FieldJournal" type="CanvasLayer"]
+layer = 140
+script = ExtResource("1_fj")
+
+; Modal scrim. mouse_filter STOP (default) eats clicks so the world/HUD beneath
+; don't receive them while the journal is open. modulate.a is driven 0<->1 by the
+; open/close tween; the colour carries the peak alpha (0.55).
+[node name="Dim" type="ColorRect" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.078431, 0.137255, 0.227451, 0.55)
+
+; The rising panel. Full-rect; slides vertically via offset_top/offset_bottom
+; (both -> +H hides it below the screen, 0 rests it). _ready parks it below.
+[node name="Book" type="Control" parent="."]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="BookImage" type="TextureRect" parent="Book"]
+texture_filter = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_book")
+expand_mode = 1
+stretch_mode = 5
+
+; Invisible hit region matching the book art's opaque bounds (get_used_rect on
+; Book.png = pos (48,17) size (384,239)). mouse_filter STOP: it absorbs clicks ON
+; the book so they don't reach the Dim scrim below — clicks in the transparent
+; margin fall through to Dim, which closes the journal (click-outside-to-dismiss).
+[node name="BookHit" type="Control" parent="Book"]
+offset_left = 48.0
+offset_top = 17.0
+offset_right = 432.0
+offset_bottom = 256.0
+
+[node name="Pages" type="Control" parent="Book"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+; --- Season gauge, LEFT page (moved from hud.tscn, re-anchored to this holder) ---
+; Holder is 76x50; child offsets reproduce the old bottom-anchored dome with the
+; slit near the holder's bottom. Position over the left page is editor-tunable.
+[node name="SeasonGaugeHolder" type="Control" parent="Book/Pages"]
+offset_left = 102.0
+offset_top = 110.0
+offset_right = 178.0
+offset_bottom = 160.0
+mouse_filter = 2
+
+[node name="WheelGlow" type="TextureRect" parent="Book/Pages/SeasonGaugeHolder"]
+texture_filter = 1
+offset_left = 2.0
+offset_top = 0.0
+offset_right = 74.0
+offset_bottom = 44.0
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_glow")
+expand_mode = 1
+
+[node name="SeasonWheelMask" type="Control" parent="Book/Pages/SeasonGaugeHolder"]
+clip_contents = true
+offset_left = 6.0
+offset_top = 12.0
+offset_right = 70.0
+offset_bottom = 44.0
+mouse_filter = 2
+
+[node name="SeasonWheel" type="TextureRect" parent="Book/Pages/SeasonGaugeHolder/SeasonWheelMask"]
+unique_name_in_owner = true
+texture_filter = 1
+offset_right = 64.0
+offset_bottom = 64.0
+mouse_filter = 2
+texture = ExtResource("3_wheel")
+expand_mode = 1
+stretch_mode = 5
+
+; Slot lip the wheel appears inserted into (palette2 index 30 #14233A).
+[node name="WheelSlit" type="ColorRect" parent="Book/Pages/SeasonGaugeHolder"]
+offset_left = 2.0
+offset_top = 42.0
+offset_right = 74.0
+offset_bottom = 45.0
+mouse_filter = 2
+color = Color(0.078431, 0.137255, 0.227451, 1)
+
+; --- Run info, RIGHT page. RunController (procedural_base) writes here via
+; NodePath ../FieldJournal/Book/Pages/RunDebugLabel. Dark text (index 30) so it
+; reads on the cream page; word-wrapped to the page width. font_size 8 = the
+; pixel-font native em (see ui_font_pixel_grid).
+[node name="RunDebugLabel" type="Label" parent="Book/Pages"]
+offset_left = 255.0
+offset_top = 50.0
+offset_right = 425.0
+offset_bottom = 230.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.078431, 0.137255, 0.227451, 1)
+theme_override_font_sizes/font_size = 8
+text = "—"
+autowrap_mode = 2

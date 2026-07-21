@@ -664,14 +664,11 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 	if _skipped:
 		return
-	# Skip on a discrete key / joypad press. Mouse clicks are intentionally
-	# consumed-but-not-skip so the player can't blow past the title by clicking
-	# the scene. Motion / axis events are likewise consumed-but-not-skip so a
-	# bumped mouse doesn't skip either.
-	var is_skip: bool = (
-		(event is InputEventKey and event.pressed and not event.echo)
-		or (event is InputEventJoypadButton and event.pressed)
-	)
+	# Skip ONLY on Escape (or its joypad equivalent via ui_cancel). Every other
+	# key, mouse click, and motion / axis event is intentionally
+	# consumed-but-not-skip so the player can't blow past the title by mashing a
+	# key or clicking the scene, and a bumped mouse can't skip either.
+	var is_skip: bool = event.is_action_pressed(&"ui_cancel") and not event.echo
 	if not is_skip:
 		return
 

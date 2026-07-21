@@ -35,6 +35,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
 [ext_resource type="Script" path="res://scripts/vfx/fire_aura_overlay.gd" id="34_aura_scr"]
 [ext_resource type="Material" path="res://resources/materials/fire_aura.tres" id="35_aura_mat"]
+[ext_resource type="PackedScene" path="res://scenes/ui/field_journal.tscn" id="36_journal"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -262,7 +263,9 @@ mouse_filter = 2
 color = Color(0, 0, 0, 0)
 script = ExtResource("34_aura_scr")
 
-[node name="HUD" parent="." instance=ExtResource("32_hud")]
+[node name="HUD" parent="." node_paths=PackedStringArray("pause_menu", "field_journal") instance=ExtResource("32_hud")]
+pause_menu = NodePath("../PauseMenu")
+field_journal = NodePath("../FieldJournal")
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)
@@ -278,3 +281,5 @@ title_fade_in_delay = 3.5
 hold_duration = 3.0
 
 [node name="PauseMenu" parent="." instance=ExtResource("33_pause")]
+
+[node name="FieldJournal" parent="." instance=ExtResource("36_journal")]
