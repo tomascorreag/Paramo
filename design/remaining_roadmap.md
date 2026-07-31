@@ -16,13 +16,14 @@ on its own.
 - **Procedural map per run.** The mountain is generated fresh each run from a
   `TerrainGenerationParams` `.tres`; no handcrafted/baked map for the slice.
   Overrides the GDD's handcrafted-map call. See `map_strategy_procedural` memory.
-- **Bimodal year of `days_per_year` day/night cycles (N = 16).** Colombian Andes
+- **Bimodal year of `days_per_year` day/night cycles (N = 24).** Colombian Andes
   rainfall is bimodal (Urrea et al. 2019): two dry windows (~Dec-Feb, ~Jun-Aug)
   and two wet (~Mar-May, ~Sep-Nov), so the default `season_cycle` is
   Dry-Wet-Dry-Wet. `SeasonManager` counts `TimeManager.day_completed`; a season
   rolls every `days_per_year / season_cycle.size()` days (derived
-  `days_per_season`, = 4 at N=16). The cycle length doubles as seasons-per-year
-  and drives the year counter. The day/night atmosphere is the season's texture.
+  `days_per_season`, = 6 at N=24). The cycle length doubles as seasons-per-year
+  and drives the year counter; a run is `season_count` = 4 seasons, i.e. exactly
+  one year, so the year counter never advances during the slice's run. The day/night atmosphere is the season's texture.
   `days_per_year`, `season_count`, `seconds_per_game_day` are `@export` for the
   balance pass.
 - **Fire is `FireManager` (autoload), not per-tile scenes.** Already implemented:
@@ -82,7 +83,9 @@ The smallest thing that is a *game*: plant, lose water, watch the laguna, end.
       corner panel appears; walking to a `ResearchStation` marker expands it and
       pauses (`get_tree().paused`); "Begin Season N+1" resumes.
 - [ ] **HUD bars.** Signal-driven water + laguna bars, season/year labels
-      (alongside the season wheel). Retire the `RunDebugLabel`.
+      (alongside the season wheel). The `RunDebugLabel` is already retired — the
+      journal's `RunCalendar` + season slot carry run progress now, so the year /
+      resource readouts are what is still missing.
 
 ## Phase 1.5 — Make the season felt
 
@@ -98,7 +101,7 @@ The smallest thing that is a *game*: plant, lose water, watch the laguna, end.
 ## Phase 1 tuning gate
 
 - [ ] **Balance pass.** Shorten season length for the 30–45 min target (currently
-      ~100 min at 4 days × 300 s × 5 seasons). Tune water economy so it doesn't
+      ~96 min at 6 days × 240 s × 4 seasons). Tune water economy so it doesn't
       snowball; tune climate so Year-1 plantings die by Year 3.
 
 ---

@@ -5,6 +5,7 @@
 [ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
 [ext_resource type="Script" uid="uid://cye4auxn1pnj0" path="res://scripts/systems/player_light_controller.gd" id="4_plc"]
 [ext_resource type="Texture2D" uid="uid://54pqqxno36uy" path="res://assets/sprites/characters/campesino.png" id="5"]
+[ext_resource type="Script" uid="uid://cpa8c2rrndmjj" path="res://scripts/systems/footstep_audio.gd" id="6_fsa"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
 shader = ExtResource("3")
@@ -59,6 +60,9 @@ shape = SubResource("SubResource_1")
 [node name="Camera2D" type="Camera2D" parent="." unique_id=617833586]
 position_smoothing_enabled = true
 position_smoothing_speed = 1.0
+
+[node name="FootstepAudio" type="Node" parent="." unique_id=904113277]
+script = ExtResource("6_fsa")
 
 [node name="PlayerLight" type="PointLight2D" parent="." unique_id=406879134]
 scale = Vector2(1, 0.5)

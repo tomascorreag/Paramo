@@ -40,7 +40,7 @@ var day_count: int = 0
 # --- Configuration ---
 
 ## Real seconds per full game day.
-@export var seconds_per_game_day: float = 300.0
+@export var seconds_per_game_day: float = 240.0
 
 ## Speed multiplier. 1.0 = realtime. Set >1 for debug fast-forward.
 @export var time_scale: float = 1.0

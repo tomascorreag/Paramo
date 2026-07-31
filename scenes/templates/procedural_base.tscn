@@ -113,8 +113,7 @@ pathfinder = NodePath("../Pathfinder")
 player = NodePath("../World/Player")
 world = NodePath("../World")
 
-[node name="RunController" type="Node" parent="." node_paths=PackedStringArray("procedural_world", "day_night_controller", "debug_label")]
+[node name="RunController" type="Node" parent="." node_paths=PackedStringArray("procedural_world", "day_night_controller")]
 script = ExtResource("4_run")
 procedural_world = NodePath("../ProceduralWorld")
 day_night_controller = NodePath("../DayNightController")
-debug_label = NodePath("../FieldJournal/Book/Pages/RunDebugLabel")

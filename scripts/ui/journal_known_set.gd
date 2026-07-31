@@ -1,0 +1,262 @@
+@tool
+class_name JournalKnownSet
+extends Control
+
+## One titled reference section on the journal's right page — "known buildings" or
+## "known flora" — showing the REAL in-world art for each thing the player can put
+## on the mountain, reprinted as brown ink (assets/shaders/journal_ink.gdshader).
+##
+## Two sources, because the two kinds of thing are built two different ways in this
+## project and neither is going to change to suit a UI panel:
+##   `tile_kinds` — bridges and ladders exist ONLY as tiles painted into
+##                  resources/tiles/base_tileset.tres. There is no Bridge sprite;
+##                  scenes/traversals/bridge.tscn is an empty Node2D. So a swatch
+##                  is cut out of the tileset at runtime.
+##   `textures`   — frailejones are Node2D world objects whose growth stages are
+##                  already AtlasTexture .tres (resources/objects/variants/), so
+##                  those go in directly.
+##
+## Layout, in the page's warp blocks (see below):
+##
+##     known flora            <- `title`, one block
+##     [][]                   <- one `cell_size` row of swatches
+##
+## THE TITLE IS DRAWN, NOT A LABEL, and that is not a style preference. This sits
+## inside a page's SubViewport, so page_warp.gdshader translates each `block_px`
+## band of it rigidly. The journal's title face is Eggmode at 16, whose line height
+## is 16 — and 18 % 16 != 0, so a Label carrying it fails
+## tests/test_journal_pages.gd's "row_block_px must be a whole number of text
+## lines". RunCalendar hit the same wall and solved it the same way. If you ever
+## "tidy" this into a Label, that test is the thing that will tell you why not.
+##
+## STUB, exactly like JournalInventory: nothing in the codebase tracks what the
+## player has DISCOVERED — availability is decided per-click by ActionRegistry and
+## never persisted. So the contents are authored in the scene. When a discovery
+## system lands, feed it through `set_known` and drop the authored arrays.
+##
+## @tool so both sections render in the editor. Unlike RunCalendar's preview mode
+## there is nothing to fake here: the tileset scan is pure resource work and needs
+## no autoloads, so the editor shows the real swatches.
+
+## Section heading. Lowercase, per the project's UI copy convention.
+@export var title: String = "known buildings":
+	set(value):
+		title = value
+		queue_redraw()
+
+@export_group("Contents")
+## TileSlots names to cut out of `tileset` — the tile-painted structures. Resolved
+## through TileKindIndex, so these are the SAME strings the placement code paints
+## with and a renamed slot fails loudly instead of rendering an empty swatch.
+@export var tile_kinds: PackedStringArray = []:
+	set(value):
+		tile_kinds = value
+		_rebuild()
+
+## Ready-made textures — the Node2D world objects, whose art is already a
+## Texture2D (a frailejon's mature growth stage, say).
+@export var textures: Array[Texture2D] = []:
+	set(value):
+		textures = value
+		_rebuild()
+
+## The TileSet `tile_kinds` are cut out of. The journal's is base_tileset.tres,
+## the same one StructureLayerManager paints structures into.
+@export var tileset: TileSet = null:
+	set(value):
+		tileset = value
+		_rebuild()
+
+## Atlas source inside `tileset` holding the structure art. 1 is the wood/structures
+## source on base_tileset.tres (StructureLayerManager.structures_source_id).
+@export var source_id: int = 1:
+	set(value):
+		source_id = value
+		_rebuild()
+
+@export_group("Layout")
+## Footprint of one swatch. The Y must be a multiple of `block_px` or a swatch
+## straddles two warp blocks and gets a scanline duplicated through it; 36 is two
+## blocks, which holds the 32px tile art with a texel of air top and bottom so no
+## ink sits on a seam. The X is free — it only has to fit the page.
+@export var cell_size: Vector2i = Vector2i(40, 36):
+	set(value):
+		cell_size = value
+		_rebuild()
+
+## The page's warp quantisation. The title row rounds up to a multiple of this, so
+## changing the title face or size cannot knock the swatch row off phase. Keep it
+## equal to the page's `row_block_px`; tests/test_journal_pages.gd guards that.
+@export var block_px: int = 18:
+	set(value):
+		block_px = value
+		_rebuild()
+
+@export_group("Type")
+## Title face. Leave null to fall back to the theme's Label font. The journal sets
+## Eggmode — a section heading is something you WROTE at the top of the list.
+@export var header_font: Font = null:
+	set(value):
+		header_font = value
+		_rebuild()
+
+## Must be a multiple of the face's native em (16 for Eggmode) or the rasteriser
+## duplicates roughly one pixel row per em at a different place in every glyph and
+## the line visibly staggers. See tests/test_journal_pages.gd.
+@export var header_font_size: int = 16:
+	set(value):
+		header_font_size = value
+		_rebuild()
+
+@export var text_color: Color = Palette.P06:
+	set(value):
+		text_color = value
+		queue_redraw()
+
+@export_group("Ink")
+## Applied to every swatch. Carrying it here rather than on each generated child
+## means all the swatches on the page share ONE material, so retuning the ramp is
+## a single resource edit. Null draws the art in its own colours.
+@export var ink_material: ShaderMaterial = null:
+	set(value):
+		ink_material = value
+		_rebuild()
+
+
+## Rows the title is pushed down inside its warp block, for the reason spelled out
+## in RunCalendar.TITLE_INK_INSET_PX: the shader translates each block rigidly and
+## the seam duplicates or drops the row next to it, so no ink may touch a block
+## edge. Eggmode at 16 inks 17 rows in an 18-row block — one row of slack, spent
+## here at the top, leaving the descender row exposed at the bottom.
+const TITLE_INK_INSET_PX: int = 1
+
+## Swatches are laid out from this node's left edge with this much lead-in, on the
+## 4-texel column grid the page's `col_block_px` snaps to.
+const _LEFT_INSET_PX: int = 8
+
+# Shared across every section on the page. Building a TileKindIndex scans the whole
+# atlas AND validates every TileSlots constant against it, pushing a warning per
+# unpainted slot — source 1 is the structures atlas, so it legitimately has none of
+# the terrain slots and the scan is noisy. Doing that once per section per setter
+# poke would bury the console. Static, so the two sections share one scan.
+static var _indices: Dictionary[String, TileKindIndex] = {}
+
+var _swatches: Array[TextureRect] = []
+
+
+func _ready() -> void:
+	# Ink on paper takes no input, and the page's SubViewport sets
+	# gui_disable_input anyway — IGNORE keeps this out of the picking pass.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rebuild()
+
+
+## Height of the title row, rounded UP to a whole block. Everything below it is
+## therefore in phase with the page whatever face the title ends up using.
+func header_row_px() -> int:
+	var face := active_header_font()
+	var h: float = face.get_height(header_font_size) if face != null else float(header_font_size)
+	var block: int = maxi(1, block_px)
+	return int(ceilf(h / float(block))) * block
+
+
+## The title face actually used: the export if set, else the theme's Label font.
+func active_header_font() -> Font:
+	return header_font if header_font != null else get_theme_font(&"font", &"Label")
+
+
+## Every swatch texture this section shows, tiles first then plain textures, in the
+## order they are drawn. Public so tests can assert a slot actually resolved rather
+## than silently rendering nothing.
+func swatch_textures() -> Array[Texture2D]:
+	var out: Array[Texture2D] = []
+	for kind: String in tile_kinds:
+		var tex := _tile_texture(StringName(kind))
+		if tex != null:
+			out.append(tex)
+	for tex: Texture2D in textures:
+		if tex != null:
+			out.append(tex)
+	return out
+
+
+## Replaces the authored contents at runtime. The hook a discovery system would
+## call; until one exists nothing invokes it.
+func set_known(kinds: PackedStringArray, texs: Array[Texture2D]) -> void:
+	tile_kinds = kinds
+	textures = texs
+
+
+# Cuts one tile's art out of the atlas. get_tile_texture_region accounts for
+# size_in_atlas, so a ladder (1x2 cells of a 32x16 atlas) yields the full 32x32
+# art rather than its bottom half — the trap this would otherwise fall into.
+# Recipe lifted from scripts/vfx/burning_cell_vfx.gd, which does the same cut for
+# the burning-grass overlay.
+func _tile_texture(kind: StringName) -> AtlasTexture:
+	var index := _index_for(tileset, source_id)
+	if index == null or not index.has(kind):
+		return null
+	var src := tileset.get_source(source_id) as TileSetAtlasSource
+	if src == null:
+		return null
+	var tex := AtlasTexture.new()
+	tex.atlas = src.texture
+	tex.region = src.get_tile_texture_region(index.coord(kind))
+	return tex
+
+
+static func _index_for(ts: TileSet, src_id: int) -> TileKindIndex:
+	if ts == null:
+		return null
+	var key := "%s#%d" % [ts.resource_path, src_id]
+	if not _indices.has(key):
+		_indices[key] = TileKindIndex.new(ts, src_id)
+	return _indices[key]
+
+
+# Swatches are child TextureRects rather than draw_texture calls in _draw() so the
+# ink material applies to THEM alone: a CanvasItem's material covers everything
+# that item draws, so hanging it on this node would push the title text through the
+# ramp too.
+func _rebuild() -> void:
+	# Null-tolerant: every setter above fires during scene load, before the node is
+	# in the tree and before `tileset` is assigned.
+	if not is_inside_tree():
+		return
+	for r: TextureRect in _swatches:
+		if is_instance_valid(r):
+			# remove_child BEFORE queue_free: the free is deferred to the end of the
+			# frame, so a second _rebuild in the same frame — two export setters poked
+			# in a row in the editor — would otherwise see the old swatches still
+			# parented and count them alongside the new ones.
+			remove_child(r)
+			r.queue_free()
+	_swatches.clear()
+
+	var top: int = header_row_px()
+	var x: int = _LEFT_INSET_PX
+	for tex: Texture2D in swatch_textures():
+		var r := PixelUI.make_icon_sized(tex)
+		r.material = ink_material
+		# Centred in its cell, then floored to whole texels: a swatch on a half
+		# texel resamples 32px pixel art the whole style depends on staying hard.
+		var art := tex.get_size()
+		r.position = Vector2(
+			floorf(x + (float(cell_size.x) - art.x) * 0.5),
+			floorf(top + (float(cell_size.y) - art.y) * 0.5))
+		add_child(r)
+		# Deliberately NOT set_owner: under @tool an owned child would be written
+		# into field_journal.tscn, and the authored arrays would then have a stale
+		# duplicate of themselves baked in beside them.
+		_swatches.append(r)
+		x += cell_size.x
+
+	queue_redraw()
+
+
+func _draw() -> void:
+	var face := active_header_font()
+	if face == null or title.is_empty():
+		return
+	draw_string(face, Vector2(_LEFT_INSET_PX, face.get_ascent(header_font_size) + TITLE_INK_INSET_PX),
+		title, HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)

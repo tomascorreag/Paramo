@@ -1,0 +1,17 @@
+[gd_resource type="AudioStreamRandomizer" format=3]
+
+[ext_resource type="AudioStream" path="res://assets/audio/footsteps/wood/footstep_wood_000.wav" id="1_rrsio"]
+[ext_resource type="AudioStream" path="res://assets/audio/footsteps/wood/footstep_wood_001.wav" id="2_28rsu"]
+[ext_resource type="AudioStream" path="res://assets/audio/footsteps/wood/footstep_wood_002.wav" id="3_r5n8u"]
+[ext_resource type="AudioStream" path="res://assets/audio/footsteps/wood/footstep_wood_003.wav" id="4_v6t85"]
+[ext_resource type="AudioStream" path="res://assets/audio/footsteps/wood/footstep_wood_004.wav" id="5_1fr1h"]
+
+[resource]
+random_pitch = 1.15
+random_volume_offset_db = 3.0
+streams_count = 5
+stream_0/stream = ExtResource("1_rrsio")
+stream_1/stream = ExtResource("2_28rsu")
+stream_2/stream = ExtResource("3_r5n8u")
+stream_3/stream = ExtResource("4_v6t85")
+stream_4/stream = ExtResource("5_1fr1h")

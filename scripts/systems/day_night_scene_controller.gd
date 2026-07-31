@@ -55,6 +55,12 @@ var _last_time: float = -INF
 var _shadow_nodes: Array[Node] = []
 var _shadows_dirty: bool = true
 
+# Last shadow curve samples actually APPLIED to the shadow group. The node loop
+# in _apply_grading is skipped while both are unchanged within epsilon and the
+# node list hasn't changed — see the gate there. -INF forces the first pass.
+var _last_shadow_opacity: float = -INF
+var _last_shadow_length: float = -INF
+
 # Whether the post-process shader is currently doing visible work. When all
 # parameters are at neutral (no grading, no vignette, no tint) we hide the
 # ColorRect entirely so the back-buffer copy + fragment pass don't run.
@@ -137,6 +143,10 @@ func set_profile(new_profile: DayNightProfile) -> void:
 	profile = new_profile
 	if _time_manager != null:
 		_last_time = -1.0
+		# Different curves may coincidentally sample equal at the swap instant,
+		# but the has-curve booleans can flip — force one full shadow pass.
+		_last_shadow_opacity = -INF
+		_last_shadow_length = -INF
 		_apply_grading(_time_manager.time_of_day)
 
 
@@ -261,9 +271,6 @@ func _apply_grading(t: float) -> void:
 			mat.set_shader_parameter(&"water_intensity", water_val)
 
 	# --- All shadows ---
-	if _shadows_dirty:
-		_shadows_dirty = false
-		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
 	# `t` is identical for every shadow node, so sample the time-driven curves
 	# once here rather than per node (otherwise N redundant Curve binary searches
 	# each frame, scaling with how many plants/structures the player has built).
@@ -274,6 +281,27 @@ func _apply_grading(t: float) -> void:
 		profile.shadow_opacity_curve.sample(t) if has_shadow_opacity else 0.0)
 	var shadow_length_base: float = (
 		profile.shadow_length_curve.sample(t) if has_shadow_length else 0.0)
+	# Skip the whole node loop while both samples sit on a flat curve segment
+	# (opacity is exactly 0 for ~40% of the cycle) and no shadow joined or left
+	# the tree. Epsilons: opacity multiplies an 8-bit alpha, so 0.001 is below
+	# one quantum; length is written as roundf(base * scale), so a 0.1 base
+	# delta can't move the rounded result at scale 1. Skips do NOT update
+	# _last_*, so drift accumulates and eventually passes the gate — no
+	# permanent staleness. Known bounded staleness: a growing frailejon's
+	# shadow_scale meta change re-applies only on the next gate pass — during
+	# flat-opacity night its shadow is hidden anyway, and day curves are sloped
+	# so the gate passes every few frames.
+	var shadows_changed: bool = (
+		absf(shadow_opacity_val - _last_shadow_opacity) > 0.001
+		or absf(shadow_length_base - _last_shadow_length) > 0.1
+	)
+	if not _shadows_dirty and not shadows_changed:
+		return
+	if _shadows_dirty:
+		_shadows_dirty = false
+		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
+	_last_shadow_opacity = shadow_opacity_val
+	_last_shadow_length = shadow_length_base
 	for node: Node in _shadow_nodes:
 		var item := node as CanvasItem
 		var mat := item.material as ShaderMaterial

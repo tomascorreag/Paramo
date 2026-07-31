@@ -1,0 +1,33 @@
+[gd_resource type="GradientTexture1D" load_steps=2 format=3]
+
+; GREEN ramp for assets/shaders/journal_ink.gdshader — flora (frailejones, and
+; whatever else gets planted). Selected for hues between the warm and cool
+; boundaries, roughly yellow-green through cyan.
+;
+; See journal_ink_warm.tres for why interpolation_mode MUST stay 1 (CONSTANT).
+;
+; LOW CONTRAST by shadow-lift: darkest is P18 (lum 0.25), a deep green rather than
+; the near-black the old single ramp started on. The top end stops at P22, a pale
+; mint at lum 0.86 — near enough to the paper's 0.90 that highlights dissolve,
+; while still carrying enough green that a plant does not bleach out to cream at
+; its lit edges. That trade is the one thing to watch when retuning: pushing the
+; last stop to P13 unifies it with the warm ramp but costs the plant its colour
+; exactly where the eye looks first.
+;
+;   0.00  P18  2F4D2F   lum 0.25
+;   0.22  P17  44702D   lum 0.36
+;   0.40  P16  819447   lum 0.52
+;   0.56  P20  89A477   lum 0.59
+;   0.70  P21  A4C5AF   lum 0.72
+;   0.84  P22  CAE6D9   lum 0.86
+;
+; Retune here in the inspector; paste palette hexes, never sampled ones.
+
+[sub_resource type="Gradient" id="Gradient_green"]
+interpolation_mode = 1
+offsets = PackedFloat32Array(0, 0.22, 0.4, 0.56, 0.7, 0.84)
+colors = PackedColorArray(0.18431373, 0.30196078, 0.18431373, 1, 0.26666667, 0.43921569, 0.17647059, 1, 0.50588235, 0.58039216, 0.27843137, 1, 0.5372549, 0.64313725, 0.46666667, 1, 0.64313725, 0.77254902, 0.68627451, 1, 0.79215686, 0.90196078, 0.85098039, 1)
+
+[resource]
+gradient = SubResource("Gradient_green")
+width = 256

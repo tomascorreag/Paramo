@@ -50,6 +50,10 @@ logs/
 godot.log
 *.stackdump
 
+# Raw audio libraries (Kenney packs etc). Only the clips actually used ship,
+# copied into assets/audio/.
+assets/audio_all/
+
 # Local Claude state
 .claude/
 CLAUDE.md

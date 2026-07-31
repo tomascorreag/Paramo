@@ -1,0 +1,32 @@
+[gd_resource type="GradientTexture1D" load_steps=2 format=3]
+
+; COOL ramp for assets/shaders/journal_ink.gdshader — stone, water, snow, sky.
+; Selected for hues between the green boundary and the violet one.
+;
+; See journal_ink_warm.tres for why interpolation_mode MUST stay 1 (CONSTANT).
+;
+; LOW CONTRAST by shadow-lift: darkest is P28 (lum 0.32), NOT P29/P30. Those two
+; are the darkest entries in the whole palette and are what the UI uses for panel
+; fills and the journal's own scrim — ink that dark on cream paper reads as a hole
+; punched in the page rather than as a drawing on it.
+;
+; The gap between the first two stops is wide (0.32 -> 0.50) because the palette
+; simply has no blue in between. Nothing to fix; it just means cool swatches step
+; harder in their shadows than warm ones do.
+;
+;   0.00  P28  405273   lum 0.32   (lifted; P29 303843 is 0.21, P30 is darker still)
+;   0.24  P27  6C81A1   lum 0.50
+;   0.48  P26  96A9C1   lum 0.65
+;   0.66  P25  BBC3D0   lum 0.76
+;   0.82  P24  D5D6DB   lum 0.84
+;
+; Retune here in the inspector; paste palette hexes, never sampled ones.
+
+[sub_resource type="Gradient" id="Gradient_cool"]
+interpolation_mode = 1
+offsets = PackedFloat32Array(0, 0.24, 0.48, 0.66, 0.82)
+colors = PackedColorArray(0.25098039, 0.32156863, 0.45098039, 1, 0.42352941, 0.50588235, 0.63137255, 1, 0.58823529, 0.6627451, 0.75686275, 1, 0.73333333, 0.76470588, 0.81568627, 1, 0.83529412, 0.83921569, 0.85882353, 1)
+
+[resource]
+gradient = SubResource("Gradient_cool")
+width = 256

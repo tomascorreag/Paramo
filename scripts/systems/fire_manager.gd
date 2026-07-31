@@ -9,10 +9,13 @@ extends Node
 # the grass→dirt swap on burn-out.
 #
 # Lazy resolution: the autoload is alive across the title screen and other
-# non-gameplay scenes. It silently idles while no Pathfinder exists, picks
-# one up the moment one enters the tree (via get_tree().node_added), and
-# clears its state whenever Pathfinder.graph_changed fires (a map reload or
-# rebuild starts the simulation over with a fresh grid).
+# non-gameplay scenes. It silently idles while no Pathfinder exists, and picks
+# one up the moment one enters the tree (via get_tree().node_added).
+#
+# It clears its state only when the WORLD is replaced — a different Pathfinder
+# (scene load/reload) or a ProceduralWorld regeneration. Pathfinder.graph_changed
+# on its own is not that: it also fires for every structure placement, which must
+# leave burning cells untouched.
 #
 # Ignition tuning sits at the top of this file (BASE_IGNITION_RATE, day/altitude/
 # water falloff). Burn/intensity/spread/fuel tuning lives in FireDynamics. Drop
@@ -63,6 +66,7 @@ const RAIN_EXTINGUISH_THRESHOLD: float = 0.33
 const RAIN_EXTINGUISH_RATE_PER_SECOND: float = 0.8
 
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
+const PROCEDURAL_WORLD_GROUP: StringName = &"procedural_world"
 
 # Source IDs in base_tileset.tres — kept in sync with TerrainPainter.
 const SOURCE_GRASS: int = 0
@@ -191,6 +195,12 @@ func _try_resolve_pathfinder() -> void:
 func _attach_to_pathfinder(pf: Node) -> void:
 	if _pathfinder == pf:
 		return
+	# A DIFFERENT Pathfinder means a different world (scene load or reload) —
+	# every fire belonged to the old one. This, and a world regeneration, are the
+	# only two events that legitimately wipe the simulation; a mere graph_changed
+	# is NOT one (see _on_graph_changed).
+	if _pathfinder != null:
+		_wipe_all_fires()
 	_pathfinder = pf
 	if pf.has_signal(&"graph_changed") and not pf.graph_changed.is_connected(_on_graph_changed):
 		pf.graph_changed.connect(_on_graph_changed)
@@ -209,23 +219,63 @@ func _refresh_grid_and_vfx() -> void:
 		# wired a VFXContainer on a custom map yet.
 		_vfx_container = _pathfinder.get_parent() as Node2D
 	_day_night = get_tree().get_first_node_in_group(DAY_NIGHT_GROUP)
+	# A world regeneration replaces the terrain under every live fire, so it IS a
+	# wipe (unlike graph_changed). Connected here rather than in _ready because
+	# the autoload outlives scenes and ProceduralWorld only exists inside one.
+	var pw := get_tree().get_first_node_in_group(PROCEDURAL_WORLD_GROUP)
+	if pw != null and pw.has_signal(&"generation_finished") \
+			and not pw.is_connected(&"generation_finished", _wipe_all_fires):
+		pw.connect(&"generation_finished", _wipe_all_fires)
 	_water_dist_cache.clear()
+	_prune_stale_burns()
 
 
 func _on_graph_changed() -> void:
-	# A new grid is in town. Burn-in-flight references go stale — wipe.
+	# The graph changed SHAPE — a bridge or ladder landed, a rock was removed, or
+	# Pathfinder rebuilt against the same painted map. This is NOT a new world, so
+	# fires must survive it: every structure placement calls Pathfinder.rebuild(),
+	# and wiping here put out every fire on the map the moment the player built
+	# anything. A genuinely new world arrives as a new Pathfinder (scene reload)
+	# or a regeneration — both wipe explicitly.
 	#
-	# Wipe by GROUP, not by _burning.values(). Smouldering cells have already
-	# been erased from _burning (see _complete_burn) but their VFX node is still
-	# alive running its tail — a dictionary-based wipe would leave those orphaned
-	# over the new grid. The group covers both live and smouldering fires.
+	# Deferred: Pathfinder emits this from inside rebuild(), so re-resolve the
+	# grid (and prune fires the new grid no longer has a tile for) next idle.
+	call_deferred(&"_refresh_grid_and_vfx")
+
+
+## Kill the whole simulation: live fires AND smouldering tails. Wipes by GROUP,
+## not by _burning.values() — a cell that finished burning is already erased from
+## _burning (see _complete_burn) while its VFX node lives on running the smoke
+## tail, and a dictionary-based wipe would strand those over the new world.
+func _wipe_all_fires() -> void:
 	for v: Node in get_tree().get_nodes_in_group(BurningCellVFX.FIRE_VFX_GROUP):
 		if is_instance_valid(v):
 			v.queue_free()
 	_burning.clear()
 	_water_dist_cache.clear()
 	_dirt_coords_by_tileset.clear()
-	call_deferred(&"_refresh_grid_and_vfx")
+
+
+# Drop burning cells the current grid can no longer describe: the TileMapLayer
+# holding their grass overlay is gone, or the rebuilt grid has no tile at that
+# cell (e.g. a bounds_clip change shrank the playable area). Everything else in
+# an entry — age, fuel, the VFX node, the frailejon — is independent of the
+# TileGrid instance, which is why a rebuild alone doesn't invalidate a fire.
+func _prune_stale_burns() -> void:
+	if _burning.is_empty():
+		return
+	for cell: Vector2i in _burning.keys():
+		var entry: Dictionary = _burning[cell]
+		var layer := entry.get("grass_layer") as TileMapLayer
+		var alive: bool = is_instance_valid(layer) and layer.is_inside_tree()
+		if alive and _grid != null and _grid.get_tile(cell) == null:
+			alive = false
+		if alive:
+			continue
+		var vfx := entry.get("vfx") as BurningCellVFX
+		if is_instance_valid(vfx):
+			vfx.queue_free()
+		_burning.erase(cell)
 
 
 # --- Per-frame loop --------------------------------------------------------

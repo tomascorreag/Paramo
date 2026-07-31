@@ -2,8 +2,9 @@ class_name FieldJournal
 extends CanvasLayer
 
 ## Full-screen "field journal" the player opens deliberately to read run status.
-## Holds the season/weather gauge and the run-info readout that used to sit in the
-## default HUD view. Opened by the HUD journal button, the `toggle_journal` action
+## Holds the season/weather gauge (a disc showing through a slot cut in the right
+## page, PageSlit) and the run calendar beneath it (RunCalendar). Opened by the HUD
+## journal button, the `toggle_journal` action
 ## (J), and closed by that action or `pause` (Esc). Opening freezes the game with
 ## get_tree().paused; this layer runs PROCESS_MODE_ALWAYS so its slide animation and
 ## input keep working while everything else is frozen (same trick as PauseMenu).

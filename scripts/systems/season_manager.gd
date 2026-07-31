@@ -41,10 +41,10 @@ enum Phase { IDLE, ACTIVE, PLANNING, RUN_OVER }
 
 ## Length of a full year in day/night cycles. The bimodal calendar splits this
 ## evenly across `season_cycle`, so each season runs `days_per_year /
-## season_cycle.size()` days. N=16 -> 4 days per season for the default 4-season
+## season_cycle.size()` days. N=24 -> 6 days per season for the default 4-season
 ## (Dry-Wet-Dry-Wet) year. Run length = days_per_season * seconds_per_game_day *
 ## season_count.
-@export var days_per_year: int = 16
+@export var days_per_year: int = 24
 
 ## Day/night cycles per season — derived from days_per_year and the number of
 ## seasons in a year (= season_cycle length). Read-only; set days_per_year to
@@ -54,8 +54,9 @@ var days_per_season: int:
 	get:
 		return maxi(1, days_per_year / maxi(1, season_cycle.size()))
 
-## Total seasons in a run. 5 per the min-loop plan (Dry-Wet-Dry-Wet-Dry).
-@export var season_count: int = 5
+## Total seasons in a run — one full bimodal year (Dry-Wet-Dry-Wet). Equal to
+## season_cycle.size(), so a run never crosses a year boundary and year stays 1.
+@export var season_count: int = 4
 
 ## Water the run starts with. Until generation/laguna seep feed the ledger,
 ## this is the whole pool the player spends on firefighting. Migrate to a

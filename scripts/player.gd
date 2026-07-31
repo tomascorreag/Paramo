@@ -30,6 +30,12 @@ const FACING_NW: int = 3
 const WALK_FRAMES_PER_DIR: int = 6
 const WALK_FPS: float = 8.0
 
+# Frames of the walk cycle where a foot contacts the ground, authored in the
+# sprite sheet. Footstep SFX fire on these, so the sound lands with the visible
+# footfall instead of on a clock of its own. At WALK_FPS these two are evenly
+# spaced (3 frames apart), giving a footfall every 0.375 s while walking.
+const WALK_CONTACT_FRAMES: Array[int] = [2, 5]
+
 # Grid-axis step direction -> facing index. Keys cover the 4 legal path
 # transitions. Any other direction is a bug in the pathfinder.
 const DIR_TO_FACING: Dictionary = {
@@ -75,6 +81,7 @@ const ITEM_LANTERN: StringName = &"lantern"
 @onready var _shadow: Sprite2D = $Shadow
 @onready var _camera: Camera2D = $Camera2D
 @onready var _light: PlayerLightController = $PlayerLight
+@onready var _footsteps: FootstepAudio = $FootstepAudio
 
 # Base sprite offset from the scene (feet-to-center). Altitude lift is added
 # on top of this so the visual shifts up while global_position stays at
@@ -130,6 +137,12 @@ var _facing: int = FACING_SE
 # the cycle at WALK_FPS regardless of step_duration, so cadence stays natural
 # even when steps are faster or slower than one cycle.
 var _walk_time: float = 0.0
+
+# Running count of foot contacts the walk cycle has passed since the last idle.
+# Compared each tick to fire footstep SFX; counting (rather than testing
+# "is the current frame a contact frame?") means a frame hitch that skips past
+# a contact still produces exactly one footfall, never zero and never a burst.
+var _contacts_passed: int = 0
 
 # Step state. _stepping == true iff we're mid-lerp between two cells.
 var _stepping: bool = false
@@ -277,8 +290,11 @@ func _physics_process(delta: float) -> void:
 	if not _path.is_empty():
 		_begin_next_step()
 	elif _walk_time != 0.0:
-		# Fully idle: snap back to the planted-foot pose.
+		# Fully idle: snap back to the planted-foot pose and rewind the walk
+		# cycle, so the next walk starts from frame 0 and its first footfall
+		# lands on that cycle's first contact frame.
 		_walk_time = 0.0
+		_contacts_passed = 0
 		_sprite.frame = _facing * WALK_FRAMES_PER_DIR
 
 
@@ -333,6 +349,13 @@ func _begin_next_step() -> void:
 			_step_duration_effective = step_duration * climb_duration_multiplier
 		_:
 			_step_duration_effective = step_duration
+
+	# Footstep SFX. Keyed on the DESTINATION cell — the surface being stepped
+	# onto. FootstepAudio runs its own free-running footfall clock (a pace is
+	# shorter than a tile), so this only refreshes the surface/interval; the
+	# rhythm is not restarted per cell.
+	if _footsteps != null:
+		_footsteps.step_started(_pathfinder, next_cell, kind)
 
 	# Commit the "logical" cell now: future pathfinds will plan from
 	# _step_to_cell, not from the cell we're leaving. This lets reclicks
@@ -411,8 +434,41 @@ func _apply_step_interp(t: float) -> void:
 	# Compensate the Y snap on sprite/camera so movement looks smooth.
 	_apply_visual_lift(alt, pos.y - snap_y)
 	# Walk cycle runs at WALK_FPS independent of step_duration.
-	var walk_frame: int = int(_walk_time * WALK_FPS) % WALK_FRAMES_PER_DIR
+	var abs_frame: int = int(_walk_time * WALK_FPS)
+	var walk_frame: int = abs_frame % WALK_FRAMES_PER_DIR
 	_sprite.frame = _facing * WALK_FRAMES_PER_DIR + walk_frame
+	_tick_footfalls(abs_frame)
+
+
+# Fire a footstep for every foot contact the walk cycle has passed since the
+# last call. `abs_frame` is the cycle-absolute frame index (not wrapped), so
+# _contacts_total is monotonic while walking and a plain > comparison is enough
+# — no edge-detection state to get wrong at cycle wrap or on a repeated call
+# with the same _walk_time (_begin_next_step and _physics_process can both land
+# on one).
+func _tick_footfalls(abs_frame: int) -> void:
+	if _footsteps == null:
+		return
+	var total := _contacts_total(abs_frame)
+	if total <= _contacts_passed:
+		return
+	_contacts_passed = total
+	_footsteps.footfall()
+
+
+# Number of foot contacts at or before `abs_frame`. Counts whole cycles, then
+# the contacts reached within the partial cycle. Reads WALK_CONTACT_FRAMES
+# rather than assuming the contacts are evenly spaced, so re-authoring the
+# sheet's contact frames is a one-line change with no other edits.
+static func _contacts_total(abs_frame: int) -> int:
+	if abs_frame < 0:
+		return 0
+	var total: int = (abs_frame / WALK_FRAMES_PER_DIR) * WALK_CONTACT_FRAMES.size()
+	var within: int = abs_frame % WALK_FRAMES_PER_DIR
+	for c: int in WALK_CONTACT_FRAMES:
+		if c <= within:
+			total += 1
+	return total
 
 
 func _apply_position(cell: Vector2i, alt: float) -> void:

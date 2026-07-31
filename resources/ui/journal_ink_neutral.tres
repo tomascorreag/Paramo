@@ -1,0 +1,33 @@
+[gd_resource type="GradientTexture1D" load_steps=2 format=3]
+
+; NEUTRAL ramp for assets/shaders/journal_ink.gdshader — anything whose saturation
+; falls below the shader's sat_threshold, i.e. greys with no hue worth honouring:
+; bare rock, worn stone, the unlit faces of things.
+;
+; See journal_ink_warm.tres for why interpolation_mode MUST stay 1 (CONSTANT).
+;
+; This ramp exists so a grey pixel does not get an arbitrary hue. Without it every
+; fragment would be forced into warm/green/cool, and hue_of() returns 0 (red) for
+; a fully desaturated colour — so all the greys in the art would come out BROWN,
+; via the warm ramp, purely because of how the maths degenerates. That failure
+; looks plausible enough to ship by accident, which is why the threshold and this
+; ramp are a pair: raising sat_threshold sends more of the art here.
+;
+; LOW CONTRAST by shadow-lift: darkest is P31 (lum 0.26), not P07.
+;
+;   0.00  P31  414446   lum 0.26
+;   0.24  P00  636663   lum 0.40
+;   0.44  P01  87857C   lum 0.52
+;   0.62  P02  BCAD9F   lum 0.69
+;   0.80  P24  D5D6DB   lum 0.84
+;
+; Retune here in the inspector; paste palette hexes, never sampled ones.
+
+[sub_resource type="Gradient" id="Gradient_neutral"]
+interpolation_mode = 1
+offsets = PackedFloat32Array(0, 0.24, 0.44, 0.62, 0.8)
+colors = PackedColorArray(0.25490196, 0.26666667, 0.2745098, 1, 0.38823529, 0.4, 0.38823529, 1, 0.52941176, 0.52156863, 0.48627451, 1, 0.7372549, 0.67843137, 0.62352941, 1, 0.83529412, 0.83921569, 0.85882353, 1)
+
+[resource]
+gradient = SubResource("Gradient_neutral")
+width = 256
