@@ -263,7 +263,7 @@ func test_inventory_is_printed_on_the_left_page() -> void:
 	# bend with the paper — the opposite of the season wheel, which PageSlit keeps out
 	# of any viewport precisely so it stays flat.
 	var rows := _inventory_labels()
-	assert_eq(rows.size(), 2, "expected a water row and a money row")
+	assert_eq(rows.size(), 2, "expected a water row and a tokens row")
 	for row: Label in rows:
 		var icon := row.get_parent().get_node(^"Icon") as TextureRect
 		assert_not_null(icon, "every row needs its glyph")

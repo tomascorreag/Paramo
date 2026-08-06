@@ -12,11 +12,11 @@ extends Control
 ## warp block tall (18 texels), and both the 16px icon and the Tiny5-16 count sit
 ## inside their row, so no ink touches a block seam.
 ##
-## The water row is LIVE: FieldJournal connects ResourceLedger.resource_changed
-## to `set_amount` and primes it on _ready, so the `water` @export is only ever
-## the editor's preview value. The money row is still a STUB — there is no
-## funding resource in the ledger yet; when there is, it needs no change here,
-## since set_amount already dispatches by id. The row set is authored in
+## Both rows are LIVE: FieldJournal connects ResourceLedger.resource_changed
+## to `set_amount` and primes them on _ready, so the @exports are only ever the
+## editor's preview values. `tokens` is the visitor income (banked daily by
+## VisitorFlow, spent on unlocks/placements) — it kept the money glyph, since
+## icons are named by the drawing, not the resource. The row set is authored in
 ## scenes/ui/field_journal.tscn — this script only knows how to fill rows in.
 ##
 ## Amounts are ints because this is printed text. The ledger stores floats;
@@ -36,11 +36,11 @@ extends Control
 		water = value
 		_refresh(&"water", value)
 
-## Amount shown for the `money` row. Stub until the resource system exists.
-@export var money: int = 0:
+## Amount shown for the `tokens` row. Editor preview only, like `water`.
+@export var tokens: int = 0:
 	set(value):
-		money = value
-		_refresh(&"money", value)
+		tokens = value
+		_refresh(&"tokens", value)
 
 
 func _ready() -> void:
@@ -48,7 +48,7 @@ func _ready() -> void:
 	# set anyway — IGNORE keeps this out of the picking pass entirely.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_refresh(&"water", water)
-	_refresh(&"money", money)
+	_refresh(&"tokens", tokens)
 
 
 ## Sets the number under one row's icon. Unknown ids are ignored rather than
@@ -58,8 +58,8 @@ func set_amount(id: StringName, value: int) -> void:
 	match id:
 		&"water":
 			water = value
-		&"money":
-			money = value
+		&"tokens":
+			tokens = value
 		_:
 			_refresh(id, value)
 

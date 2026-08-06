@@ -94,6 +94,18 @@ var _rain_current: float = 0.0
 # Debug-only manual override. >=0 disables the state machine and snaps
 # rain_current to this value. <0 means "no override, run events".
 var _rain_override: float = -1.0
+# Climate-change scale on the rain START probability (never the stop roll —
+# see _roll_weather). 1.0 = the profile as authored; ClimateController lowers
+# it each season. Lives here rather than on DayNightProfile because profiles
+# are shared .tres — mutating one at runtime would leak into the editor and
+# every later run.
+var rain_probability_scale: float = 1.0
+
+
+## Climate hook: scales how often rain STARTS (clamped >= 0). Set by
+## ClimateController at season boundaries; a fresh scene resets it to 1.0.
+func set_rain_probability_scale(scale: float) -> void:
+	rain_probability_scale = maxf(0.0, scale)
 
 
 func _ready() -> void:
@@ -447,7 +459,10 @@ func _roll_weather() -> void:
 		# on the very next period boundary.
 		if _rain_state_game_t < profile.rain_post_stop_cooldown:
 			return
-		if randf() < base * p_curve:
+		# The climate scale multiplies the START roll only: it must make rain
+		# rarer, and the stop roll uses base * (1 - curve), so scaling `base`
+		# itself would also make storms harder to STOP — the opposite effect.
+		if randf() < base * p_curve * rain_probability_scale:
 			_start_rain_event()
 	else: # ACTIVE
 		# Post-start cooldown: a fresh storm gets at least this much in-game

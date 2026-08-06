@@ -59,6 +59,7 @@ func _bind_inventory() -> void:
 		return
 	ResourceLedger.resource_changed.connect(_on_resource_changed)
 	_inventory.set_amount(&"water", _display_amount(ResourceLedger.get_amount(&"water")))
+	_inventory.set_amount(&"tokens", _display_amount(ResourceLedger.get_amount(&"tokens")))
 
 
 func _on_resource_changed(id: StringName, value: float, _delta: float) -> void:

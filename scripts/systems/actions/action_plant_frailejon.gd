@@ -8,6 +8,7 @@ func _init() -> void:
 	id = &"plant_frailejon"
 	icon = preload("res://assets/sprites/UX/icons/frailejon.tres")
 	group = &"plant"
+	unlock_id = &"frailejon"
 
 
 func _applies(ctx: ActionContext) -> bool:

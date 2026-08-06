@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="SeasonProfile" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="SeasonProfile" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/data/season_profile.gd" id="1"]
+[ext_resource type="Resource" path="res://resources/day_night/dry_season.tres" id="2"]
 
 [resource]
 script = ExtResource("1")
@@ -8,4 +9,5 @@ id = &"dry"
 display_name = "Dry Season"
 is_dry = true
 allows_fire = true
-day_night_profile = null
+day_night_profile = ExtResource("2")
+dryness_equilibrium = 0.75

@@ -43,6 +43,26 @@ on its own.
   season-quantized.
 - **No score.** The end screen names what was lost; it does not aggregate a
   score (GDD rhetoric).
+- **Dryness is the simulation's spine** (`ClimateController`): one global [0,1]
+  scalar — rain soaks it toward 0 fast, clear sky dries it toward the season's
+  `dryness_equilibrium` slowly. Fire ignition multiplies by it. The climate
+  ramp is per-SEASON (gentle ~5% rain decay + equilibrium drift), not the
+  GDD's per-year band creep — the slice's run is one year, so per-year cannot
+  fire; `ClimateState` altitude-band creep remains a Phase 1.5 item.
+- **Tourism is abstract and quantized.** No tourist entities: `VisitorFlow`
+  computes `visitors = base × (1 − day_avg_rain) × appeal` at each completed
+  day and banks visitors × 5 tokens as ONE lump. Daily lump (not a trickle)
+  because visitor income is player-steerable — the ledger doctrine's
+  quantization rule applies, unlike weather-driven water.
+- **Fire chars, char scares, rain heals** (`RegrowthManager`): burnout hands
+  the pre-burn grass coord over `tile_burned`; charred cells roll daily
+  recovery scaled by rain; the charred count drives visitor `appeal` toward 0.
+  Sun pays and burns — drought is a payday loan, which is the loop's argument.
+- **Everything placeable starts locked.** 10 tokens unlocks a type for the run
+  (bought by clicking its swatch on the journal's right page), 5 more per
+  placement (charged at commit, refunded on build failure). Locked actions are
+  NOT offered in the wheel (`TileAction.unlock_id`); unlocked-but-broke ones
+  dim (`is_enabled`). `starting_tokens = 15` = one unlock + one placement.
 
 ---
 
@@ -76,6 +96,29 @@ on its own.
       is shown greyed and swallows its click rather than disappearing.
 - [x] Journal supplies list reads the live water balance
       (`FieldJournal` → `ResourceLedger.resource_changed` → `JournalInventory`).
+
+### Simulation pass (weather ↔ water ↔ fire ↔ tourism ↔ tokens)
+
+- [x] Dry/Wet `DayNightProfile`s authored and wired into the season .tres —
+      weather now differs by season (dry: rain base 0.08, wet: 0.5). Visuals
+      still identical between them; distinct looks remain Phase 1.5.
+- [x] `ClimateController` — global dryness scalar, per-season climate ramp
+      (rain-start probability scale pushed into `DayNightSceneController`,
+      never by mutating the shared profile .tres), fire-ignition multiplier
+      read by `FireManager` (group lookup, fallback 1.0). + tests.
+- [x] `RegrowthManager` — char ledger fed by the widened `tile_burned(cell,
+      grass_coord, grass_layer)` signal, rain-scaled daily recovery repainting
+      the original grass variant, `appeal` factor for tourism. + tests.
+- [x] `VisitorFlow` — abstract daily visitors, end-of-day token lump under
+      `&"visitors"`. + tests.
+- [x] `UnlockState` + `TileAction.unlock_id` — bridge/ladder/frailejon locked
+      at run start, unlock 10 / placement 5 (commit-charged, failure-refunded),
+      run-scoped reset. + tests.
+- [x] Journal shop — the right page's known-set sections are buyable:
+      `JournalShopInput` on BookHit resolves clicks by arithmetic (no viewport
+      input forwarding), locked swatches fade via the ink shader's new `dim`
+      uniform with the cost printed beside them. Journal money row renamed to
+      the live `tokens`. + tests.
 
 ---
 

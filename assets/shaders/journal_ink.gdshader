@@ -51,6 +51,13 @@ uniform float hue_cool_end : hint_range(0.0, 1.0) = 0.88;   // ~317 deg, past vi
 // uniform is here to A/B the mapping while tuning the ramps.
 uniform float ink_amount : hint_range(0.0, 1.0) = 1.0;
 
+// Output ALPHA multiplier — the journal shop draws a LOCKED swatch faded. A
+// uniform rather than self_modulate because this shader overwrites COLOR and
+// never multiplies the vertex modulate back in, so self_modulate is silently
+// ignored on anything it draws (the trap this uniform exists to avoid). Alpha
+// only: RGB stays a palette stop, per the palette rule.
+uniform float dim : hint_range(0.0, 1.0) = 1.0;
+
 // Rec.601 weights, the same ones post_process.gdshader grades with — kept
 // identical so a swatch and the world it depicts agree about which parts of a
 // sprite are the dark ones.
@@ -107,5 +114,5 @@ void fragment() {
 
 	// Alpha is passed through untouched: the swatches are cut-out sprites and the
 	// page has to show through everywhere they are empty.
-	COLOR = vec4(mix(col.rgb, ink, ink_amount), col.a);
+	COLOR = vec4(mix(col.rgb, ink, ink_amount), col.a * dim);
 }

@@ -88,7 +88,11 @@ const VFX_CONTAINER_GROUP: StringName = &"vfx_container"
 
 # --- Signals ---------------------------------------------------------------
 
-signal tile_burned(cell: Vector2i)
+## A fire finished consuming its cell (burnout, not extinguish). Carries the
+## pre-burn grass atlas coord + layer so a regrowth system can repaint the
+## grass later — without them the coord dies with the _burning entry and the
+## cell is dirt forever.
+signal tile_burned(cell: Vector2i, grass_coord: Vector2i, grass_layer: TileMapLayer)
 
 
 # --- State -----------------------------------------------------------------
@@ -98,6 +102,7 @@ var _grid: Object = null # TileGrid
 var _vfx_container: Node2D = null
 var _time_manager: Node = null
 var _day_night: Node = null # DayNightSceneController, for rain query
+var _climate: Node = null # ClimateController, for the dryness ignition multiplier
 
 # cell -> { "vfx": BurningCellVFX, "age": float, "fuel": float, "fuel_max": float,
 #           "max_intensity": float, "frailejon": Node2D (or null),
@@ -398,7 +403,8 @@ func _roll_ignitions() -> void:
 
 		var alt_mult: float = _altitude_falloff(_grid.altitude_center(c))
 		var water_mult: float = _water_falloff(c)
-		var p: float = BASE_IGNITION_RATE_PER_SAMPLE * day_mult * alt_mult * water_mult
+		var p: float = BASE_IGNITION_RATE_PER_SAMPLE * day_mult * alt_mult \
+				* water_mult * _climate_ignition_multiplier()
 		if randf() < p:
 			_ignite(c)
 			if _burning.size() >= MAX_CONCURRENT_BURNING:
@@ -525,8 +531,10 @@ func _complete_burn(cell: Vector2i) -> void:
 	if is_instance_valid(frj):
 		frj.queue_free()
 
+	var grass_coord: Vector2i = entry.get("grass_coord", Vector2i(-1, -1))
+	var grass_layer: TileMapLayer = entry.get("grass_layer") as TileMapLayer
 	_burning.erase(cell)
-	tile_burned.emit(cell)
+	tile_burned.emit(cell, grass_coord, grass_layer)
 
 
 # --- Probability terms -----------------------------------------------------
@@ -536,6 +544,16 @@ func _rain_intensity() -> float:
 			and _day_night.has_method(&"get_rain_current_intensity"):
 		return float(_day_night.call(&"get_rain_current_intensity"))
 	return 0.0
+
+
+# Dryness scaling from the scene's ClimateController. Fallback 1.0 keeps
+# scenes without one (tests, tools) at the pre-climate ignition rate.
+func _climate_ignition_multiplier() -> float:
+	if _climate == null or not is_instance_valid(_climate):
+		_climate = get_tree().get_first_node_in_group(&"climate")
+	if _climate != null and _climate.has_method(&"get_ignition_multiplier"):
+		return float(_climate.call(&"get_ignition_multiplier"))
+	return 1.0
 
 
 func _day_curve() -> float:

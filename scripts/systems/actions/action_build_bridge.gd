@@ -9,6 +9,7 @@ func _init() -> void:
 	id = &"build_bridge"
 	icon = preload("res://assets/sprites/UX/icons/bridge.tres")
 	group = &"build"
+	unlock_id = &"bridge"
 
 
 func _applies(ctx: ActionContext) -> bool:

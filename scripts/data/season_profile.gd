@@ -28,3 +28,9 @@ extends Resource
 ## Day/night look swapped in at the season boundary (golden haze vs gray-blue
 ## fog). Optional — null leaves the current profile untouched.
 @export var day_night_profile: DayNightProfile = null
+
+## Where the global dryness scalar settles during this season under clear sky
+## (ClimateController pulls dryness toward this; rain pushes it toward 0).
+## Fire ignition scales with dryness, so this is "how flammable a rainless
+## stretch of this season makes the mountain".
+@export_range(0.0, 1.0) var dryness_equilibrium: float = 0.5

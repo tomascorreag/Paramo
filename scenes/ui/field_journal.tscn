@@ -16,6 +16,7 @@
 [ext_resource type="Texture2D" uid="uid://cwrdu208heb4c" path="res://assets/sprites/UX/icons/water.tres" id="14_water"]
 [ext_resource type="Texture2D" uid="uid://cdqpb0ioeqmvm" path="res://assets/sprites/UX/icons/money.tres" id="15_money"]
 [ext_resource type="Script" uid="uid://cdnm8m3obine8" path="res://scripts/ui/journal_known_set.gd" id="17_known"]
+[ext_resource type="Script" path="res://scripts/ui/journal_shop_input.gd" id="17_shop"]
 [ext_resource type="Shader" uid="uid://csf5f2xufxrdy" path="res://assets/shaders/journal_ink.gdshader" id="18_inksh"]
 [ext_resource type="Texture2D" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
 [ext_resource type="Texture2D" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
@@ -150,12 +151,16 @@ texture = ExtResource("2_book")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="BookHit" type="Control" parent="Book/BookArt" unique_id=1368919671]
+[node name="BookHit" type="Control" parent="Book/BookArt" unique_id=1368919671 node_paths=PackedStringArray("page_right", "content", "sections")]
 anchors_preset = 0
 offset_left = 48.0
 offset_top = 17.0
 offset_right = 432.0
 offset_bottom = 256.0
+script = ExtResource("17_shop")
+page_right = NodePath("../Pages/PageRight")
+content = NodePath("../Pages/PageRight/SubViewport/Content")
+sections = [NodePath("../Pages/PageRight/SubViewport/Content/KnownBuildings"), NodePath("../Pages/PageRight/SubViewport/Content/KnownFlora")]
 
 [node name="Pages" type="Control" parent="Book/BookArt" unique_id=1020230992]
 anchors_preset = 0
@@ -267,6 +272,7 @@ mouse_filter = 2
 script = ExtResource("17_known")
 title = "known buildings"
 tile_kinds = PackedStringArray("HALF_STAIR_NE", "LADDER_NE")
+entry_ids = PackedStringArray("bridge", "ladder")
 tileset = ExtResource("20_tiles")
 source_id = 1
 cell_size = Vector2i(40, 36)
@@ -285,6 +291,7 @@ mouse_filter = 2
 script = ExtResource("17_known")
 title = "known flora"
 textures = Array[Texture2D]([ExtResource("21_frail")])
+entry_ids = PackedStringArray("frailejon")
 tileset = ExtResource("20_tiles")
 source_id = 1
 cell_size = Vector2i(40, 36)
@@ -335,7 +342,6 @@ offset_right = 152.0
 offset_bottom = 198.0
 mouse_filter = 2
 script = ExtResource("12_inv")
-money = 250
 
 [node name="water" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557003]
 anchors_preset = 0
@@ -362,14 +368,14 @@ theme_override_fonts/font = ExtResource("16_tiny5")
 theme_override_font_sizes/font_size = 16
 text = "0"
 
-[node name="money" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557006]
+[node name="tokens" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557006]
 anchors_preset = 0
 offset_top = 18.0
 offset_right = 145.0
 offset_bottom = 36.0
 mouse_filter = 2
 
-[node name="Icon" type="TextureRect" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/money" unique_id=1904557007]
+[node name="Icon" type="TextureRect" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/tokens" unique_id=1904557007]
 texture_filter = 1
 material = SubResource("ShaderMaterial_ink")
 offset_top = 1.0
@@ -378,7 +384,7 @@ offset_bottom = 17.0
 mouse_filter = 2
 texture = ExtResource("15_money")
 
-[node name="Count" type="Label" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/money" unique_id=1904557008]
+[node name="Count" type="Label" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/tokens" unique_id=1904557008]
 offset_left = 22.0
 offset_right = 90.0
 offset_bottom = 18.0

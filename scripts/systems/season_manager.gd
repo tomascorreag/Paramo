@@ -64,6 +64,12 @@ var days_per_season: int:
 ## on purpose. Migrate to a RunConfig .tres in the balance pass.
 @export var starting_water: float = 10.0
 
+## Tokens the run starts with. Everything placeable begins LOCKED (10 to
+## unlock a type + 5 per placement), so 15 buys exactly one unlock and one
+## placement — the opening has a verb without waiting for the first visitors.
+## Set to 0 for the barren opening. Migrate to a RunConfig .tres later.
+@export var starting_tokens: float = 15.0
+
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season
 ## split and the year counter (year increments every season_cycle.size() seasons).
@@ -94,6 +100,7 @@ func start_run() -> void:
 		return
 	ResourceLedger.reset()
 	ResourceLedger.set_amount(&"water", starting_water, &"initial")
+	ResourceLedger.set_amount(&"tokens", starting_tokens, &"initial")
 	season_index = 0
 	year = 1
 	TimeManager.day_count = 0

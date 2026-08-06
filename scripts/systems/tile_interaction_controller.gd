@@ -233,10 +233,22 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.tile_interaction = self
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
+	ctx.unlocks = _unlocks_node()
 	# Cached BFS from the player's cell — lets is_offerable answer "can the player
 	# reach a cell to act from?" without a per-action flood fill.
 	ctx.reachable = pathfinder.reachable_from(player.current_cell)
 	return ctx
+
+
+# The scene's UnlockState, resolved lazily by group (it sits beside this
+# controller in gameplay_base but _ready order is not guaranteed). Null in
+# scenes without the token economy — actions treat that as all-unlocked.
+var _unlocks: Node = null
+
+func _unlocks_node() -> Node:
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	return _unlocks
 
 
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
@@ -423,6 +435,12 @@ func _deny(cell: Vector2i) -> void:
 # ---------------------------------------------------------------------------
 
 func plant_frailejon(cell: Vector2i) -> void:
+	# Charge at commit. Instancing never fails after this point (no validate
+	# step — _applies already vetted the cell), so no refund path is needed.
+	var unlocks := _unlocks_node()
+	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
+		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
+			return
 	var frailejon: Frailejon = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 

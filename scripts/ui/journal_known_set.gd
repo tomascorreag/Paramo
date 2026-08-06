@@ -29,10 +29,17 @@ extends Control
 ## lines". RunCalendar hit the same wall and solved it the same way. If you ever
 ## "tidy" this into a Label, that test is the thing that will tell you why not.
 ##
-## STUB, exactly like JournalInventory: nothing in the codebase tracks what the
-## player has DISCOVERED — availability is decided per-click by ActionRegistry and
-## never persisted. So the contents are authored in the scene. When a discovery
-## system lands, feed it through `set_known` and drop the authored arrays.
+## ALSO THE SHOP SURFACE. Each swatch can carry an id (`entry_ids`, 1:1 with
+## swatch order) and a state set via `set_entry_state`: a LOCKED entry renders
+## its swatch faded (through the ink shader's `dim` uniform — self_modulate is
+## silently ignored by that shader, see its header) with the unlock cost
+## printed beside it; an owned entry renders full ink, exactly as before. This
+## node stays input-IGNORE — clicks arrive via JournalShopInput on BookHit,
+## which asks `entry_at` where they landed. With no states set (preview tools,
+## layout tests) everything renders as it always did.
+##
+## Contents are still authored in the scene: nothing tracks DISCOVERY — the
+## shop tracks PURCHASE (UnlockState). `set_known` remains the discovery hook.
 ##
 ## @tool so both sections render in the editor. Unlike RunCalendar's preview mode
 ## there is nothing to fake here: the tileset scan is pure resource work and needs
@@ -59,6 +66,14 @@ extends Control
 	set(value):
 		textures = value
 		_rebuild()
+
+## Shop id per swatch, 1:1 with draw order (tile_kinds first, then textures).
+## These are UnlockState types / TileAction.unlock_id values ("bridge",
+## "ladder", "frailejon"). Leave empty for a pure reference section.
+@export var entry_ids: PackedStringArray = []:
+	set(value):
+		entry_ids = value
+		queue_redraw()
 
 ## The TileSet `tile_kinds` are cut out of. The journal's is base_tileset.tres,
 ## the same one StructureLayerManager paints structures into.
@@ -141,7 +156,16 @@ const _LEFT_INSET_PX: int = 8
 # poke would bury the console. Static, so the two sections share one scan.
 static var _indices: Dictionary[String, TileKindIndex] = {}
 
+## Fade applied to a locked entry's swatch, via the ink shader's `dim` uniform.
+const LOCKED_ALPHA: float = 0.4
+
 var _swatches: Array[TextureRect] = []
+# id -> {"locked": bool, "cost": int, "affordable": bool}. Empty (the default
+# everywhere outside a live run) renders every swatch owned/full-ink.
+var _states: Dictionary = {}
+# ink_material with dim = LOCKED_ALPHA, built lazily, shared by every locked
+# swatch in this section.
+var _dim_material: ShaderMaterial = null
 
 
 func _ready() -> void:
@@ -185,6 +209,70 @@ func swatch_textures() -> Array[Texture2D]:
 func set_known(kinds: PackedStringArray, texs: Array[Texture2D]) -> void:
 	tile_kinds = kinds
 	textures = texs
+
+
+# --- Shop state (JournalShopInput drives these) ------------------------------
+
+## Sets one entry's shop presentation. Locked: faded swatch + cost printed
+## beside it (cost itself faded when unaffordable). Unknown ids are stored
+## harmlessly — the draw pass only consults states for ids it actually shows.
+func set_entry_state(id: StringName, locked: bool, cost: int,
+		affordable: bool) -> void:
+	_states[id] = {"locked": locked, "cost": cost, "affordable": affordable}
+	_apply_states()
+
+
+## The swatch cell rect for one entry, in this node's local space. Same layout
+## arithmetic as _rebuild, so hit-testing and rendering cannot drift apart.
+func entry_rect(index: int) -> Rect2:
+	return Rect2(
+			Vector2(_LEFT_INSET_PX + index * cell_size.x, header_row_px()),
+			Vector2(cell_size))
+
+
+## Which entry a local-space point lands on, -1 for a miss. Hit-tested in
+## UNWARPED page space: the page warp displaces this content by at most a few
+## texels near the spine, and a 40x36 cell absorbs that error (the accepted
+## simplification — see preview_page_warp.gd's findings).
+func entry_at(point: Vector2) -> int:
+	for i in _swatches.size():
+		if entry_rect(i).has_point(point):
+			return i
+	return -1
+
+
+func entry_id_at(index: int) -> StringName:
+	if index < 0 or index >= entry_ids.size():
+		return &""
+	return StringName(entry_ids[index])
+
+
+func _state_for(index: int) -> Dictionary:
+	return _states.get(entry_id_at(index), {})
+
+
+func _apply_states() -> void:
+	for i in _swatches.size():
+		var r: TextureRect = _swatches[i]
+		if not is_instance_valid(r):
+			continue
+		if _state_for(i).get("locked", false):
+			r.material = _locked_material()
+		else:
+			r.material = ink_material
+	queue_redraw()
+
+
+# One duplicate per section, not per swatch: every locked swatch fades the
+# same amount, and the duplicate exists only because the shared ink material
+# must keep dim = 1.0 for everything else on the page.
+func _locked_material() -> ShaderMaterial:
+	if ink_material == null:
+		return null
+	if _dim_material == null:
+		_dim_material = ink_material.duplicate() as ShaderMaterial
+		_dim_material.set_shader_parameter(&"dim", LOCKED_ALPHA)
+	return _dim_material
 
 
 # Cuts one tile's art out of the atlas. get_tile_texture_region accounts for
@@ -251,12 +339,37 @@ func _rebuild() -> void:
 		_swatches.append(r)
 		x += cell_size.x
 
-	queue_redraw()
+	_apply_states()
 
 
 func _draw() -> void:
 	var face := active_header_font()
-	if face == null or title.is_empty():
+	if face != null and not title.is_empty():
+		draw_string(face, Vector2(_LEFT_INSET_PX, face.get_ascent(header_font_size) + TITLE_INK_INSET_PX),
+			title, HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
+	_draw_costs()
+
+
+# The unlock price beside each LOCKED swatch, in the data face (Tiny5-8, from
+# the theme). Anchored to the cell's bottom-right: baseline 2px above the cell
+# bottom keeps every ink row inside the cell's LOWER warp block, clear of both
+# seams (the block-seam rule — ink flush against a block edge gets duplicated
+# or dropped by the page warp).
+func _draw_costs() -> void:
+	var face := get_theme_font(&"font", &"Label")
+	if face == null:
 		return
-	draw_string(face, Vector2(_LEFT_INSET_PX, face.get_ascent(header_font_size) + TITLE_INK_INSET_PX),
-		title, HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
+	const COST_FONT_SIZE: int = 8
+	for i in _swatches.size():
+		var state := _state_for(i)
+		if not state.get("locked", false):
+			continue
+		var text := str(int(state.get("cost", 0)))
+		var rect := entry_rect(i)
+		var w: float = face.get_string_size(
+				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE).x
+		var color := text_color if state.get("affordable", false) \
+				else Palette.with_alpha(text_color, LOCKED_ALPHA)
+		draw_string(face,
+				Vector2(rect.end.x - w - 2.0, rect.end.y - 2.0),
+				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE, color)
