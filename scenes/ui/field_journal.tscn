@@ -335,7 +335,6 @@ offset_right = 152.0
 offset_bottom = 198.0
 mouse_filter = 2
 script = ExtResource("12_inv")
-water = 12
 money = 250
 
 [node name="water" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557003]

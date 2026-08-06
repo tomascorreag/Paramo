@@ -58,10 +58,11 @@ var days_per_season: int:
 ## season_cycle.size(), so a run never crosses a year boundary and year stays 1.
 @export var season_count: int = 4
 
-## Water the run starts with. Until generation/laguna seep feed the ledger,
-## this is the whole pool the player spends on firefighting. Migrate to a
-## RunConfig .tres in the balance pass.
-@export var starting_water: float = 100.0
+## Water the run starts with. Firefighting costs 1 per cell doused and WaterCycle
+## refills continuously (fast while it rains), so this is the buffer that decides
+## how big a fire you can survive before the weather has to bail you out — small
+## on purpose. Migrate to a RunConfig .tres in the balance pass.
+@export var starting_water: float = 10.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season

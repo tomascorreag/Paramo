@@ -36,6 +36,7 @@
 [ext_resource type="Script" path="res://scripts/vfx/fire_aura_overlay.gd" id="34_aura_scr"]
 [ext_resource type="Material" path="res://resources/materials/fire_aura.tres" id="35_aura_mat"]
 [ext_resource type="PackedScene" path="res://scenes/ui/field_journal.tscn" id="36_journal"]
+[ext_resource type="Script" path="res://scripts/systems/water_cycle.gd" id="37_water"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -219,6 +220,9 @@ post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
 background_rect = NodePath("../BackgroundLayer/BG")
 wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
 water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
+
+[node name="WaterCycle" type="Node" parent="." unique_id=480862932]
+script = ExtResource("37_water")
 
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=156444878]
 layer = 100

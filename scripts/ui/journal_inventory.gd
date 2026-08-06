@@ -12,10 +12,15 @@ extends Control
 ## warp block tall (18 texels), and both the 16px icon and the Tiny5-16 count sit
 ## inside their row, so no ink touches a block seam.
 ##
-## STUB: the amounts are authored numbers. There is no ResourceManager yet, so
-## nothing feeds this; when there is one, connect its change signal to
-## `set_amount` and delete the `@export` defaults. The row set is authored in
+## The water row is LIVE: FieldJournal connects ResourceLedger.resource_changed
+## to `set_amount` and primes it on _ready, so the `water` @export is only ever
+## the editor's preview value. The money row is still a STUB — there is no
+## funding resource in the ledger yet; when there is, it needs no change here,
+## since set_amount already dispatches by id. The row set is authored in
 ## scenes/ui/field_journal.tscn — this script only knows how to fill rows in.
+##
+## Amounts are ints because this is printed text. The ledger stores floats;
+## FieldJournal floors on the way in (see its _display_amount).
 ##
 ## Expected children, one group per resource, named by its id:
 ##   <id> : Control
@@ -24,7 +29,8 @@ extends Control
 ##
 ## @tool so the authored stub amounts render in the editor.
 
-## Amount shown for the `water` row. Stub until the resource system exists.
+## Amount shown for the `water` row. Editor preview only — overwritten from
+## ResourceLedger the moment FieldJournal is ready.
 @export var water: int = 0:
 	set(value):
 		water = value

@@ -162,7 +162,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	var items := _assemble_menu_items(actions)
+	var items := _assemble_menu_items(actions, ctx)
 
 	_pending_cell = cell
 	var world_pos := pathfinder.cell_to_world(cell)
@@ -242,7 +242,12 @@ func _build_context(cell: Vector2i) -> ActionContext:
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
 # groups (group != &""). Group order follows registration order; within a
 # group, actions also keep registration order.
-func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
+#
+# Each entry carries "enabled" (from TileAction.is_enabled) so the wheel can dim
+# an action the player can't currently pay for rather than hiding it. A group
+# wrapper is enabled if ANY child is — dimming a submenu whose contents are
+# usable would hide working actions behind a dead-looking icon.
+func _assemble_menu_items(actions: Array[TileAction], ctx: ActionContext) -> Array[Dictionary]:
 	var top: Array[Dictionary] = []
 	var groups: Dictionary = {}            # StringName -> Array[Dictionary]
 	var group_order: Array[StringName] = []
@@ -250,6 +255,7 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 		var entry := {
 			"id": String(a.id),
 			"icon": a.icon,
+			"enabled": a.is_enabled(ctx),
 		}
 		if a.group == &"":
 			top.append(entry)
@@ -261,9 +267,15 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 
 	for group_id in group_order:
 		var submenu: Array = groups[group_id]
+		var any_enabled: bool = false
+		for entry: Dictionary in submenu:
+			if entry.get("enabled", true):
+				any_enabled = true
+				break
 		top.append({
 			"id": _GROUP_ID_PREFIX + String(group_id),
 			"icon": _GROUP_ICONS.get(group_id),
+			"enabled": any_enabled,
 			"submenu": submenu,
 		})
 	return top
@@ -309,6 +321,12 @@ func _on_item_selected(id: String) -> void:
 	if not action.is_offerable(ctx):
 		_deny(_pending_cell)
 		return
+	# Affordability is re-checked separately: the wheel dims an unaffordable
+	# action, but that snapshot is taken when the menu opens, and the balance can
+	# move before the click lands.
+	if not action.is_enabled(ctx):
+		_deny(_pending_cell)
+		return
 	# Already standing next to the target -> act immediately (unchanged UX).
 	if action.is_available(ctx):
 		action.execute(ctx)
@@ -352,7 +370,10 @@ func _process(_delta: float) -> void:
 	var target := _pending_target
 	_pending_action = null  # clear first so unlock/close guards see no pending
 	var ctx := _build_context(target)
-	if action.is_available(ctx):
+	# is_enabled as well as is_available: the walk takes real time, and a costed
+	# action the player could afford when they clicked may be unaffordable by the
+	# time they arrive.
+	if action.is_available(ctx) and action.is_enabled(ctx):
 		action.execute(ctx)
 		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
 		# for plant/remove it clears the walk marker.

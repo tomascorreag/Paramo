@@ -26,6 +26,7 @@ const _WHEEL_PIVOT: Vector2 = Vector2(32, 32)
 @onready var _book: Control = %Book
 @onready var _dim: ColorRect = %Dim
 @onready var _season_wheel: TextureRect = %SeasonWheel
+@onready var _inventory: JournalInventory = %Inventory
 
 var _open: bool = false
 var _tween: Tween
@@ -46,6 +47,33 @@ func _ready() -> void:
 	_book.offset_top = h
 	_book.offset_bottom = h
 	_dim.modulate.a = 0.0
+	_bind_inventory()
+
+
+# The supplies list on the left page is driven by ResourceLedger. Primed once
+# from the current balance as well as connected, because the ledger is an
+# autoload that outlives scene loads — a journal instanced mid-run would
+# otherwise show whatever the .tscn was authored with until the next change.
+func _bind_inventory() -> void:
+	if _inventory == null:
+		return
+	ResourceLedger.resource_changed.connect(_on_resource_changed)
+	_inventory.set_amount(&"water", _display_amount(ResourceLedger.get_amount(&"water")))
+
+
+func _on_resource_changed(id: StringName, value: float, _delta: float) -> void:
+	if _inventory == null:
+		return
+	# Unknown ids (funding, community support later) are no-ops in set_amount
+	# until the scene authors a row for them, so no filtering is needed here.
+	_inventory.set_amount(id, _display_amount(value))
+
+
+# Floor, not round: the ledger is float and firefighting costs 1 water per cell,
+# so flooring keeps "the number on the page" equal to "cells I can still douse".
+# Rounding would promise a douse the player can't afford.
+func _display_amount(value: float) -> int:
+	return int(floorf(value))
 
 
 # The season wheel turns continuously with the season clock: a half-turn (180°)

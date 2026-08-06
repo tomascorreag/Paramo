@@ -64,6 +64,19 @@ func is_offerable(ctx: ActionContext) -> bool:
 	return false
 
 
+## "Can the player currently PAY for this action?" — deliberately separate from
+## `_applies`, which asks whether the action makes sense on this cell at all.
+## The split is what lets an unaffordable action be SHOWN DIMMED in the radial
+## menu instead of silently vanishing: a fire with no extinguish entry reads as a
+## bug, a greyed extinguish entry reads as "you are out of water".
+##
+## Default true — most actions are free. Override in actions with a resource
+## cost. Side-effect free; called both when the wheel is built and again on
+## selection, since a walk-then-act can span a change in the balance.
+func is_enabled(_ctx: ActionContext) -> bool:
+	return true
+
+
 ## Cells from which this action can be performed on `ctx.cell`: walkable cells
 ## satisfying the action's range rule. Scans the 3×3 block around the target
 ## (including the origin, so a future distance-0 action's `_range_ok` override

@@ -29,11 +29,18 @@ on its own.
 - **Fire is `FireManager` (autoload), not per-tile scenes.** Already implemented:
   ignition rolls, burn, 4-neighbour spread, grass→dirt burnout, rain coupling.
 - **Extinguishing costs water; the water bucket is gone.** `ActionExtinguishFire`
-  spends from `ResourceLedger`; the bucket state machine and fill action were
-  removed.
+  spends 1 water per burning cell doused, working outward from the clicked cell
+  so a partial douse spends where the player aimed; the bucket state machine and
+  fill action were removed.
 - **Single accountant.** All water flows through
   `ResourceLedger.add/try_spend(id, amount, source)`; the per-source tally feeds
   the loss-naming end screen later.
+- **Water accrues continuously, scaled by live rain** (`WaterCycle`), not at
+  season boundaries. Deliberate relaxation of the ledger's season-quantized
+  stance: the player cannot steer the weather, so there is nothing to
+  per-second-optimize, and the reserve visibly filling during rain IS the
+  mechanic. Player-steerable sources (frailejon yield, laguna seep) stay
+  season-quantized.
 - **No score.** The end screen names what was lost; it does not aggregate a
   score (GDD rhetoric).
 
@@ -48,9 +55,27 @@ on its own.
 - [x] `RunController` — starts the run after world generation
       (`ProceduralWorld.generation_finished`), debug readout, dev keys
       (F fast-forward, M end-season, N next-season).
-- [x] Starting water pool seeded at run start (`SeasonManager.starting_water`).
-- [x] Extinguish-costs-water; bucket logic removed.
+- [x] Starting water pool seeded at run start (`SeasonManager.starting_water`,
+      now 10.0 — was 100.0, which no run could ever spend).
+- [x] Bucket logic removed. NOTE: this line previously also claimed
+      extinguish-costs-water, which was never true — the bucket was deleted but
+      the spend was never added, and `ActionExtinguishFire` documented itself as
+      "a free, unlimited player verb" until the water pass below.
 - [x] Season wheel in the HUD, rotating continuously with the season clock. + tests.
+
+### Water pass
+
+- [x] `WaterCycle` node (`gameplay_base.tscn`) — continuous accrual into the
+      ledger, `base_per_game_day` always plus `rain_per_game_day_at_full` scaled
+      by live rain intensity polled off `DayNightSceneController`. Banked on a
+      0.5 s beat under `&"fog_capture"` / `&"rainfall"` so the breakdown survives
+      for the end screen. + tests.
+- [x] `ActionExtinguishFire` spends 1 water per cell doused, partial douses
+      allowed, nearest-first. + tests.
+- [x] `TileAction.is_enabled` + dimmed `RadialMenuItem` — an unaffordable action
+      is shown greyed and swallows its click rather than disappearing.
+- [x] Journal supplies list reads the live water balance
+      (`FieldJournal` → `ResourceLedger.resource_changed` → `JournalInventory`).
 
 ---
 

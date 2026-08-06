@@ -2,23 +2,36 @@ class_name ActionExtinguishFire
 extends TileAction
 
 # Put out fire in a 3×3 block centred on the clicked cell — the target tile and
-# all 8 neighbours. Always available (no resource cost, no inventory gate):
-# firefighting is a free, unlimited player verb. Offered whenever ANY of the 9
-# cells is on fire, and extinguishes every burning cell in that block at once.
+# all 8 neighbours. Offered whenever ANY of the 9 cells is on fire.
+#
+# Costs WATER_PER_CELL from the ledger for each cell actually doused, so a wide
+# wildfire is genuinely expensive and the reserve is what makes fire a threat
+# rather than a chore. Deliberately NOT all-or-nothing: a partial douse spends
+# what it can, working outward from the cell the player clicked, so the click
+# always does something and the water is spent where they aimed.
+#
+# Two gates, and the split matters:
+#   _applies    — "is anything here on fire?"   (drives whether the action shows)
+#   is_enabled  — "can I afford even one cell?" (drives whether it shows DIMMED)
+# Collapsing them would make the action vanish when broke, which reads as a bug
+# rather than as "you are out of water".
 #
 # A burning cell is grass→dirt-swapped (walkable), so the standard interaction
 # gate reaches the clicked tile with no special-casing.
 #
-# FireManager is an autoload (referenced by its global name); extinguish() is a
-# no-op on a cell that isn't burning, so execute() can blanket the whole 3×3
-# without pre-checking each cell.
-#
-# Uses the bucket glyph as a stand-in "water" icon; a dedicated extinguish glyph
-# can replace it later.
+# FireManager and ResourceLedger are autoloads (referenced by their global
+# names); FireManager.extinguish() is a no-op on a cell that isn't burning.
 
 ## Chebyshev radius of the extinguish footprint. 1 = the clicked cell + its 8
 ## neighbours (3×3). Bump to widen the splash.
 const RADIUS: int = 1
+
+## Water spent per burning cell doused. Priced per cell rather than per click so
+## the cost tracks the size of the fire, not the number of right-clicks.
+const WATER_PER_CELL: float = 1.0
+
+const WATER: StringName = &"water"
+const SPEND_SOURCE: StringName = &"extinguish_fire"
 
 
 func _init() -> void:
@@ -36,10 +49,37 @@ func _applies(ctx: ActionContext) -> bool:
 	return false
 
 
+## Dimmed in the radial menu below the price of a single cell. Not below the
+## price of the WHOLE footprint: partial douses are allowed, so one cell's worth
+## of water is a usable action.
+func is_enabled(_ctx: ActionContext) -> bool:
+	return ResourceLedger.has(WATER, WATER_PER_CELL)
+
+
 func execute(ctx: ActionContext) -> void:
-	# extinguish() no-ops on non-burning cells, so blanket the whole block.
-	for cell in _footprint(ctx.cell):
+	# try_spend is atomic — it returns false without mutating when short — so the
+	# loop needs no separate affordability check and can never half-charge for a
+	# cell it failed to douse.
+	for cell in _burning_cells_by_proximity(ctx.cell):
+		if not ResourceLedger.try_spend(WATER, WATER_PER_CELL, SPEND_SOURCE):
+			break
 		FireManager.extinguish(cell)
+
+
+## The burning cells of the footprint, nearest the clicked cell first (Chebyshev
+## ring order, stable within a ring). This ordering is what makes a partial douse
+## feel aimed rather than arbitrary: run out of water and the fires left standing
+## are the ones furthest from where you clicked.
+func _burning_cells_by_proximity(center: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for ring in range(RADIUS + 1):
+		for cell in _footprint(center):
+			var d: Vector2i = cell - center
+			if maxi(absi(d.x), absi(d.y)) != ring:
+				continue
+			if FireManager.is_burning(cell):
+				out.append(cell)
+	return out
 
 
 ## The clicked cell plus every cell within RADIUS (Chebyshev). RADIUS 1 → the 3×3
