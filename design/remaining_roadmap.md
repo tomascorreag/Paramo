@@ -119,6 +119,16 @@ on its own.
       input forwarding), locked swatches fade via the ink shader's new `dim`
       uniform with the cost printed beside them. Journal money row renamed to
       the live `tokens`. + tests.
+- [x] **Headless Monte Carlo balance simulator** (`scripts/tools/sim/`) —
+      deterministic full runs of the real stack (paint-parity world, real
+      FireManager/weather/economy via extracted `advance`/`tick`/`sim_tick`,
+      `WeatherModel` shared by game + sim, per-subsystem seeded RNG) with a
+      scripted player bot (douse/unlock/place, configurable noise), CSV out
+      for pandas, scenario table. + determinism/step-duration/weather tests.
+      First finding, before any tuning: at current fire rates an unfought dry
+      day chars ~40% of the map, appeal hits 0 in every run, and even an
+      optimal bot barely moves the outcome — fire needs a large nerf before
+      the token economy can breathe.
 
 ---
 

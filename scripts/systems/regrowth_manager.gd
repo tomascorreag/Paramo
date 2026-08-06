@@ -41,6 +41,10 @@ var _rain_elapsed: float = 0.0
 var _day_night: Node = null
 var _world_hooked: bool = false
 
+# Recovery's own RNG stream (per-cell daily rolls). Randomly seeded for the
+# game; the balance simulator seeds it per run for determinism.
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 
 func _ready() -> void:
 	add_to_group(GROUP)
@@ -80,6 +84,12 @@ func rain_intensity() -> float:
 
 
 func _process(delta: float) -> void:
+	tick(delta)
+
+
+## The frame body, public so the headless simulator can drive fixed-dt steps
+## with _process disabled. Identical logic either way.
+func tick(delta: float) -> void:
 	_hook_world_once()
 	if SeasonManager.phase != SeasonManager.Phase.ACTIVE:
 		return
@@ -123,7 +133,7 @@ func _on_day_completed(_day_count: int) -> void:
 		# impossible today — cheap insurance against a future char-burns rule).
 		if FireManager.is_burning(cell):
 			continue
-		if randf() < p:
+		if rng.randf() < p:
 			layer.set_cell(cell, SOURCE_GRASS, rec["coord"] as Vector2i, 0)
 			_charred.erase(cell)
 

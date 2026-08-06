@@ -700,6 +700,31 @@ func classify_step(from: Vector2i, to: Vector2i) -> int:
 	return StepKind.FLAT
 
 
+## How long one step of `kind` takes, in REAL seconds (movement is real-time —
+## deliberately unscaled by TimeManager.time_scale). Extracted from the player's
+## step machinery so the balance simulator's bot pays exactly the player's
+## travel times; Player._begin_next_step calls this with its own exports.
+## `alt_delta` is |altitude_center(to) - altitude_center(from)| in half-steps.
+static func step_duration_for(kind: int, alt_delta: float, base: float,
+		climb_mult: float, scramble_mult: float) -> float:
+	match kind:
+		StepKind.LADDER:
+			# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
+			# validated to integer-cube heights; clamp to >=1 so a degenerate
+			# 0-delta edge still takes one climb step's worth of time.
+			return base * climb_mult * maxf(alt_delta / 2.0, 1.0)
+		StepKind.SCRAMBLE:
+			# No-ladder ledge climb: scales with height, no clamp — a half-step
+			# ledge → 2× a step, a full cube → 4×. Double the cost of the same
+			# height on a ladder.
+			return base * scramble_mult * (alt_delta / 2.0)
+		StepKind.RAMP_SIDE:
+			# Onto/off a ramp from the side: flat 2× (same as a 1-cube ladder).
+			return base * climb_mult
+		_:
+			return base
+
+
 # ----------------------------------------------------------------------------
 # Traversal edges (ladders, future: teleporters, etc.)
 # ----------------------------------------------------------------------------

@@ -56,11 +56,18 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	advance(delta)
+
+
+## The frame body, public so the headless simulator can drive fixed-dt steps
+## with _process disabled. Emits day_completed / time_changed / period_changed
+## synchronously, exactly like a frame.
+func advance(delta: float) -> void:
 	if paused or seconds_per_game_day <= 0.0:
 		return
 
-	var advance: float = delta * time_scale / seconds_per_game_day
-	time_of_day += advance
+	var step: float = delta * time_scale / seconds_per_game_day
+	time_of_day += step
 
 	if time_of_day >= 1.0:
 		time_of_day -= 1.0

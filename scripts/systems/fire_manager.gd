@@ -112,6 +112,25 @@ var _climate: Node = null # ClimateController, for the dryness ignition multipli
 # this fire's own random ceiling (some fires stay small). See FireDynamics.
 var _burning: Dictionary = {}
 
+# Fire's own RNG stream. Every gameplay roll (ignition sample/roll, spread,
+# rain extinguish, per-fire intensity ceiling, dirt-variant pick) draws from
+# here, never from the global stream — so VFX (which stays on the global
+# stream) can't perturb outcomes, and the balance simulator can seed this
+# per run for determinism. Randomly seeded on construction, so the live game
+# is distributionally unchanged.
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
+# The simulator runs fire without a scene: no BurningCellVFX node per
+# ignition. Entries then carry "vfx": null, which every consumer already
+# guards with is_instance_valid. The game leaves this true.
+var spawn_vfx: bool = true
+
+# Lifetime tallies for the balance simulator (polling the burning set can't
+# see an ignition and its burnout landing in the same tick). Monotonic;
+# readers snapshot and diff. The game never resets or reads them.
+var stats_ignitions: int = 0
+var stats_rain_extinguished: int = 0
+
 var _water_dist_cache: Dictionary[Vector2i, int] = {}
 
 # tile_set -> { tile_kind: Array[Vector2i] }. For each kind painted on the
@@ -286,10 +305,16 @@ func _prune_stale_burns() -> void:
 # --- Per-frame loop --------------------------------------------------------
 
 func _process(delta: float) -> void:
+	sim_tick(delta, _rain_intensity())
+
+
+## One fire step at an explicit rain intensity. The frame path above and the
+## headless balance simulator both run exactly this — the simulator calls it
+## directly with a fixed dt and its own rain value.
+func sim_tick(delta: float, rain: float) -> void:
 	if _grid == null:
 		return
 
-	var rain: float = _rain_intensity()
 	_advance_burns(delta, rain)
 
 	_ignition_accum += delta
@@ -317,7 +342,7 @@ func _advance_burns(delta: float, rain: float) -> void:
 	for cell: Vector2i in cells:
 		var entry: Dictionary = _burning[cell]
 
-		if extinguish_p > 0.0 and randf() < extinguish_p:
+		if extinguish_p > 0.0 and rng.randf() < extinguish_p:
 			extinguished.append(cell)
 			continue
 
@@ -350,6 +375,7 @@ func _advance_burns(delta: float, rain: float) -> void:
 		if fuel <= 0.0:
 			completed.append(cell)
 
+	stats_rain_extinguished += extinguished.size()
 	for cell: Vector2i in extinguished:
 		_extinguish(cell)
 	for cell: Vector2i in completed:
@@ -375,7 +401,7 @@ func _roll_spread(from_cell: Vector2i, intensity: float, delta: float, rain_mult
 			continue
 		if not _same_flat_level(from_cd, nb):
 			continue
-		if randf() < p_per_neighbour:
+		if rng.randf() < p_per_neighbour:
 			_ignite(nb)
 
 
@@ -393,8 +419,8 @@ func _roll_ignitions() -> void:
 		return
 	for i in K_IGNITION_SAMPLES:
 		var c := Vector2i(
-			b.position.x + randi() % b.size.x,
-			b.position.y + randi() % b.size.y,
+			b.position.x + rng.randi() % b.size.x,
+			b.position.y + rng.randi() % b.size.y,
 		)
 		if _burning.has(c):
 			continue
@@ -405,7 +431,7 @@ func _roll_ignitions() -> void:
 		var water_mult: float = _water_falloff(c)
 		var p: float = BASE_IGNITION_RATE_PER_SAMPLE * day_mult * alt_mult \
 				* water_mult * _climate_ignition_multiplier()
-		if randf() < p:
+		if rng.randf() < p:
 			_ignite(c)
 			if _burning.size() >= MAX_CONCURRENT_BURNING:
 				return
@@ -440,12 +466,16 @@ func _ignite(cell: Vector2i) -> void:
 	if dirt_coord.x >= 0:
 		layer.set_cell(cell, SOURCE_DIRT, dirt_coord, 0)
 
-	var vfx := BurningCellVFX.new()
-	vfx.setup(cell, layer, grass_src, atlas_coords)
-	# Parent under the source TileMapLayer so the layer's altitude lift +
-	# y_sort_origin place us in the same frame as the burning tile. Flames then
-	# y-sort correctly against tiles on every other layer.
-	layer.add_child(vfx)
+	# Headless simulation runs without the overlay node; every consumer of
+	# entry["vfx"] already null/validity-guards.
+	var vfx: BurningCellVFX = null
+	if spawn_vfx:
+		vfx = BurningCellVFX.new()
+		vfx.setup(cell, layer, grass_src, atlas_coords)
+		# Parent under the source TileMapLayer so the layer's altitude lift +
+		# y_sort_origin place us in the same frame as the burning tile. Flames
+		# then y-sort correctly against tiles on every other layer.
+		layer.add_child(vfx)
 
 	var occ: Node2D = cd.occupant
 	var frailejon: Node = null
@@ -454,6 +484,7 @@ func _ignite(cell: Vector2i) -> void:
 		frailejon = occ
 
 	var fuel: float = _fuel_for_cell(cell, cd)
+	stats_ignitions += 1
 	_burning[cell] = {
 		"vfx": vfx,
 		"age": 0.0,
@@ -461,7 +492,7 @@ func _ignite(cell: Vector2i) -> void:
 		"fuel_max": fuel,
 		# This fire's own intensity ceiling, rolled uniformly — some fires stay
 		# small, some grow to full. See FireDynamics.intensity.
-		"max_intensity": randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
+		"max_intensity": rng.randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
 		"frailejon": frailejon,
 		# Cached for the extinguish-restore path: re-paint these on the source
 		# layer to undo the ignition-time grass→dirt swap.
@@ -621,7 +652,7 @@ func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
 	var coords: Array = by_kind.get(kind, [])
 	if coords.is_empty():
 		return Vector2i(-1, -1)
-	return coords[randi() % coords.size()]
+	return coords[rng.randi() % coords.size()]
 
 
 # Returns { tile_kind: Array[Vector2i] } over the dirt source: every painted

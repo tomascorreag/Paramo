@@ -329,26 +329,11 @@ func _begin_next_step() -> void:
 	_step_is_climb = (kind == TileGrid.StepKind.LADDER)
 	_step_climb_turned = false
 	var alt_delta: float = absf(_step_to_alt - _step_from_alt)
-	match kind:
-		TileGrid.StepKind.LADDER:
-			# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
-			# validated to integer-cube heights, so this divides evenly; floats
-			# are used only to tolerate any future sub-cube edges without
-			# collapsing to zero. Clamp to >=1 so a degenerate 0-delta edge
-			# still takes one climb step's worth of time.
-			var cubes: float = maxf(alt_delta / 2.0, 1.0)
-			_step_duration_effective = step_duration * climb_duration_multiplier * cubes
-		TileGrid.StepKind.SCRAMBLE:
-			# No-ladder ledge climb: scales with height, no clamp, so a half-step
-			# ledge → 0.5 cube → 2× a step and a full cube → 4×. Double the cost
-			# of climbing the same height on a ladder.
-			_step_duration_effective = step_duration * scramble_duration_multiplier * (alt_delta / 2.0)
-		TileGrid.StepKind.RAMP_SIDE:
-			# Stepping onto/off a ramp from the side: flat 2× (same as a 1-cube
-			# ladder), regardless of the sub-step change to the ramp center.
-			_step_duration_effective = step_duration * climb_duration_multiplier
-		_:
-			_step_duration_effective = step_duration
+	# Duration table lives on TileGrid (step_duration_for) so the balance
+	# simulator's bot pays exactly these times without duplicating the rules.
+	_step_duration_effective = TileGrid.step_duration_for(
+			kind, alt_delta, step_duration,
+			climb_duration_multiplier, scramble_duration_multiplier)
 
 	# Footstep SFX. Keyed on the DESTINATION cell — the surface being stepped
 	# onto. FootstepAudio runs its own free-running footfall clock (a pace is

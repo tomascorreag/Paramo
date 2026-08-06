@@ -66,3 +66,6 @@ TILE_SYSTEM_REWRITE.md
 *.key
 secrets.*
 credentials.*
+
+# Balance-simulator CSV output (scripts/tools/sim/balance_sim.gd --out)
+sim_out/

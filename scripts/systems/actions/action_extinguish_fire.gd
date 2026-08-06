@@ -72,18 +72,28 @@ func execute(ctx: ActionContext) -> void:
 ## are the ones furthest from where you clicked.
 func _burning_cells_by_proximity(center: Vector2i) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for ring in range(RADIUS + 1):
-		for cell in _footprint(center):
-			var d: Vector2i = cell - center
-			if maxi(absi(d.x), absi(d.y)) != ring:
-				continue
-			if FireManager.is_burning(cell):
-				out.append(cell)
+	for cell in footprint_by_ring(center, RADIUS):
+		if FireManager.is_burning(cell):
+			out.append(cell)
+	return out
+
+
+## Every cell within `radius` (Chebyshev) of `center`, ordered ring 0 outward,
+## stable within a ring. Static + side-effect free so the balance simulator's
+## bot douses in exactly the order this action does.
+static func footprint_by_ring(center: Vector2i, radius: int = RADIUS) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for ring in range(radius + 1):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if maxi(absi(dx), absi(dy)) == ring:
+					out.append(center + Vector2i(dx, dy))
 	return out
 
 
 ## The clicked cell plus every cell within RADIUS (Chebyshev). RADIUS 1 → the 3×3
-## block. Side-effect free.
+## block. Side-effect free. (Unordered variant of footprint_by_ring, kept for
+## _applies where order is irrelevant.)
 func _footprint(center: Vector2i) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	for dy in range(-RADIUS, RADIUS + 1):

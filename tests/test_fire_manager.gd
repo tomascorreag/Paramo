@@ -149,3 +149,39 @@ func test_wipe_clears_every_fire() -> void:
 	_manager._wipe_all_fires()
 
 	assert_eq(_manager._burning.size(), 0, "a wipe must leave no burning cells")
+
+
+func test_seeded_rng_makes_rain_extinguish_deterministic() -> void:
+	# The balance simulator's contract: fire draws only from its own injected
+	# rng, so a seeded manager replays identically. Drive the rain-extinguish
+	# roll (the one stochastic path runnable on stubs — ignition/spread need a
+	# painted tileset) over two identically-seeded managers and require the
+	# same survivor set.
+	var survivors: Array = []
+	for pass_i in 2:
+		var mgr: Node = load(MANAGER_SCRIPT).new()
+		add_child_autofree(mgr)
+		mgr.rng.seed = 424242
+		var grid := GridStub.new()
+		for i in 12:
+			var cell := Vector2i(i, 0)
+			var tile := TileStub.new()
+			tile.layer = _layer
+			grid.cells[cell] = tile
+			mgr._grid = grid
+			mgr._burning[cell] = {
+				"vfx": null, "age": 1.0, "fuel": 5.0, "fuel_max": 5.0,
+				"max_intensity": 1.0, "frailejon": null,
+				"grass_coord": Vector2i(0, 0), "grass_layer": _layer,
+			}
+		# Heavy rain, several steps: extinguish_p > 0 every step.
+		for _step in 8:
+			mgr._advance_burns(0.2, 1.0)
+		var keys: Array = mgr._burning.keys()
+		keys.sort()
+		survivors.append(keys)
+
+	assert_true(survivors[1].size() < 12,
+			"heavy rain over 8 steps should extinguish something (p ~ 0.72 total)")
+	assert_eq(survivors[0], survivors[1],
+			"same seed must reproduce the same extinguish outcomes")

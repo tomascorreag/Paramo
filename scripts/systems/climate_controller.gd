@@ -90,6 +90,12 @@ func rain_intensity() -> float:
 
 
 func _process(delta: float) -> void:
+	tick(delta)
+
+
+## The frame body, public so the headless simulator can drive fixed-dt steps
+## with _process disabled. Identical logic either way.
+func tick(delta: float) -> void:
 	if SeasonManager.phase != SeasonManager.Phase.ACTIVE:
 		return
 	if TimeManager.paused or TimeManager.seconds_per_game_day <= 0.0:

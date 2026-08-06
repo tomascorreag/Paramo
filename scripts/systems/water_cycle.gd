@@ -82,6 +82,12 @@ func rain_intensity() -> float:
 
 
 func _process(delta: float) -> void:
+	tick(delta)
+
+
+## The frame body, public so the headless simulator can drive fixed-dt steps
+## with _process disabled. Identical logic either way.
+func tick(delta: float) -> void:
 	# The run spine gates accrual, not visibility: this node lives in the
 	# gameplay scene, which is also up behind the title screen and during the
 	# planning phase. Neither should fill the reserve.
