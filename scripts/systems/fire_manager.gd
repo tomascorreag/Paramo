@@ -202,6 +202,41 @@ func extinguish(cell: Vector2i) -> bool:
 	return true
 
 
+# --- Headless-driver surface (balance sim, tests) --------------------------
+# The scene path attaches lazily via groups + call_deferred; a headless run
+# happens inside ONE frame, so deferred work would land after the run ended.
+# These are the only supported entry points for driving fire without a scene
+# — reach-ins to _burning/_pathfinder/etc. couple callers to internals.
+
+## Attach to `pf`'s world and start from a clean slate, synchronously.
+func reset_to_world(pf: Node) -> void:
+	_wipe_all_fires()
+	if _pathfinder != pf:
+		_attach_to_pathfinder(pf)
+	_refresh_grid_and_vfx()
+	_ignition_accum = 0.0
+
+
+## Detach from the current world entirely (test teardown — the world node is
+## about to be freed and _process must not touch its stale layers).
+func detach_world() -> void:
+	_wipe_all_fires()
+	_pathfinder = null
+	_grid = null
+
+
+## Number of currently burning cells.
+func burning_count() -> int:
+	return _burning.size()
+
+
+## Read-only view of the burning set (cell -> entry). Returned BY REFERENCE
+## on purpose: the sim's bot polls this every decision and must not pay a
+## copy. Callers must not mutate it or hold it across a tick.
+func burning_view() -> Dictionary:
+	return _burning
+
+
 func _on_node_added(n: Node) -> void:
 	if _pathfinder != null and is_instance_valid(_pathfinder):
 		return
@@ -305,6 +340,15 @@ func _prune_stale_burns() -> void:
 # --- Per-frame loop --------------------------------------------------------
 
 func _process(delta: float) -> void:
+	# Same gates sim_tick applies, checked BEFORE _rain_intensity(): the rain
+	# lookup is a validity check + dynamic call, and paying it every frame on
+	# the title screen / pause / planning (where sim_tick would discard it) is
+	# the only game-side cost the sim extraction added. Duplicating two cheap
+	# branches removes it.
+	if _grid == null:
+		return
+	if _time_manager != null and bool(_time_manager.get(&"paused")):
+		return
 	sim_tick(delta, _rain_intensity())
 
 

@@ -21,7 +21,12 @@ extends Node
 ## re-planning when a nearer fire ignites or the target burns out, no
 ## cancel); remove verbs are never used; planning takes zero real time (fire
 ## now freezes with the paused clock, so this costs nothing); bridge
-## placement is not modeled (unlock purchase only).
+## placement is not modeled (unlock purchase only); the stand cell beside a
+## fire is picked by Manhattan distance then ONE A* (the game's action layer
+## A*s every reachable stand and takes the shortest actual path, so around
+## cliffs/water the bot over-pays travel time); the game's boot-time rain
+## roll has no analogue here — correct, since the title intro resets weather
+## dry before gameplay, which is the state the sim starts from.
 ##
 ## CSV columns (run row, in RUN_COLUMNS order):
 ##   scenario          scenario name
@@ -43,7 +48,9 @@ extends Node
 ##   grass_frac_end    grass cells / initial grass cells at end
 ##   grass_frac_min    minimum of that fraction over the run (sampled per tick)
 ##   appeal_min        minimum visitor-appeal factor (day-boundary samples)
-##   rain_frac         fraction of ticks with rain intensity > 0.1
+##   rain_frac         fraction of ticks with rain intensity > 0.1. Sampled
+##                     POST-tick; fire consumes the PRE-tick value (frame
+##                     order) — a one-tick skew, negligible at DT 0.25.
 ##   dryness_mean      mean dryness (per-tick average)
 ##   unlock_day_bridge/_ladder/_frailejon  day the bot bought it (-1 = never)
 ##   bot_douses        cells the bot doused (player-verb extinguishes)
@@ -53,8 +60,7 @@ extends Node
 ## season_index, tokens, water, avg_rain, dryness, charred, grass_frac,
 ## appeal, fires_active, ignitions, burned_out.
 
-const DT: float = 0.25          # real seconds per tick == fire's ignition tick
-const TICKS_PER_DAY: int = 960  # 240 s/game-day at time_scale 1 / DT
+const DT: float = 0.25  # real seconds per tick == fire's ignition tick
 
 # Independent derived streams per subsystem (xor pattern from
 # verify_terrain_invariants.gd; OBJECT xor lives in SimWorld).
@@ -151,26 +157,35 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 				autoload_restore.append([target, prop, target.get(prop)])
 			target.set(prop, balance[target_name][prop])
 
-	var host: Node = systems["SimWeatherHost"]
-	var climate: Node = systems["ClimateController"]
-	var regrowth: Node = systems["RegrowthManager"]
+	# Typed references for the per-tick loop below: ~8 dynamic call()/get()
+	# lookups per tick x ~23k ticks/run is real dispatch cost, and this script
+	# is load()ed at runtime so compile-time class names are legal here.
+	var host: SimWeatherHost = systems["SimWeatherHost"]
+	var water: WaterCycle = systems["WaterCycle"]
+	var climate: ClimateController = systems["ClimateController"]
+	var regrowth: RegrowthManager = systems["RegrowthManager"]
+	var visitors: VisitorFlow = systems["VisitorFlow"]
+	var unlocks: UnlockState = systems["UnlockState"]
 
 	# --- seeding + fire wiring ----------------------------------------------
-	(host.get(&"rng") as RandomNumberGenerator).seed = run_seed ^ SEED_XOR_WEATHER
-	(FireManager.get(&"rng") as RandomNumberGenerator).seed = run_seed ^ SEED_XOR_FIRE
-	(regrowth.get(&"rng") as RandomNumberGenerator).seed = run_seed ^ SEED_XOR_REGROWTH
+	host.rng.seed = run_seed ^ SEED_XOR_WEATHER
+	FireManager.rng.seed = run_seed ^ SEED_XOR_FIRE
+	regrowth.rng.seed = run_seed ^ SEED_XOR_REGROWTH
 	FireManager.spawn_vfx = false
+	# Frozen autoload _process for the run's duration — restored in cleanup so
+	# a GUT suite (which shares the autoloads with every other test) doesn't
+	# inherit a dead clock.
+	var proc_restore: Array = [
+		[FireManager, FireManager.is_processing()],
+		[TimeManager, TimeManager.is_processing()],
+	]
 	FireManager.set_process(false)
 	TimeManager.set_process(false)
 	# A fresh run on the same Pathfinder: wipe fire state explicitly (a mere
 	# rebuild deliberately does NOT), and resolve the new grid synchronously —
 	# the whole run happens inside one frame, so deferred refreshes would
 	# flush only after it ended.
-	FireManager._wipe_all_fires()
-	if FireManager._pathfinder != world.pathfinder:
-		FireManager._attach_to_pathfinder(world.pathfinder)
-	FireManager._refresh_grid_and_vfx()
-	FireManager._ignition_accum = 0.0
+	FireManager.reset_to_world(world.pathfinder)
 	var base_ignitions: int = FireManager.stats_ignitions
 	var base_rain_ext: int = FireManager.stats_rain_extinguished
 
@@ -194,6 +209,11 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		bot.fire_manager = FireManager
 		bot.ledger = ResourceLedger
 		bot.cell = world.spawn_cell
+		if bot.cell.x < 0:
+			# _find_starting_cell can legitimately fail; an inert bot would
+			# silently read as a no-bot baseline in the CSV.
+			push_warning("SimRunner: seed %d has no spawn cell — bot is inert"
+					% run_seed)
 
 	# --- the run -------------------------------------------------------------
 	SeasonManager.start_run()
@@ -213,14 +233,19 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	var day_ignitions_prev: int = base_ignitions
 	var day_burned_prev: int = 0
 
-	var max_ticks: int = (SeasonManager.days_per_year + 2) * TICKS_PER_DAY
+	# Derived, not a constant: TimeManager is a legal balance-override target,
+	# so a scenario retuning seconds_per_game_day or time_scale must move the
+	# tick cap with it or the cap silently lies.
+	var ticks_per_day: int = maxi(1, int(round(TimeManager.seconds_per_game_day
+			/ (DT * maxf(TimeManager.time_scale, 0.0001)))))
+	var max_ticks: int = (SeasonManager.days_per_year + 2) * ticks_per_day
 	while SeasonManager.phase != SeasonManager.Phase.RUN_OVER \
 			and ticks_total < max_ticks:
 		if SeasonManager.phase == SeasonManager.Phase.PLANNING:
 			# Clock is paused, like the game. The bot shops, then the run taps
 			# "next season".
 			if bot != null:
-				bot.on_planning(systems["UnlockState"], TimeManager.day_count)
+				bot.on_planning(unlocks, TimeManager.day_count)
 			SeasonManager.begin_next_season()
 			continue
 
@@ -229,13 +254,13 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		# the game FireManager runs BEFORE the weather controller evolves —
 		# fire reads the PREVIOUS frame's rain. Read the host before ticking
 		# it to reproduce that exactly.
-		FireManager.sim_tick(DT, float(host.call(&"get_rain_current_intensity")))
-		host.call(&"tick", DT)
-		systems["WaterCycle"].call(&"tick", DT)
-		climate.call(&"tick", DT)
-		regrowth.call(&"tick", DT)
-		systems["VisitorFlow"].call(&"tick", DT)
-		var rain: float = float(host.call(&"get_rain_current_intensity"))
+		FireManager.sim_tick(DT, host.get_rain_current_intensity())
+		host.tick(DT)
+		water.tick(DT)
+		climate.tick(DT)
+		regrowth.tick(DT)
+		visitors.tick(DT)
+		var rain: float = host.get_rain_current_intensity()
 		if bot != null:
 			bot.tick(ticks_total * DT)
 
@@ -244,10 +269,10 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		day_rain_sum += rain
 		if rain > 0.1:
 			rain_ticks += 1
-		dryness_sum += float(climate.get(&"dryness"))
-		var burning: int = FireManager._burning.size()
+		dryness_sum += climate.dryness
+		var burning: int = FireManager.burning_count()
 		peak_fires = maxi(peak_fires, burning)
-		var charred: int = int(regrowth.call(&"charred_count"))
+		var charred: int = regrowth.charred_count()
 		var grass_frac: float = _grass_fraction(initial_grass, burning, charred)
 		grass_frac_min = minf(grass_frac_min, grass_frac)
 
@@ -259,7 +284,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 			# (frailejon._exit_tree clears the grid claim on free).
 			_flush_dead_objects()
 			charred_cell_days += charred
-			var appeal: float = float(regrowth.call(&"get_appeal_factor"))
+			var appeal: float = regrowth.get_appeal_factor()
 			appeal_min = minf(appeal_min, appeal)
 			if collect_days:
 				days.append({
@@ -270,7 +295,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 					"tokens": ResourceLedger.get_amount(&"tokens"),
 					"water": ResourceLedger.get_amount(&"water"),
 					"avg_rain": day_rain_sum / maxf(day_ticks, 1.0),
-					"dryness": float(climate.get(&"dryness")),
+					"dryness": climate.dryness,
 					"charred": charred,
 					"grass_frac": grass_frac,
 					"appeal": appeal,
@@ -284,8 +309,8 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 			day_burned_prev = _burned_out_count
 
 	# --- run row -------------------------------------------------------------
-	var charred_end: int = int(regrowth.call(&"charred_count"))
-	var burning_end: int = FireManager._burning.size()
+	var charred_end: int = regrowth.charred_count()
+	var burning_end: int = FireManager.burning_count()
 	var run_row: Dictionary = {
 		"scenario": scenario_name,
 		"run_seed": run_seed,
@@ -325,7 +350,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 
 	# --- cleanup -------------------------------------------------------------
 	FireManager.tile_burned.disconnect(_on_tile_burned)
-	FireManager._wipe_all_fires()
+	FireManager.detach_world()
 	# Bot-planted frailejones aren't in the procedural_object group (player
 	# plants never are), so the next regenerate's sweep won't free them —
 	# clear them here, along with anything still queued for deletion.
@@ -336,6 +361,9 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	if SeasonManager.phase != SeasonManager.Phase.RUN_OVER:
 		push_warning("SimRunner: run hit the tick cap before RUN_OVER")
 		SeasonManager.end_run(&"sim_tick_cap")
+	FireManager.spawn_vfx = true
+	for entry in proc_restore:
+		(entry[0] as Node).set_process(entry[1])
 	for restore in autoload_restore:
 		(restore[0] as Node).set(restore[1], restore[2])
 	for def in _SYSTEM_DEFS:

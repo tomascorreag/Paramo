@@ -48,9 +48,7 @@ func after_each() -> void:
 	# The runner leaves the autoloads at RUN_OVER; put everything back so the
 	# rest of the suite sees the state it expects, and detach FireManager from
 	# the about-to-be-freed sim world so its _process can't touch stale layers.
-	FireManager._wipe_all_fires()
-	FireManager._pathfinder = null
-	FireManager._grid = null
+	FireManager.detach_world()
 	FireManager.spawn_vfx = true
 	SeasonManager.phase = _saved_phase
 	SeasonManager.season_index = _saved_season_index
@@ -74,6 +72,25 @@ func test_same_seed_same_scenario_identical_run_rows() -> void:
 			"same (seed, scenario) must produce a byte-identical run row")
 	assert_eq(a["days"], b["days"], "and identical per-day rows")
 	assert_eq(int(a["run"]["days"]), 4, "the 4-day fixture ran to completion")
+
+
+func test_run_outcome_is_independent_of_position_in_process() -> void:
+	# The stronger property back-to-back reruns can't check: a seed's outcome
+	# must not depend on WHAT RAN BEFORE it on the shared autoloads/world.
+	# Caught in the wild twice — TimeManager._current_period surviving
+	# start_run (an extra weather roll for the first run only) and last run's
+	# rocks re-claiming cells on the next run's fresh grid. Both made
+	# --seed0-sharded sweeps disagree with single-process sweeps.
+	var scenario: Dictionary = {
+		"name": "determinism_fixture",
+		"balance": {"SeasonManager": {"days_per_year": 4}},
+	}
+	var a: Dictionary = _runner.run_one(7777, scenario, false)
+	_runner.run_one(1, scenario, false)
+	_runner.run_one(2, scenario, false)
+	var b: Dictionary = _runner.run_one(7777, scenario, false)
+	assert_eq(a["run"], b["run"],
+			"seed 7777 must produce the same row regardless of prior runs")
 
 
 func test_different_seeds_diverge() -> void:

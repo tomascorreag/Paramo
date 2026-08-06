@@ -49,6 +49,11 @@ const SCENARIOS: Dictionary = {
 
 
 static func get_scenario(scenario_name: String) -> Dictionary:
+	if not SCENARIOS.has(scenario_name):
+		# Still returns a usable defaults-shaped spec, but never silently: a
+		# typo'd --scenario would otherwise run "defaults" labeled by the typo.
+		push_error("SimScenarios: unknown scenario '%s'. Known: %s"
+				% [scenario_name, SCENARIOS.keys()])
 	var spec: Dictionary = SCENARIOS.get(scenario_name, {}).duplicate(true)
 	spec["name"] = scenario_name
 	return spec

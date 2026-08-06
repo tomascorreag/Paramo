@@ -22,9 +22,6 @@ const TILE_SET_PATH: String = "res://resources/tiles/base_tileset.tres"
 # cliff skirt at -2..-8 paint-only (absent from pathfinder wiring).
 const GROUND_TOP_ALTITUDE: int = 32
 const CLIFF_ALTITUDES: Array[int] = [-2, -4, -6, -8]
-# Existing derived-seed constant from verify_terrain_invariants.gd — kept
-# identical so object layouts match that harness at the same seed.
-const OBJECT_SEED_XOR: int = 0xC8FAB0CC
 
 var ground_layers: Array[TileMapLayer] = []
 var layers_by_altitude: Dictionary = {}
@@ -75,6 +72,16 @@ func _exit_tree() -> void:
 ## Generate + paint + rebuild + populate for `params` (seed already set by the
 ## caller). Deterministic per params.seed, including object placement.
 func regenerate(params: TerrainGenerationParams) -> void:
+	# Free last run's occupants NOW, not via ObjectPainter's queue_free: a
+	# single-frame sim never flushes the deletion queue, so survivors would
+	# re-register onto the fresh TileGrid from their graph_changed handlers
+	# (rock.gd / frailejon.gd) at rebuild() below, blocking cells and
+	# displacing this run's placement — making the run depend on what ran
+	# before it in the process.
+	for child: Node in object_parent.get_children():
+		object_parent.remove_child(child)
+		child.free()
+
 	for alt_key in layers_by_altitude:
 		(layers_by_altitude[alt_key] as TileMapLayer).clear()
 
@@ -91,7 +98,7 @@ func regenerate(params: TerrainGenerationParams) -> void:
 	# match the game per seed. Runs AFTER rebuild so the fresh TileGrid
 	# exists for occupant registration, like the game.
 	var obj_rng := RandomNumberGenerator.new()
-	obj_rng.seed = params.seed ^ OBJECT_SEED_XOR
+	obj_rng.seed = params.seed ^ ObjectPainter.OBJECT_SEED_XOR
 	ObjectPainter.paint(grid, object_parent, pathfinder, obj_rng)
 
 	spawn_cell = _spawn_picker._find_starting_cell(grid)
@@ -109,6 +116,32 @@ func cell_census() -> Dictionary:
 				continue
 			var src: int = l.get_cell_source_id(cell)
 			out[src] = int(out.get(src, 0)) + 1
+	return out
+
+
+## Cell-for-cell paint map inside the playable bounds:
+## (cell.x, cell.y, layer_altitude) -> [source_id, atlas_coords]. The parity
+## probe against the game's paint path. A per-source census can't see a
+## variant swap or a one-layer shift (the totals net out); this can. Keyed by
+## cell AND altitude because a cliff column paints the same cell on several
+## layers — a plain cell key would keep only the last layer's entry.
+func cell_map() -> Dictionary:
+	return cell_map_of(ground_layers, grid.width, grid.height)
+
+
+static func cell_map_of(layers: Array, w: int, h: int) -> Dictionary:
+	var out: Dictionary = {}
+	var bounds := Rect2i(0, 0, w, h)
+	for l in layers:
+		var layer := l as TileMapLayer
+		if layer == null:
+			continue
+		var alt: int = int(layer.get_meta("altitude"))
+		for cell: Vector2i in layer.get_used_cells():
+			if bounds.has_point(cell):
+				out[Vector3i(cell.x, cell.y, alt)] = [
+						layer.get_cell_source_id(cell),
+						layer.get_cell_atlas_coords(cell)]
 	return out
 
 

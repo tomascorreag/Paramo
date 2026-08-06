@@ -83,6 +83,18 @@ func advance(delta: float) -> void:
 		period_changed.emit(new_period, old)
 
 
+## Reset the clock to the start of day 0 for a fresh run. Re-evaluates the
+## period WITHOUT emitting: leaving _current_period at the previous run's
+## value makes the first advance() fire a spurious period_changed (and with
+## it a weather roll) — or, worse, NOT fire one that a fresh boot would,
+## so the outcome depends on what ran before. Silence is correct here for
+## the same reason _ready is silent: nothing has "changed" yet.
+func reset_clock() -> void:
+	time_of_day = 0.0
+	day_count = 0
+	_current_period = _evaluate_period(time_of_day)
+
+
 ## Returns the current named period.
 func get_period() -> StringName:
 	return _current_period

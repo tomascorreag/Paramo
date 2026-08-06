@@ -364,11 +364,10 @@ func _validate_layer_ceiling(
 # (defined on TerrainGenerationParams) and warns.
 # Object placement draws from a seed-derived stream so rock layouts are part
 # of the seed's identity (a "favorite seed" bake reproduces its rocks, and
-# the balance simulator sees the same layouts as the game). The xor constant
-# matches verify_terrain_invariants.gd and SimWorld — one derivation everywhere.
+# the balance simulator sees the same layouts as the game).
 func _object_rng(params: TerrainGenerationParams) -> RandomNumberGenerator:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = params.seed ^ 0xC8FAB0CC
+	rng.seed = params.seed ^ ObjectPainter.OBJECT_SEED_XOR
 	return rng
 
 

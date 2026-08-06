@@ -37,15 +37,20 @@ func get_rain_current_intensity() -> float:
 	return model.current
 
 
-## One weather step. Same gates as the game controller's _process: paused or
-## frozen clock means frozen weather (both clocks).
+## One weather step. Same gates as the game controller's _process: pause
+## freezes both clocks; a frozen game clock (seconds_per_game_day <= 0)
+## freezes only the game-time half — ramps are REAL-time and keep moving,
+## exactly as in the game controller. Diverging here was a measured drift.
 func tick(delta: float) -> void:
 	if profile == null:
 		return
-	if TimeManager.paused or TimeManager.seconds_per_game_day <= 0.0:
+	if TimeManager.paused:
 		return
-	model.evolve(profile, delta,
-			delta * TimeManager.time_scale / TimeManager.seconds_per_game_day)
+	var game_day_delta: float = 0.0
+	if TimeManager.seconds_per_game_day > 0.0:
+		game_day_delta = delta * TimeManager.time_scale \
+				/ TimeManager.seconds_per_game_day
+	model.evolve(profile, delta, game_day_delta)
 
 
 func _on_period_changed(_new: StringName, _old: StringName) -> void:

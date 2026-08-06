@@ -115,6 +115,12 @@ func _exit_tree() -> void:
 func _on_graph_changed() -> void:
 	if not is_inside_tree():
 		return
+	# Skip re-registration when already dying (same guard as Rock): a
+	# remove/burnout queue_frees us, and a rebuild in that same frame emits
+	# graph_changed synchronously — without this the dying plant re-claims
+	# its cell on the fresh grid until the deferred free lands.
+	if is_queued_for_deletion():
+		return
 	var pf := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if pf == null:
 		return

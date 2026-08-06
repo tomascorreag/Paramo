@@ -213,6 +213,9 @@ func _verify_paint(seeds: int) -> int:
 	if packed == null:
 		push_error("balance_sim: cannot load %s" % PARITY_SCENE)
 		return 1
+	# Deliberately NOT added to the tree: a tile census needs no _ready side
+	# effects, and out-of-tree the spawned occupants can't crash on
+	# get_tree() or register grid claims that would outlive the check.
 	var scene_root: Node = packed.instantiate(PackedScene.GEN_EDIT_STATE_MAIN)
 	var pw: Node = _find_by_script(scene_root, "procedural_world.gd")
 	if pw == null:
@@ -224,42 +227,51 @@ func _verify_paint(seeds: int) -> int:
 	world.name = "SimWorldParity"
 	root.add_child(world)
 
+	var saved_seed_override: Variant = pw.get(&"seed_override")
 	var failures: int = 0
 	for s in seeds:
 		var run_seed: int = 1000 + s
 		pw.set(&"seed_override", run_seed)
 		pw.call(&"regenerate")
 		var params: TerrainGenerationParams = pw.call(&"_resolve_params")
-		var game_census: Dictionary = _census_of(
-				pw.get(&"ground_layers"), params.width, params.height)
+		var game_layers: Array = pw.get(&"ground_layers")
+		# SimWorld hard-codes the layer stack that mirrors procedural_base.tscn;
+		# if the scene grows or shrinks its stack the comparison below would
+		# silently truncate — fail loudly instead.
+		if game_layers.size() != world.ground_layers.size():
+			push_error(
+					"balance_sim: ground layer stack mismatch (game %d vs sim %d) — update SimWorld's GROUND_TOP_ALTITUDE stack"
+					% [game_layers.size(), world.ground_layers.size()])
+			failures += 1
+			break
+		# Cell-for-cell: [altitude, source, atlas coord] per cell, so a variant
+		# swap or one-layer shift fails instead of netting out in a histogram.
+		var game_map: Dictionary = SimWorld.cell_map_of(
+				game_layers, params.width, params.height)
 
 		world.regenerate(params)
-		var sim_census: Dictionary = world.cell_census()
+		var sim_map: Dictionary = world.cell_map()
 
-		if sim_census == game_census:
-			print("seed %d: paint parity OK %s" % [run_seed, sim_census])
+		if sim_map == game_map:
+			print("seed %d: paint parity OK — %d cells identical, census %s" % [
+					run_seed, sim_map.size(), world.cell_census()])
 		else:
 			failures += 1
-			print("seed %d: PARITY MISMATCH\n  game: %s\n  sim:  %s" % [
-					run_seed, game_census, sim_census])
+			var diffs: Array = []
+			for key: Vector3i in game_map:
+				if sim_map.get(key) != game_map[key]:
+					diffs.append(key)
+			for key: Vector3i in sim_map:
+				if not game_map.has(key):
+					diffs.append(key)
+			print("seed %d: PARITY MISMATCH — %d differing cell(s), e.g. %s" % [
+					run_seed, diffs.size(), diffs.slice(0, 5)])
 
+	pw.set(&"seed_override", saved_seed_override)
 	scene_root.free()
+	world.free()
 	print("--- paint parity: %s ---" % ("PASS" if failures == 0 else "FAIL"))
 	return 0 if failures == 0 else 1
-
-
-func _census_of(layers: Array, w: int, h: int) -> Dictionary:
-	var out: Dictionary = {}
-	var bounds := Rect2i(0, 0, w, h)
-	for l in layers:
-		if l == null:
-			continue
-		for cell: Vector2i in (l as TileMapLayer).get_used_cells():
-			if not bounds.has_point(cell):
-				continue
-			var src: int = (l as TileMapLayer).get_cell_source_id(cell)
-			out[src] = int(out.get(src, 0)) + 1
-	return out
 
 
 func _find_by_script(node: Node, script_name: String) -> Node:

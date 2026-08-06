@@ -19,15 +19,11 @@ func before_each() -> void:
 	params.seed = 7
 	_world.regenerate(params)
 	FireManager.spawn_vfx = false
-	FireManager._wipe_all_fires()
-	FireManager._attach_to_pathfinder(_world.pathfinder)
-	FireManager._refresh_grid_and_vfx()
+	FireManager.reset_to_world(_world.pathfinder)
 
 
 func after_each() -> void:
-	FireManager._wipe_all_fires()
-	FireManager._pathfinder = null
-	FireManager._grid = null
+	FireManager.detach_world()
 	FireManager.spawn_vfx = true
 	TimeManager.paused = _saved_paused
 
@@ -60,7 +56,7 @@ func test_planted_frailejon_lives_and_dies_by_the_games_rules() -> void:
 			"pathfinding penalty flows through the occupant, not a raw number")
 
 	assert_true(FireManager.ignite(cell), "an occupied grass cell still ignites")
-	assert_eq(FireManager._burning[cell]["frailejon"], occ,
+	assert_eq(FireManager.burning_view()[cell]["frailejon"], occ,
 			"the fire grabbed the plant through the occupant hook")
 
 	FireManager._complete_burn(cell)

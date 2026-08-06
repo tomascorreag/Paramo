@@ -337,7 +337,7 @@ func _apply_grading(t: float) -> void:
 # -----------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if _rain_layer == null or profile == null:
+	if profile == null:
 		return
 	# Weather pauses with the game clock. Visual ramp continues smoothly if
 	# the user un-pauses mid-fade because the model's real clock only advances here.
@@ -357,7 +357,12 @@ func _process(delta: float) -> void:
 	else:
 		_weather.evolve_real(profile, delta)
 
-	_push_rain_to_shader()
+	# Only the PUSH needs a RainLayer. Gating the model step on it (as this
+	# used to) wedges a rolled start in RAMPING_UP forever on a map without
+	# rain visuals — every rain consumer (fire, water, climate) would then
+	# read a permanently-dry world with no diagnostic.
+	if _rain_layer != null:
+		_push_rain_to_shader()
 
 
 func _push_rain_to_shader() -> void:

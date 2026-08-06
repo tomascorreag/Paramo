@@ -67,6 +67,12 @@ const _SCENE_BY_KIND: Dictionary = {
 
 const _GROUP_PROCEDURAL: StringName = &"procedural_object"
 
+## The one authored derivation for the object-placement RNG stream:
+## rng.seed = terrain_seed ^ OBJECT_SEED_XOR. Lives here (the consumer of the
+## stream) so ProceduralWorld, SimWorld, and the terrain harness all reference
+## the same constant instead of re-authoring the literal.
+const OBJECT_SEED_XOR: int = 0xC8FAB0CC
+
 # Gaussian σ (in altitude half-steps) for the per-kind altitude preference
 # applied during placement. Matches the tile painter's `_SIGMA_ALT` so an
 # author who has internalized the variant-picker's altitude tuning gets the

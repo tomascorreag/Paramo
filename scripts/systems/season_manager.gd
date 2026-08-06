@@ -103,8 +103,7 @@ func start_run() -> void:
 	ResourceLedger.set_amount(&"tokens", starting_tokens, &"initial")
 	season_index = 0
 	year = 1
-	TimeManager.day_count = 0
-	TimeManager.time_of_day = 0.0
+	TimeManager.reset_clock()
 	TimeManager.paused = false
 	_day_at_season_start = 0
 	phase = Phase.ACTIVE

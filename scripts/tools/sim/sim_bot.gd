@@ -1,10 +1,11 @@
 class_name SimBot
 extends RefCounted
 
-## The balance simulator's scripted player. v1 verbs: walk to fires and douse
+## The balance simulator's scripted player. Verbs: walk to fires and douse
 ## them (the exact economics of ActionExtinguishFire — ring order, 1 water
-## per cell, atomic try_spend), and buy unlocks during planning phases.
-## Placements (ladders, frailejones) land in v2.
+## per cell, atomic try_spend), buy unlocks during planning phases, and place
+## ladders/frailejones during planning (see _try_place — random-valid, not
+## value-scored).
 ##
 ## Movement is modeled as time, not animation: a decision computes the real
 ## travel seconds over the actual Pathfinder route (per-step durations via
@@ -82,7 +83,9 @@ func _arrive() -> void:
 
 
 func _consider_fires(now: float) -> void:
-	var burning: Dictionary = fire_manager.get(&"_burning")
+	# By-reference read-only view — the zero-copy poll this decision loop
+	# relies on (see FireManager.burning_view).
+	var burning: Dictionary = fire_manager.call(&"burning_view")
 	if burning.size() < policy.min_fires_to_act:
 		return
 	if float(ledger.call(&"get_amount", WATER)) - WATER_PER_CELL \

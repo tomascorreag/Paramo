@@ -144,11 +144,21 @@ func _run() -> void:
 
 		t = Time.get_ticks_usec()
 		var obj_rng := RandomNumberGenerator.new()
-		obj_rng.seed = (s + 1) ^ 0xC8FAB0CC
-		ObjectPainter.assign_object_kinds(grid, obj_rng)
-		ObjectPainter.paint(grid, world, pathfinder)
+		obj_rng.seed = (s + 1) ^ ObjectPainter.OBJECT_SEED_XOR
+		# paint() runs assign_object_kinds itself with the rng it's given — a
+		# separate seeded assign call here would be dead work, overwritten by
+		# paint's own pass.
+		ObjectPainter.paint(grid, world, pathfinder, obj_rng)
 		objects_ms.append((Time.get_ticks_usec() - t) / 1000.0)
-		object_counts.append(world.get_child_count())
+		# Count grid-side flags, not children: paint queue_frees the previous
+		# seed's group and frames DO pass in this SceneTree script, so
+		# get_child_count() samples a tree mid-flush and reads high.
+		var flagged: int = 0
+		for y in range(grid.height):
+			for x in range(grid.width):
+				if grid.at(x, y).object_kind != &"":
+					flagged += 1
+		object_counts.append(flagged)
 
 	# --- synthetic tick loop (once — seed-independent math) ------------------
 	var t1: int = Time.get_ticks_usec()
