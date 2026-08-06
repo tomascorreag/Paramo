@@ -15,6 +15,14 @@ extends Node
 ## Ecosystem health is a CONTINUUM (user decision): there is no loss rule
 ## here or in the game. Rows report trajectories and percentages.
 ##
+## Player-model limitations (policy-level, deliberate — factor into any CSV
+## reading): the bot shops only during planning phases (a player can buy from
+## the journal any time); walks are commit-and-teleport (no mid-walk
+## re-planning when a nearer fire ignites or the target burns out, no
+## cancel); remove verbs are never used; planning takes zero real time (fire
+## now freezes with the paused clock, so this costs nothing); bridge
+## placement is not modeled (unlock purchase only).
+##
 ## CSV columns (run row, in RUN_COLUMNS order):
 ##   scenario          scenario name
 ##   run_seed          the run's master seed (terrain seed; others derive)
@@ -105,13 +113,16 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	var params := TerrainGenerationParams.new()
 	var terrain_overrides: Dictionary = scenario.get("terrain", {})
 	for k: String in terrain_overrides:
+		if not (k in params):
+			push_warning("SimRunner: unknown terrain param '%s' (typo?)" % k)
+			continue
 		params.set(k, terrain_overrides[k])
 	params.seed = run_seed
 	# The Pathfinder is reused across runs, and traversal edges + cell
 	# penalties deliberately SURVIVE rebuild (they track live structures in
-	# the game) — scrub last run's ladders/frailejones or they leak.
+	# the game) — scrub last run's ladders or they leak.
 	world.pathfinder.clear_all_cell_penalties()
-	world.pathfinder._traversal_edges.clear()
+	world.pathfinder.clear_all_traversal_edges()
 	world.regenerate(params)
 	var initial_grass: int = int(world.cell_census().get(0, 0))
 
@@ -179,6 +190,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 				bot.policy.set(prop, bot_cfg[prop])
 		bot.rng.seed = run_seed ^ SEED_XOR_BOT
 		bot.pathfinder = world.pathfinder
+		bot.object_parent = world.object_parent
 		bot.fire_manager = FireManager
 		bot.ledger = ResourceLedger
 		bot.cell = world.spawn_cell
@@ -213,13 +225,17 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 			continue
 
 		TimeManager.advance(DT)
+		# Frame-order fidelity: autoloads process before scene nodes, so in
+		# the game FireManager runs BEFORE the weather controller evolves —
+		# fire reads the PREVIOUS frame's rain. Read the host before ticking
+		# it to reproduce that exactly.
+		FireManager.sim_tick(DT, float(host.call(&"get_rain_current_intensity")))
 		host.call(&"tick", DT)
 		systems["WaterCycle"].call(&"tick", DT)
 		climate.call(&"tick", DT)
 		regrowth.call(&"tick", DT)
 		systems["VisitorFlow"].call(&"tick", DT)
 		var rain: float = float(host.call(&"get_rain_current_intensity"))
-		FireManager.sim_tick(DT, rain)
 		if bot != null:
 			bot.tick(ticks_total * DT)
 
@@ -237,6 +253,11 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 
 		if TimeManager.day_count != last_day:
 			last_day = TimeManager.day_count
+			# The whole run happens inside one frame, so queue_free (burnt
+			# frailejones, from FireManager._complete_burn) never actually
+			# lands — flush the dead here so their occupant slots vacate
+			# (frailejon._exit_tree clears the grid claim on free).
+			_flush_dead_objects()
 			charred_cell_days += charred
 			var appeal: float = float(regrowth.call(&"get_appeal_factor"))
 			appeal_min = minf(appeal_min, appeal)
@@ -305,6 +326,13 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	# --- cleanup -------------------------------------------------------------
 	FireManager.tile_burned.disconnect(_on_tile_burned)
 	FireManager._wipe_all_fires()
+	# Bot-planted frailejones aren't in the procedural_object group (player
+	# plants never are), so the next regenerate's sweep won't free them —
+	# clear them here, along with anything still queued for deletion.
+	for child: Node in world.object_parent.get_children():
+		if child.is_queued_for_deletion() \
+				or not child.is_in_group(&"procedural_object"):
+			child.free()
 	if SeasonManager.phase != SeasonManager.Phase.RUN_OVER:
 		push_warning("SimRunner: run hit the tick cap before RUN_OVER")
 		SeasonManager.end_run(&"sim_tick_cap")
@@ -319,6 +347,12 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 func _on_tile_burned(_cell: Vector2i, _coord: Vector2i,
 		_layer: TileMapLayer) -> void:
 	_burned_out_count += 1
+
+
+func _flush_dead_objects() -> void:
+	for child: Node in world.object_parent.get_children():
+		if child.is_queued_for_deletion():
+			child.free()
 
 
 # Grass is exact bookkeeping, no census needed: a burning cell was swapped to

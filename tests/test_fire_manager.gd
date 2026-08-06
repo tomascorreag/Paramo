@@ -151,6 +151,28 @@ func test_wipe_clears_every_fire() -> void:
 	assert_eq(_manager._burning.size(), 0, "a wipe must leave no burning cells")
 
 
+func test_fire_freezes_while_the_clock_is_paused() -> void:
+	# The planning-phase bug: weather gated on TimeManager.paused but fire
+	# did not, so fires burned in real time while the player sat in a paused
+	# screen with no way to fight them. sim_tick must be a no-op when paused.
+	var saved_paused: bool = TimeManager.paused
+	var cell := Vector2i(3, 3)
+	_add_burning(cell)
+	var age_before: float = float(_manager._burning[cell]["age"])
+
+	TimeManager.paused = true
+	_manager._time_manager = TimeManager
+	_manager.sim_tick(1.0, 0.0)
+	assert_eq(float(_manager._burning[cell]["age"]), age_before,
+			"a paused clock must freeze burn progression")
+
+	TimeManager.paused = false
+	_manager.sim_tick(1.0, 0.0)
+	assert_gt(float(_manager._burning[cell]["age"]), age_before,
+			"unpausing resumes the burn")
+	TimeManager.paused = saved_paused
+
+
 func test_seeded_rng_makes_rain_extinguish_deterministic() -> void:
 	# The balance simulator's contract: fire draws only from its own injected
 	# rng, so a seeded manager replays identically. Drive the rain-extinguish

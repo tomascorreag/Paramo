@@ -185,7 +185,7 @@ func regenerate() -> void:
 		# editor mode (Pathfinder is a placeholder) and when `world` is
 		# unwired (defensive — emits a single error).
 		if world != null:
-			_OBJECT_PAINTER.paint(grid, world, pathfinder)
+			_OBJECT_PAINTER.paint(grid, world, pathfinder, _object_rng(params))
 
 	_place_player_on_walkable(grid)
 
@@ -256,7 +256,8 @@ func regenerate_async() -> void:
 		if world != null:
 			if overlay != null:
 				overlay.set_status("LOADING_PLANTING")
-			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(grid, world, pathfinder)
+			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(
+					grid, world, pathfinder, _object_rng(params))
 			if not spawn_ctx.is_empty():
 				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
 					if overlay != null:
@@ -361,6 +362,16 @@ func _validate_layer_ceiling(
 # that mutates a band (e.g. weight tweak per pass) would silently mutate the
 # saved asset. If no resource is assigned, falls back to default values
 # (defined on TerrainGenerationParams) and warns.
+# Object placement draws from a seed-derived stream so rock layouts are part
+# of the seed's identity (a "favorite seed" bake reproduces its rocks, and
+# the balance simulator sees the same layouts as the game). The xor constant
+# matches verify_terrain_invariants.gd and SimWorld — one derivation everywhere.
+func _object_rng(params: TerrainGenerationParams) -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = params.seed ^ 0xC8FAB0CC
+	return rng
+
+
 func _resolve_params() -> TerrainGenerationParams:
 	var p: TerrainGenerationParams
 	if generation_params != null:

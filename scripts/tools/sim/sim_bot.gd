@@ -22,12 +22,21 @@ const WATER_PER_CELL: float = 1.0
 ## (a reachability query + sort) must not run every 0.25 s tick.
 const SCAN_COOLDOWN_SECONDS: float = 1.0
 
+const FRAILEJON_SCENE_PATH: String = "res://scenes/tools/frailejon.tscn"
+
 var policy: BotPolicy = null
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var pathfinder: Pathfinder = null
+## Parent for planted frailejon scenes (SimWorld.object_parent).
+var object_parent: Node2D = null
 ## The autoload; injected so this class has no compile-time autoload names.
 var fire_manager: Node = null
 var ledger: Node = null
+
+## Cells this bot's ladders occupy. Real ladders register as blocking
+## occupants on the grid; the sim's edge-only ladders don't, so the bot keeps
+## its own set and folds it into the blocked-cells rule below.
+var _ladder_cells: Dictionary = {}
 
 var cell: Vector2i = Vector2i(-1, -1)
 var busy_until: float = 0.0
@@ -155,10 +164,12 @@ func on_planning(unlock_state: Node, day: int) -> void:
 # sample budget, else a frailejon on a free cell. v2 heuristic is random-
 # valid, not value-scored (deliberate — score later if sweeps need it).
 #
-# Fidelity notes: a placed ladder's mechanical effect IS the traversal edge
-# (the painted tiles are visual); a frailejon's is the 0.4 walk penalty,
-# modeled via set_cell_penalty — the sim's frailejones can't burn (no scene
-# occupant), a documented approximation.
+# Fidelity notes: a frailejon is the REAL scene — it self-registers as a
+# grid occupant in _ready (walk penalty, fire char/death all flow through
+# the game's own code paths). A ladder's mechanical effect IS the traversal
+# edge (painted tiles are visual); its cell occupancy is tracked bot-side
+# (_ladder_cells) and folded into the same blocked-cells rule the game's
+# TraversalPlacementController applies.
 func _try_place(unlock_state: Node) -> bool:
 	var grid: TileGrid = pathfinder.grid()
 	if grid == null:
@@ -174,28 +185,53 @@ func _try_place(unlock_state: Node) -> bool:
 	if not bool(unlock_state.call(&"can_afford_placement")):
 		return false
 
+	var blocked: Dictionary = _blocked_cells(grid)
 	for _s in policy.placement_samples:
 		var c := Vector2i(
 				b.position.x + rng.randi() % b.size.x,
 				b.position.y + rng.randi() % b.size.y)
-		if not grid.is_walkable(c):
+		if not grid.is_walkable(c) or blocked.has(c):
 			continue
 		if ladder_ok:
-			var tops: Array[Vector2i] = Ladder.find_candidates(c, grid)
+			var tops: Array[Vector2i] = Ladder.find_candidates(c, grid, \
+					Ladder.MAX_HEIGHT_CUBES, blocked)
 			if not tops.is_empty():
 				var top: Vector2i = tops[rng.randi() % tops.size()]
-				if Ladder.validate(c, top, grid) == Ladder.Result.OK \
+				if Ladder.validate(c, top, grid, blocked) == Ladder.Result.OK \
 						and bool(unlock_state.call(&"try_pay_placement", &"ladder")):
 					pathfinder.add_traversal_edge(c, top)
+					_ladder_cells[c] = true
+					_ladder_cells[top] = true
 					placements[&"ladder"] = int(placements.get(&"ladder", 0)) + 1
 					return true
-		if frailejon_ok and grid.occupant_at(c) == null \
-				and pathfinder.get_cell_penalty(c) == 0.0:
+		if frailejon_ok and grid.occupant_at(c) == null:
 			if bool(unlock_state.call(&"try_pay_placement", &"frailejon")):
-				pathfinder.set_cell_penalty(c, 0.4)
+				_plant_frailejon(c)
 				placements[&"frailejon"] = int(placements.get(&"frailejon", 0)) + 1
 				return true
 	return false
+
+
+# The union the game's TraversalPlacementController._gather_blocked_cells
+# builds (occupants of every blocking kind), plus this bot's own ladder
+# cells (see _ladder_cells).
+func _blocked_cells(grid: TileGrid) -> Dictionary:
+	var blocked: Dictionary = _ladder_cells.duplicate()
+	for kind: StringName in [&"frailejon", &"bridge_deck", &"ladder", &"rock"]:
+		for c: Vector2i in grid.occupants_of_kind(kind).keys():
+			blocked[c] = true
+	return blocked
+
+
+# Plant the real scene, in the game's own order (tile_interaction_controller:
+# set cell BEFORE add_child so _ready's occupant registration reads it, then
+# position). Occupancy, walk penalty, burn char and burnout death all run the
+# game's frailejon code from here on.
+func _plant_frailejon(c: Vector2i) -> void:
+	var inst: Node2D = (load(FRAILEJON_SCENE_PATH) as PackedScene).instantiate()
+	inst.set(&"cell", c)
+	object_parent.add_child(inst)
+	inst.global_position = pathfinder.cell_to_world(c)
 
 
 func _travel_seconds(path: Array[Vector2i]) -> float:

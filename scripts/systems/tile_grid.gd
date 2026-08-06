@@ -746,6 +746,10 @@ func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_remove_edge_one_way(b, a)
 
 
+func clear_traversal_edges() -> void:
+	_traversal_edges.clear()
+
+
 func _add_edge_one_way(a: Vector2i, b: Vector2i) -> void:
 	var s: Dictionary = _traversal_edges.get(a, {})
 	s[b] = true

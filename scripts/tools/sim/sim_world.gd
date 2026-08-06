@@ -12,11 +12,10 @@ extends Node
 ## process; regenerate() clears and repaints per run (the expensive part is
 ## the paint, not node churn — measured in benchmark_sim_world.gd).
 ##
-## Determinism note: ObjectPainter.paint() is NOT used — its begin_spawn
-## re-rolls assign_object_kinds with a randomize()d rng (documented known
-## non-determinism in the game). regenerate() instead assigns kinds with the
-## run-derived seed and drives spawn_step directly, so rock placement is
-## reproducible per seed.
+## Object placement goes through ObjectPainter.paint() with a seed-derived
+## rng — the exact call the game's ProceduralWorld makes since object
+## placement was made seed-deterministic — so rock layouts match the game
+## cell-for-cell at the same seed.
 
 const TILE_SET_PATH: String = "res://resources/tiles/base_tileset.tres"
 # Mirrors procedural_base.tscn: Ground0..Ground16 (altitudes 0..32) walkable,
@@ -87,21 +86,13 @@ func regenerate(params: TerrainGenerationParams) -> void:
 	pathfinder.bounds_clip = Rect2i(0, 0, params.width, params.height)
 	pathfinder.rebuild()
 
-	# Deterministic object pass (see class comment). Runs AFTER rebuild so the
-	# fresh TileGrid exists for occupant registration, like the game.
+	# Deterministic object pass: the same seeded-rng path the game now uses
+	# (ProceduralWorld._object_rng — identical derivation), so rock layouts
+	# match the game per seed. Runs AFTER rebuild so the fresh TileGrid
+	# exists for occupant registration, like the game.
 	var obj_rng := RandomNumberGenerator.new()
 	obj_rng.seed = params.seed ^ OBJECT_SEED_XOR
-	ObjectPainter.assign_object_kinds(grid, obj_rng)
-	ObjectPainter._clear_existing(object_parent)
-	var ctx: Dictionary = {
-		"grid": grid,
-		"world": object_parent,
-		"pathfinder": pathfinder,
-		"rng": obj_rng,
-		"y": 0,
-	}
-	while not ObjectPainter.spawn_step(ctx, 0x7FFFFFFF):
-		pass
+	ObjectPainter.paint(grid, object_parent, pathfinder, obj_rng)
 
 	spawn_cell = _spawn_picker._find_starting_cell(grid)
 

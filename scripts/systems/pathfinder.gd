@@ -481,6 +481,17 @@ func clear_all_cell_penalties() -> void:
 	_cell_penalties.clear()
 
 
+## Drop every registered traversal edge (ladders). Same contract as
+## clear_all_cell_penalties: world teardown only — rebuild() preserves and
+## re-applies edges because their structures outlive the grid. The balance
+## simulator calls this between runs on its reused Pathfinder.
+func clear_all_traversal_edges() -> void:
+	_traversal_edges.clear()
+	if _grid != null and _grid.has_method(&"clear_traversal_edges"):
+		_grid.clear_traversal_edges()
+	graph_changed.emit()
+
+
 # Register a bidirectional traversal edge between two 4-connected cells that
 # bypasses shape-based altitude checks. Ladders use this to let the player
 # step between a floor at altitude A and a floor at altitude A+2k on the

@@ -314,6 +314,12 @@ func _process(delta: float) -> void:
 func sim_tick(delta: float, rain: float) -> void:
 	if _grid == null:
 		return
+	# Fire pauses with the game clock, like weather does. Without this gate,
+	# fires burned/spread/ignited in REAL time through the title gate and the
+	# planning phase (clock paused, player shopping) — a screen the player
+	# can't fight from.
+	if _time_manager != null and bool(_time_manager.get(&"paused")):
+		return
 
 	_advance_burns(delta, rain)
 

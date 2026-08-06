@@ -129,6 +129,14 @@ on its own.
       day chars ~40% of the map, appeal hits 0 in every run, and even an
       optimal bot barely moves the outcome — fire needs a large nerf before
       the token economy can breathe.
+- [x] Sim-review fixes that landed in the GAME: fire now freezes with the
+      paused clock (it used to burn in real time through the title gate and
+      planning screen — weather was gated, fire wasn't); procedural rock
+      placement is seed-deterministic (`ObjectPainter` takes the terrain-seed
+      rng from `ProceduralWorld`, so a favorite-seed bake reproduces its
+      rocks). Sim side: exact game frame order (fire reads last tick's rain),
+      bot plants REAL frailejon scenes (occupant/char/burn-death via game
+      code), ladder placement obeys the game's blocked-cells rule.
 
 ---
 
