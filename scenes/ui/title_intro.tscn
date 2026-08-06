@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/title_intro.gd" id="1_ti_script"]
 [ext_resource type="Texture2D" path="res://assets/sprites/Titles/MainTitle_animated.png" id="2_ti_anim"]
 [ext_resource type="Theme" path="res://resources/ui/paramo_theme.tres" id="3_ti_theme"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/frame_border.tres" id="4_ti_frame"]
 
 [node name="TitleIntro" type="CanvasLayer"]
 layer = 210
@@ -37,22 +38,105 @@ mouse_filter = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="ClickToBegin" type="Label" parent="."]
+; The language gate. Replaces the old "click to begin" prompt: picking a box IS
+; the begin click, and it also sets the locale (see title_intro.gd _choose).
+; Both boxes carry LITERAL text, never a translation key — each label is written
+; in the language it selects, which is the whole point of showing them together.
+; Box order and the strings themselves come from LocaleManager.SUPPORTED; the
+; script rewrites them in _ready so the scene and that list cannot drift.
+[node name="LanguageChoice" type="HBoxContainer" parent="."]
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -120.0
+offset_left = -108.0
 offset_top = 40.0
-offset_right = 120.0
-offset_bottom = 64.0
+offset_right = 108.0
+offset_bottom = 88.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 theme = ExtResource("3_ti_theme")
+theme_override_constants/separation = 8
+alignment = 1
+
+; Two-node fill + frame pattern (see CLAUDE.md UI Architecture): the Panel takes
+; its solid fill from the global theme, the Frame child overlays the hollow
+; outline. Copied inline rather than instancing framed_panel.tscn so the labels
+; stay directly editable in this scene.
+[node name="Box0" type="Panel" parent="LanguageChoice"]
+custom_minimum_size = Vector2(100, 48)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Frame" type="Panel" parent="LanguageChoice/Box0"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("4_ti_frame")
+
+[node name="Stack" type="VBoxContainer" parent="LanguageChoice/Box0"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Name" type="Label" parent="LanguageChoice/Box0/Stack"]
+layout_mode = 2
+mouse_filter = 2
 theme_override_colors/font_color = Color(0.996, 0.882, 0.722, 1)
 theme_override_font_sizes/font_size = 16
-text = "click to begin"
+text = "español"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Region" type="Label" parent="LanguageChoice/Box0/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.737, 0.678, 0.624, 1)
+theme_override_font_sizes/font_size = 8
+text = "colombia"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Box1" type="Panel" parent="LanguageChoice"]
+custom_minimum_size = Vector2(100, 48)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Frame" type="Panel" parent="LanguageChoice/Box1"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("4_ti_frame")
+
+[node name="Stack" type="VBoxContainer" parent="LanguageChoice/Box1"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="Name" type="Label" parent="LanguageChoice/Box1/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.996, 0.882, 0.722, 1)
+theme_override_font_sizes/font_size = 16
+text = "english"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Region" type="Label" parent="LanguageChoice/Box1/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.737, 0.678, 0.624, 1)
+theme_override_font_sizes/font_size = 8
+text = "uk"
 horizontal_alignment = 1
 vertical_alignment = 1

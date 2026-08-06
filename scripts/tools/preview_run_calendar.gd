@@ -31,6 +31,7 @@ extends SceneTree
 ## Args:
 ##   --out <dir>    output directory (default: user://)
 ##   --full         save the whole 480x270 book instead of the right-page crop
+##   --locale <id>  render in a specific language (en_GB / es_CO)
 
 # load()ed, not preload()ed — see the same note in preview_page_warp.gd: a preload
 # resolves before _initialize() installs the autoloads, and field_journal.gd then
@@ -58,6 +59,7 @@ const STATES: Array[Array] = [
 
 var _out_dir: String = "user://"
 var _full: bool = false
+var _locale: String = ""
 var _vp: SubViewport
 var _journal: CanvasLayer
 var _frames: int = 0
@@ -78,6 +80,9 @@ func _initialize() -> void:
 					_out_dir = argv[i + 1]
 			"--full":
 				_full = true
+			"--locale":
+				if i + 1 < argv.size():
+					_locale = argv[i + 1]
 	if not _out_dir.ends_with("/"):
 		_out_dir += "/"
 	DirAccess.make_dir_recursive_absolute(_out_dir)
@@ -136,6 +141,7 @@ func _install_autoloads() -> void:
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 1:
+		_apply_locale()
 		_open_instantly(_journal)
 		# 6 days a season x 4 seasons = a 6-wide, 4-tall grid. days_per_season is
 		# derived, so retune it through days_per_year.
@@ -160,6 +166,20 @@ func _process(_delta: float) -> bool:
 		2:
 			_capture(STATES[index][0])
 	return false
+
+
+# Applied on the first FRAME, not in _initialize. Project autoloads still run
+# under --script, and LocaleManager._ready() sets the boot locale — which happens
+# after _initialize and would silently overwrite an override set there. Ask for
+# the language once everything that has an opinion about it has had its say.
+func _apply_locale() -> void:
+	if _locale.is_empty():
+		return
+	TranslationServer.set_locale(_locale)
+	if TranslationServer.get_locale() != _locale:
+		push_warning("preview_run_calendar: locale '%s' is not loaded (%s)"
+			% [_locale, TranslationServer.get_loaded_locales()])
+	_calendar().queue_redraw()
 
 
 func _write_state(state: Array) -> void:

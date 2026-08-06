@@ -52,7 +52,7 @@ theme_override_constants/separation = 8
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
-text = "paused"
+text = "UI_PAUSED"
 horizontal_alignment = 1
 
 [node name="Main" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1368542683]
@@ -79,7 +79,7 @@ theme_override_styles/panel = ExtResource("3_8uki6")
 [node name="SettingsHeader" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1251077074]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
-text = "settings"
+text = "UI_SETTINGS"
 horizontal_alignment = 1
 
 [node name="BarRight" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1904957683]
@@ -92,7 +92,7 @@ theme_override_styles/panel = ExtResource("3_8uki6")
 [node name="VolumeLabel" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1450622199]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
-text = "volume"
+text = "UI_VOLUME"
 horizontal_alignment = 1
 
 [node name="SliderFrame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=328256822]
@@ -130,7 +130,7 @@ theme_override_constants/separation = 6
 [node name="ConfirmLabel" type="Label" parent="Center/Panel/Margin/Stack/Confirm" unique_id=857861158]
 custom_minimum_size = Vector2(160, 0)
 layout_mode = 2
-text = "discard run and restart?"
+text = "UI_DISCARD_RUN_Q"
 horizontal_alignment = 1
 autowrap_mode = 2
 
@@ -143,13 +143,13 @@ alignment = 1
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 24)
 layout_mode = 2
-text = "yes"
+text = "UI_YES"
 
 [node name="CancelBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow" unique_id=1645592046]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 24)
 layout_mode = 2
-text = "cancel"
+text = "UI_CANCEL"
 
 [node name="ResumeBtn" type="Button" parent="Center/Panel" unique_id=82048195]
 unique_name_in_owner = true
@@ -167,7 +167,7 @@ grow_horizontal = 2
 grow_vertical = 0
 pivot_offset_ratio = Vector2(0.5, 0.5)
 focus_mode = 0
-text = "resume"
+text = "UI_RESUME"
 
 [node name="Frame" type="Panel" parent="Center/Panel/ResumeBtn" unique_id=990110001]
 layout_mode = 0

@@ -92,7 +92,10 @@ func _set_view(v: View) -> void:
 	_view = v
 	_main.visible = v == View.MAIN
 	_confirm.visible = v == View.CONFIRM
-	_title.text = "quit?" if v == View.CONFIRM else "paused"
+	# Translation KEYS, not text: Label re-translates whatever is in `text` when
+	# the locale changes, so storing an already-translated string here would
+	# freeze this one label in the language it was set in.
+	_title.text = "UI_QUIT_Q" if v == View.CONFIRM else "UI_PAUSED"
 
 
 # --- Actions ----------------------------------------------------------------

@@ -45,8 +45,14 @@ extends Control
 ## there is nothing to fake here: the tileset scan is pure resource work and needs
 ## no autoloads, so the editor shows the real swatches.
 
-## Section heading. Lowercase, per the project's UI copy convention.
-@export var title: String = "known buildings":
+## Section heading — a TRANSLATION KEY, resolved in _draw. Lowercase in every
+## locale, per the project's UI copy convention.
+##
+## The Spanish here must be ACCENT-FREE. This heading is drawn in Eggmode, which
+## ships 107 glyphs and has no á é í ó ú ü ñ ¿ … — a heading with one would render
+## tofu. tests/test_journal_pages.gd asserts the coverage; see the CSV for the
+## accent-free wording actually used.
+@export var title: String = "JOURNAL_KNOWN_BUILDINGS":
 	set(value):
 		title = value
 		queue_redraw()
@@ -345,8 +351,11 @@ func _rebuild() -> void:
 func _draw() -> void:
 	var face := active_header_font()
 	if face != null and not title.is_empty():
+		# tr() INSIDE _draw, not cached: Control queue_redraw()s itself on
+		# NOTIFICATION_TRANSLATION_CHANGED, so resolving here is all a locale
+		# switch needs. A cached translation would need its own handler.
 		draw_string(face, Vector2(_LEFT_INSET_PX, face.get_ascent(header_font_size) + TITLE_INK_INSET_PX),
-			title, HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
+			tr(title), HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
 	_draw_costs()
 
 

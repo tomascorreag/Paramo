@@ -21,6 +21,11 @@ extends CanvasLayer
 # just paints over the screen briefly. The pan keeps running underneath
 # and is still in motion long after the title clears.
 #
+# Also the game's LANGUAGE GATE: before the cinematic runs, the player picks
+# español (Colombia) or english (UK) from two boxes, which sets the locale for
+# the whole session (see _choose / LocaleManager). It is asked every launch, with
+# the previous session's pick marked but not pre-committed.
+#
 # Skippable: a key / joypad press fast-forwards to a quick fade-out and frees
 # the node. Mouse clicks are swallowed but do NOT skip.
 # Skipping also snaps the opening camera pan to its endpoint (via
@@ -48,10 +53,11 @@ extends CanvasLayer
 ## Set false on debug/test scenes to skip the intro entirely.
 @export var play_intro: bool = true
 
-## If true (and play_intro), the intro does NOT auto-run. Instead a frozen
-## navy "click to begin" screen is shown and the cinematic + music + fullscreen
-## are all triggered by the first click / key press. Set false to restore the
-## old auto-running intro (e.g. on debug scenes that want no gate).
+## If true (and play_intro), the intro does NOT auto-run. Instead the world is
+## shown frozen with the two LANGUAGE boxes over it, and the cinematic + music +
+## fullscreen are all triggered by picking one. Set false to restore the
+## auto-running intro with no language question (e.g. debug scenes) — the locale
+## then stays whatever LocaleManager resolved at boot.
 @export var wait_for_click: bool = true
 
 ## Curtain color shown during the initial reveal + static hold. Cold paramo
@@ -127,17 +133,29 @@ extends CanvasLayer
 ## Skip-fade duration when the player presses any input. Fast but not instant.
 @export var skip_fade_duration: float = 0.15
 
-@export_group("Click Prompt")
-## Alpha the "click to begin" prompt settles to when the mouse is far away.
-@export_range(0.0, 1.0, 0.01) var prompt_min_alpha: float = 0.08
-## Alpha the prompt reaches when the mouse is on top of it.
+@export_group("Language Prompt")
+## Alpha a language box settles to when the mouse is far away. Much higher than
+## the old "click to begin" prompt's 0.08: that prompt was a whisper because it
+## only said "press anything", whereas these boxes carry a decision the player
+## has to READ before acting. At rest both must be legible, not hinted.
+@export_range(0.0, 1.0, 0.01) var prompt_min_alpha: float = 0.45
+## Alpha a language box reaches when the mouse is on top of it.
 @export_range(0.0, 1.0, 0.01) var prompt_max_alpha: float = 1.0
-## Distance from the prompt at which intensity bottoms out at prompt_min_alpha.
+## Floor alpha for the box matching the locale saved from a previous session, so
+## the last choice reads as pre-selected without being pre-clicked. Must sit
+## between prompt_min_alpha and prompt_max_alpha to show at all — at or below the
+## floor it is inert, at the max it is indistinguishable from a hover.
+@export_range(0.0, 1.0, 0.01) var prompt_preselect_alpha: float = 0.7
+## Distance from a box at which intensity bottoms out at prompt_min_alpha.
 ## Measured in the project's base-resolution units (stretch=canvas_items over a
 ## 480x270 viewport), NOT physical pixels — so this spans the on-screen space
-## regardless of window size. Center-to-corner is ~275, so ~200 uses the full
-## intensity range across the visible screen.
-@export var prompt_falloff_px: float = 200.0
+## regardless of window size.
+##
+## Sized to the GAP BETWEEN the boxes, not to the screen. They sit 8px apart, so
+## the old screen-spanning 200 put the far box within ~27% of the ramp while the
+## near one was at 100% — both read as lit and the hover stopped meaning
+## anything. At 60, hovering one leaves the other close to its floor.
+@export var prompt_falloff_px: float = 60.0
 ## Exponential smoothing rate for the intensity ramp (higher = snappier follow).
 @export var prompt_track_speed: float = 10.0
 
@@ -165,20 +183,37 @@ func get_pan_duration() -> float:
 	return get_total_intro_duration() + pan_additional_duration
 
 
+## Frame overlaid on the box matching the previously-saved locale. A separate
+## authored stylebox rather than a tint: modulating the normal frame would
+## multiply two palette colours into one that is in neither (see the Color
+## Palette rule in CLAUDE.md). Alpha is the other pre-selection signal, and alpha
+## is free.
+const _FRAME_ACCENT: StyleBox = preload("res://resources/ui/styleboxes/frame_accent.tres")
+
 @onready var _curtain: ColorRect = $Curtain
 @onready var _title: TextureRect = $Title
-@onready var _click_label: Label = $ClickToBegin
+@onready var _choice: HBoxContainer = $LanguageChoice
 
-# True while the frozen "click to begin" gate is showing and waiting for the
-# first input. Read by Player (is_awaiting_click) to hold the opening pan clock.
+# True while the frozen language gate is showing and waiting for a pick. Read by
+# Player (is_awaiting_click) to hold the opening pan clock. The name is kept
+# because Player calls is_awaiting_click(); the click now carries a language.
 var _awaiting_click: bool = false
 # True between _ready and gate activation: the world is still generating behind
-# the loading overlay, so the prompt is hidden and all input is swallowed (no
+# the loading overlay, so the boxes are hidden and all input is swallowed (no
 # begin yet). Cleared by _activate_gate on ProceduralWorld.generation_finished.
 var _gate_pending: bool = false
-# True while the click prompt is tracking the mouse (from gate activation until
-# the first click). Drives per-frame proximity intensity in _process.
+# True while the language boxes are tracking the mouse (from gate activation
+# until the first click). Drives per-frame proximity intensity in _process.
 var _tracking_prompt: bool = false
+# The two language boxes, in LocaleManager.SUPPORTED order.
+var _boxes: Array[Panel] = []
+# Index of the box the player is aiming at with the KEYBOARD / joypad, or -1 when
+# they're using the mouse. Kept apart from the mouse ramp because the two are
+# different intents: proximity is continuous and advisory, a d-pad highlight is
+# discrete and commits on ui_accept. Mouse motion hands control back (-1).
+var _highlight: int = -1
+# Index of the box matching the saved locale, or -1 on a first-ever launch.
+var _preselected: int = -1
 # TimeManager.paused snapshot taken when the gate freezes time-of-day, restored
 # when the click starts the cinematic.
 var _was_time_paused: bool = false
@@ -253,22 +288,28 @@ func _ready() -> void:
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	_gate_gameplay_ux()
+	_build_language_boxes()
 
 	if wait_for_click:
 		# Frozen entry screen, shown ONCE the terrain has generated: the world is
 		# revealed at the camera's lake-centered start pose (curtain transparent,
-		# title hidden) with a "click to begin" prompt. The whole cinematic — navy
-		# fade-in, title, music, fullscreen and the straight-down camera pan — is
-		# deferred to the first click (see _begin_from_click). The opening pan is
+		# title hidden) with the two language boxes over it. The whole cinematic —
+		# navy fade-in, title, music, fullscreen and the straight-down camera pan —
+		# is deferred to the pick (see _choose). The opening pan is
 		# held by Player (it reads is_awaiting_click()), and TimeManager is paused
-		# so the static view stays at night until the click.
+		# so the static view stays at night until the pick.
 		#
 		# Until generation finishes (loading overlay up, layer 128, below this
-		# layer 200), the gate stays PENDING: prompt hidden, all input swallowed,
+		# layer 200), the gate stays PENDING: boxes hidden, all input swallowed,
 		# no begin. _activate_gate flips it on at ProceduralWorld.generation_finished.
 		_curtain.modulate.a = 0.0
 		_title.modulate.a = 0.0
-		_click_label.modulate.a = 0.0
+		# Container stays opaque and the BOXES carry the alpha: the proximity ramp
+		# is per-box, and the container's own modulate is reserved for the single
+		# fade-out on choose (it multiplies through, so driving both would fight).
+		_choice.modulate.a = 1.0
+		for box: Panel in _boxes:
+			box.modulate.a = 0.0
 		if _time_manager != null:
 			_was_time_paused = _time_manager.paused
 			_time_manager.paused = true
@@ -281,9 +322,55 @@ func _ready() -> void:
 			_activate_gate()
 		return
 
-	# No gate: auto-run the intro and hide the prompt.
-	_click_label.visible = false
+	# No gate (debug/test scenes): auto-run the intro with no language question.
+	# The locale stays whatever LocaleManager resolved at boot.
+	_choice.visible = false
 	_run_intro()
+
+
+# ----------------------------------------------------------------------------
+# Language boxes
+#
+# The scene authors two boxes so they render styled in the editor; this fills in
+# their strings from LocaleManager.SUPPORTED so the list has exactly one home.
+# A box's text is LITERAL — "español" is not a translation of "english", both are
+# printed at once and each is written in the language it selects.
+# ----------------------------------------------------------------------------
+
+func _build_language_boxes() -> void:
+	_boxes.clear()
+	var supported: Array[Dictionary] = LocaleManager.SUPPORTED
+	for i: int in range(_choice.get_child_count()):
+		var box := _choice.get_child(i) as Panel
+		if box == null:
+			continue
+		if i >= supported.size():
+			# More boxes authored than locales shipped: drop the extra rather than
+			# leaving a box that selects nothing.
+			box.visible = false
+			continue
+		_boxes.append(box)
+		(box.get_node(^"Stack/Name") as Label).text = String(supported[i]["native"])
+		(box.get_node(^"Stack/Region") as Label).text = String(supported[i]["region"])
+	if _boxes.size() < supported.size():
+		push_warning("TitleIntro: %d locales shipped but only %d boxes authored in %s."
+			% [supported.size(), _boxes.size(), scene_file_path])
+
+	# Mark the previous session's pick. Purely a floor alpha + a different frame;
+	# it is NOT pre-clicked, because the player asked to be asked every launch.
+	_preselected = _index_of_locale(LocaleManager.saved_locale())
+	if _preselected >= 0:
+		(_boxes[_preselected].get_node(^"Frame") as Panel) \
+			.add_theme_stylebox_override(&"panel", _FRAME_ACCENT)
+
+
+func _index_of_locale(code: String) -> int:
+	if code.is_empty():
+		return -1
+	for i: int in range(mini(_boxes.size(), LocaleManager.SUPPORTED.size())):
+		if LocaleManager.SUPPORTED[i]["code"] == code:
+			return i
+	return -1
 
 
 # ----------------------------------------------------------------------------
@@ -564,29 +651,60 @@ func _activate_gate() -> void:
 	_gate_pending = false
 	_awaiting_click = true
 	_running = true
-	# Start dim; proximity tracking in _process ramps it up as the mouse nears.
-	_click_label.modulate.a = prompt_min_alpha
+	# Start dim; proximity tracking in _process ramps each box up as the mouse
+	# nears it. The pre-selected box settles higher via its floor alpha.
+	for box: Panel in _boxes:
+		box.modulate.a = prompt_min_alpha
 	_tracking_prompt = true
 
 
-# Per-frame: drive the prompt's alpha from how close the mouse is to it. On top
-# of / inside the label → prompt_max_alpha; at prompt_falloff_px or beyond →
-# prompt_min_alpha. Uses distance to the label's rect (0 when inside) so the
-# whole glyph is the target, not just its center. Exponential smoothing keeps
-# the ramp from snapping/jittering as the cursor moves.
+# Per-frame: drive each box's alpha from how close the mouse is to THAT box. On
+# top of / inside one → prompt_max_alpha; at prompt_falloff_px or beyond →
+# prompt_min_alpha. Distance is measured to the box's rect (0 when inside) so the
+# whole box is the target, not just its centre. Exponential smoothing keeps the
+# ramp from snapping/jittering as the cursor moves.
+#
+# Running it per box is what makes the two read as a CHOICE: approaching one
+# lights it while the other stays dim, so which one you are about to commit to is
+# legible before you click.
 func _update_prompt_intensity(delta: float) -> void:
-	var rect: Rect2 = _click_label.get_global_rect()
-	var m: Vector2 = _click_label.get_global_mouse_position()
-	var closest := Vector2(
-		clampf(m.x, rect.position.x, rect.end.x),
-		clampf(m.y, rect.position.y, rect.end.y)
-	)
-	var dist: float = m.distance_to(closest)
-	# Linear ramp: intensity falls off evenly with distance from the label.
-	var t: float = clampf(dist / maxf(prompt_falloff_px, 1.0), 0.0, 1.0)
-	var target: float = lerpf(prompt_max_alpha, prompt_min_alpha, t)
 	var k: float = 1.0 - exp(-prompt_track_speed * delta)
-	_click_label.modulate.a = lerpf(_click_label.modulate.a, target, k)
+	for i: int in range(_boxes.size()):
+		var box: Panel = _boxes[i]
+		var target: float
+		if _highlight >= 0:
+			# Keyboard/joypad is driving: proximity is meaningless, so the
+			# highlighted box is simply lit and the rest are floored.
+			target = prompt_max_alpha if i == _highlight else prompt_min_alpha
+		else:
+			var rect: Rect2 = box.get_global_rect()
+			var m: Vector2 = box.get_global_mouse_position()
+			var closest := Vector2(
+				clampf(m.x, rect.position.x, rect.end.x),
+				clampf(m.y, rect.position.y, rect.end.y)
+			)
+			# Linear ramp: intensity falls off evenly with distance from the box.
+			var t: float = clampf(m.distance_to(closest) / maxf(prompt_falloff_px, 1.0), 0.0, 1.0)
+			target = lerpf(prompt_max_alpha, prompt_min_alpha, t)
+		if i == _preselected:
+			target = maxf(target, prompt_preselect_alpha)
+		box.modulate.a = lerpf(box.modulate.a, target, k)
+
+
+# The player picked a language. That IS the begin click — setting the locale is
+# the only thing this adds over the old "any key starts it" gate.
+#
+# The locale is applied BEFORE _begin_from_click so the pause menu / journal /
+# loading text, all of which were instantiated with the boot locale during
+# generation, re-translate while the curtain is still down. Godot handles that
+# for us: TranslationServer.set_locale propagates
+# NOTIFICATION_TRANSLATION_CHANGED through the whole tree and Control re-renders
+# on receipt — nothing here has to walk the UI.
+func _choose(index: int) -> void:
+	if index < 0 or index >= _boxes.size():
+		return
+	LocaleManager.set_locale(String(LocaleManager.SUPPORTED[index]["code"]))
+	_begin_from_click()
 
 
 # First interaction: fade the prompt out, request fullscreen, start the music,
@@ -598,11 +716,13 @@ func _begin_from_click() -> void:
 	_awaiting_click = false
 
 	# Stop proximity tracking so _process stops fighting the fade-out tween.
+	# Both boxes fade together via the container — the choice is already made, so
+	# singling out the picked one would only delay the cinematic.
 	_tracking_prompt = false
 	var fade: Tween = create_tween()
-	fade.tween_property(_click_label, "modulate:a", 0.0, 0.25) \
+	fade.tween_property(_choice, "modulate:a", 0.0, 0.25) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	fade.tween_callback(_click_label.hide)
+	fade.tween_callback(_choice.hide)
 
 	# Resume time-of-day; the intro drives night→day from here.
 	if _time_manager != null:
@@ -617,6 +737,37 @@ func _begin_from_click() -> void:
 		player.start_opening_pan()
 
 	_run_intro()
+
+
+# Gate input. Two ways in, because the boxes must be reachable without a mouse
+# (the old gate took any key, so requiring a click would regress joypad players):
+#   mouse    — a press inside a box picks it; a press anywhere else does nothing
+#   keyboard — ui_left/ui_right move the highlight, ui_accept commits it
+# Mouse MOTION hands control back to proximity by clearing the highlight, so the
+# two schemes can't both claim to be "the selected one" at once.
+func _handle_gate_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_highlight = -1
+		return
+
+	if event is InputEventMouseButton and event.pressed:
+		var at: Vector2 = (event as InputEventMouseButton).global_position
+		for i: int in range(_boxes.size()):
+			if _boxes[i].get_global_rect().has_point(at):
+				_choose(i)
+				return
+		return
+
+	if _boxes.is_empty():
+		return
+	if event.is_action_pressed(&"ui_left"):
+		_highlight = (maxi(_highlight, 0) - 1 + _boxes.size()) % _boxes.size()
+	elif event.is_action_pressed(&"ui_right"):
+		_highlight = (maxi(_highlight, 0) + 1) % _boxes.size()
+	elif event.is_action_pressed(&"ui_accept"):
+		# Nothing highlighted yet: fall back to the previous session's pick, else
+		# the first box. Pressing Enter should never be a no-op here.
+		_choose(_highlight if _highlight >= 0 else maxi(_preselected, 0))
 
 
 func _request_fullscreen() -> void:
@@ -644,16 +795,12 @@ func _input(event: InputEvent) -> void:
 	if _gate_pending:
 		get_viewport().set_input_as_handled()
 		return
-	# Gate phase: swallow everything, begin on a discrete click / key / button.
+	# Gate phase: swallow everything. Unlike the old prompt, a press no longer
+	# begins by itself — the player has to say WHICH language, so a click must
+	# land on a box and a key press must be a deliberate move/confirm.
 	if _awaiting_click:
 		get_viewport().set_input_as_handled()
-		var is_begin: bool = (
-			(event is InputEventMouseButton and event.pressed)
-			or (event is InputEventKey and event.pressed and not event.echo)
-			or (event is InputEventJoypadButton and event.pressed)
-		)
-		if is_begin:
-			_begin_from_click()
+		_handle_gate_input(event)
 		return
 
 	if not _running:

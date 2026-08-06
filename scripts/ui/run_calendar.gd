@@ -41,9 +41,17 @@ extends Control
 ## multiple of PageWarp.row_block_px on the page this sits in (see the class
 ## comment) — on the journal that is 16, one line of Eggmode. The X is
 ## unconstrained, but the row must fit the 156-texel page alongside the label
-## gutter, and that gutter has to hold "N wet" in the journal's face (41 texels at
-## 16px): at a 6-day season, 56 + 6*16 + 1 = 153. Lengthening the season eats this
-## margin cell by cell.
+## gutter: at a 6-day season, 56 + 6*16 + 1 = 153. Lengthening the season eats
+## this margin cell by cell.
+##
+## The gutter itself holds "N <season>" in the BODY face (Tiny5 at font_size 8,
+## from active_font — NOT the title face), right-aligned into label_width_px - 6.
+## The journal sets 38, so 32 texels ≈ 8 characters. That sizing is driven by
+## SPANISH, not English: "4 lluvia" measures 24px against "4 wet" at 19, and the
+## gutter was widened from 30 to fit it with slack for a two-digit row.
+## tests/test_journal_pages.gd measures every row in both locales, because
+## draw_string clips silently at this width — an overflowing row just loses its
+## tail with no error.
 @export var cell_size: Vector2i = Vector2i(16, 16):
 	set(value):
 		cell_size = value
@@ -55,9 +63,13 @@ extends Control
 		label_width_px = value
 		queue_redraw()
 
-## Title over the grid. Lowercase, per the project's UI copy convention. Empty
-## drops the title line and pulls the grid up by one text row.
-@export var header_text: String = "season log":
+## Title over the grid — a TRANSLATION KEY, resolved in _draw. Lowercase in every
+## locale, per the project's UI copy convention. Empty drops the title line and
+## pulls the grid up by one text row.
+##
+## Drawn in Eggmode, so its Spanish must be ACCENT-FREE — that face has no
+## accented glyphs at all (see JournalKnownSet.title for the full note).
+@export var header_text: String = "JOURNAL_SEASON_LOG":
 	set(value):
 		header_text = value
 		queue_redraw()
@@ -209,7 +221,7 @@ extends Control
 
 ## Stands in for SeasonManager.season_cycle's ids, applied by index modulo its
 ## length exactly as the real cycle is.
-@export var preview_season_names: PackedStringArray = ["dry", "wet"]:
+@export var preview_season_names: PackedStringArray = ["SEASON_DRY", "SEASON_WET"]:
 	set(value):
 		preview_season_names = value
 		queue_redraw()
@@ -271,19 +283,28 @@ func elapsed_days() -> int:
 	return clampi(done, 0, grid.x * grid.y)
 
 
-## Short lowercase name for season `index`, from the profile's id (&"dry"/&"wet").
-## display_name is Title Case and too wide for the gutter, so the id is what the
-## calendar shows.
+## Short lowercase name for season `index`, translated from the profile's
+## `short_name_key`. display_name is Title Case, English-only (it feeds a debug
+## print) and too wide for the gutter, so it is not what the calendar shows.
+##
+## Resolved per call from inside _draw, never cached — that is what makes a
+## locale switch repaint the gutter for free (Control redraws on
+## NOTIFICATION_TRANSLATION_CHANGED).
 func season_name(index: int) -> String:
 	if Engine.is_editor_hint():
 		if preview_season_names.is_empty():
 			return ""
-		return preview_season_names[index % preview_season_names.size()]
+		return tr(preview_season_names[index % preview_season_names.size()])
 	var cycle: Array[SeasonProfile] = SeasonManager.season_cycle
 	if cycle.is_empty():
 		return ""
 	var profile: SeasonProfile = cycle[index % cycle.size()]
-	return String(profile.id) if profile != null else ""
+	if profile == null:
+		return ""
+	# Fall back to the id so a profile authored without a key still labels its
+	# rows (untranslated) instead of leaving the gutter blank.
+	return tr(profile.short_name_key) if not profile.short_name_key.is_empty() \
+		else String(profile.id)
 
 
 ## The body font actually used: the export if set, else the theme's Label font.
@@ -342,7 +363,9 @@ func _draw() -> void:
 	var title := active_header_font()
 	if title != null and not header_text.is_empty():
 		var title_y: float = title.get_ascent(header_font_size) + TITLE_INK_INSET_PX
-		draw_string(title, Vector2(left, title_y), header_text,
+		# tr() inside _draw rather than cached — Control redraws itself on
+		# NOTIFICATION_TRANSLATION_CHANGED, so that is the whole locale story here.
+		draw_string(title, Vector2(left, title_y), tr(header_text),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
 
 	if face != null:

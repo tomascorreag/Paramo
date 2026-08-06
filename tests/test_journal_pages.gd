@@ -340,17 +340,16 @@ func test_right_page_carries_the_known_sets() -> void:
 	# renders as a bare title, which reads as a layout bug rather than a missing slot.
 	var sections := _sections()
 	assert_eq(sections.size(), 2, "expected a buildings section and a flora section")
-	var titles: Array[String] = []
+	var keys: Array[String] = []
 	for s: JournalKnownSet in sections:
-		titles.append(s.title)
+		keys.append(s.title)
 		assert_gt(
 			s.swatch_textures().size(), 0,
 			"%s resolved no swatches" % s.title)
-		assert_eq(
-			s.title, s.title.to_lower(),
-			"%s: UI copy is lowercase, per the project convention" % s.title)
-	assert_has(titles, "known buildings")
-	assert_has(titles, "known flora")
+	# `title` holds a translation KEY now, not the printed text — the section
+	# heading is drawn as tr(title) so it follows the player's language.
+	assert_has(keys, "JOURNAL_KNOWN_BUILDINGS")
+	assert_has(keys, "JOURNAL_KNOWN_FLORA")
 
 
 func test_known_set_tile_kinds_resolve_through_the_tileset() -> void:
@@ -645,3 +644,94 @@ func test_calendar_stamps_one_cell_per_day_lived() -> void:
 	SeasonManager.season_index = 99
 	var grid := cal.grid_size()
 	assert_eq(cal.elapsed_days(), grid.x * grid.y)
+
+
+# --- Localization ------------------------------------------------------------
+#
+# The journal is where a second language can break the page rather than merely
+# read oddly, in two distinct ways. Both are silent at runtime.
+
+const LOCALES: Array[String] = ["en_GB", "es_CO"]
+
+
+func test_journal_titles_are_drawable_in_the_title_face() -> void:
+	# Eggmode ships 107 glyphs and has NO accented vowel, no ñ, no ¿ — every one
+	# of them is a missing glyph, which renders as tofu or falls back to a
+	# non-pixel face and breaks the 16px grid. The Spanish headings are therefore
+	# written accent-free ON PURPOSE ("construcciones conocidas", not
+	# "construcción"). Nothing else enforces that, so this does.
+	var face: Font = _cal().active_header_font()
+	assert_eq(face.resource_path, TITLE_FONT, "titles must be the Eggmode face")
+
+	var keys: Array[String] = [_cal().header_text]
+	for s: JournalKnownSet in _sections():
+		keys.append(s.title)
+
+	var previous := TranslationServer.get_locale()
+	for locale: String in LOCALES:
+		TranslationServer.set_locale(locale)
+		for key: String in keys:
+			var text := tr(key)
+			assert_ne(text, key, "%s has no %s translation" % [key, locale])
+			for i: int in text.length():
+				assert_true(
+					face.has_char(text.unicode_at(i)),
+					"%s/%s: Eggmode has no glyph for '%s' — the journal's titles must be accent-free"
+						% [key, locale, text[i]])
+			assert_eq(text, text.to_lower(),
+				"%s/%s: UI copy is lowercase, per the project convention" % [key, locale])
+	TranslationServer.set_locale(previous)
+
+
+func test_season_names_fit_the_calendar_gutter() -> void:
+	# The gutter prints "N <season>" right-aligned into label_width_px - 6 texels
+	# in the BODY face. Spanish runs longer than English, and draw_string clips
+	# silently at that width — the row just loses its tail with no error. The
+	# widest row is the largest day number the grid can reach.
+	var cal := _cal()
+	var face: Font = cal.active_font()
+	var grid := cal.grid_size()
+	var budget: float = float(cal.label_width_px) - 6.0
+
+	var previous := TranslationServer.get_locale()
+	for locale: String in LOCALES:
+		TranslationServer.set_locale(locale)
+		for r: int in range(grid.y):
+			var text := "%d %s" % [r + 1, cal.season_name(r)]
+			var w: float = face.get_string_size(
+				text, HORIZONTAL_ALIGNMENT_RIGHT, -1, cal.font_size).x
+			assert_lte(w, budget,
+				"%s: '%s' is %.0fpx in a %.0fpx gutter" % [locale, text, w, budget])
+	TranslationServer.set_locale(previous)
+
+
+func test_journal_titles_fit_their_page() -> void:
+	# The failure this catches actually happened: the first Spanish wording for the
+	# buildings heading measured 199px in Eggmode-16 against a 156px page.
+	# draw_string is given width -1 (no wrap, no clip), so an over-long title does
+	# not wrap or ellipsise — it simply runs off the paper and out of the
+	# SubViewport, silently. Spanish is ~25% longer than English, so English
+	# fitting proves nothing.
+	var previous := TranslationServer.get_locale()
+	for locale: String in LOCALES:
+		TranslationServer.set_locale(locale)
+
+		var cal := _cal()
+		var cal_face: Font = cal.active_header_font()
+		var cal_w: float = cal_face.get_string_size(
+			tr(cal.header_text), HORIZONTAL_ALIGNMENT_LEFT, -1, cal.header_font_size).x
+		assert_lte(cal_w, cal.size.x,
+			"%s: calendar title '%s' is %.0fpx on a %.0fpx page"
+				% [locale, tr(cal.header_text), cal_w, cal.size.x])
+
+		for s: JournalKnownSet in _sections():
+			var face: Font = s.active_header_font()
+			var w: float = face.get_string_size(
+				tr(s.title), HORIZONTAL_ALIGNMENT_LEFT, -1, s.header_font_size).x
+			# The heading starts at the section's own left inset, so that inset is
+			# not available to the text.
+			var budget: float = s.size.x - 8.0
+			assert_lte(w, budget,
+				"%s: '%s' is %.0fpx in a %.0fpx column"
+					% [locale, tr(s.title), w, budget])
+	TranslationServer.set_locale(previous)

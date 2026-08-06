@@ -14,8 +14,16 @@ extends Resource
 ## Stable identifier for dispatch / save data. Use &"dry", &"wet".
 @export var id: StringName = &""
 
-## Shown in the HUD ("Dry Season", "Wet Season").
+## Long name, English only. NOT player-facing today — its one consumer is a debug
+## print in run_controller.gd. Localize it (and add keys to
+## assets/translations/paramo.csv) if it ever reaches the HUD.
 @export var display_name: String = ""
+
+## Translation key for the SHORT name the journal's calendar prints down its
+## gutter (&"SEASON_DRY" / &"SEASON_WET" — "dry"/"seca", "wet"/"lluvia").
+## Separate from display_name because that gutter is 50 texels wide: "Dry Season"
+## does not fit in any language. Empty falls back to `id`, untranslated.
+@export var short_name_key: StringName = &""
 
 ## True for Verano (dry). Fire, water-generation, and tourist systems key off
 ## this rather than off id string-compares.

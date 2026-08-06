@@ -1,0 +1,18 @@
+keys,en_GB,es_CO
+UI_PAUSED,paused,pausa
+UI_QUIT_Q,quit?,¿salir?
+UI_SETTINGS,settings,ajustes
+UI_VOLUME,volume,volumen
+UI_DISCARD_RUN_Q,discard run and restart?,¿descartar la partida y reiniciar?
+UI_YES,yes,sí
+UI_CANCEL,cancel,cancelar
+UI_RESUME,resume,continuar
+JOURNAL_SEASON_LOG,season log,temporadas
+JOURNAL_KNOWN_BUILDINGS,known buildings,obras conocidas
+JOURNAL_KNOWN_FLORA,known flora,flora conocida
+LOADING_LOADING,loading…,cargando…
+LOADING_TERRAIN,generating terrain…,generando terreno…
+LOADING_PAINTING,drawing the world…,dibujando el mundo…
+LOADING_PLANTING,planting vegetation…,sembrando vegetación…
+SEASON_DRY,dry,seca
+SEASON_WET,wet,lluvia

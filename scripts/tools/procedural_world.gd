@@ -229,7 +229,7 @@ func regenerate_async() -> void:
 	_validate_layer_ceiling(params, layers_by_altitude)
 
 	if overlay != null:
-		overlay.set_status("Generando terreno…")
+		overlay.set_status("LOADING_TERRAIN")
 	var grid: TerrainGrid = await _generate_grid_async(params, overlay)
 	if grid == null:
 		push_error("ProceduralWorld: terrain generation returned null — aborting.")
@@ -239,7 +239,7 @@ func regenerate_async() -> void:
 
 	# Paint the playable grid + south-cliff skirt, a few rows per frame.
 	if overlay != null:
-		overlay.set_status("Dibujando el mundo…")
+		overlay.set_status("LOADING_PAINTING")
 	var paint_ctx: Dictionary = TerrainPainter.begin_paint(
 		grid, layers_by_altitude, tile_set, params
 	)
@@ -255,7 +255,7 @@ func regenerate_async() -> void:
 		pathfinder.rebuild()
 		if world != null:
 			if overlay != null:
-				overlay.set_status("Sembrando vegetación…")
+				overlay.set_status("LOADING_PLANTING")
 			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(grid, world, pathfinder)
 			if not spawn_ctx.is_empty():
 				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
