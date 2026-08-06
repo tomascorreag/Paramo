@@ -25,10 +25,12 @@ signal locale_changed(code: String)
 
 ## The locales the game ships, in the order the title gate shows them. `native`
 ## is the label printed on that language's box — deliberately written IN that
-## language, so it needs no translation. `region` is the subtitle under it.
+## language, so it needs no translation. `flag` is the region icon under it
+## (an AtlasTexture .tres per the UI Icons rule), which replaced the old
+## `region` text subtitle.
 const SUPPORTED: Array[Dictionary] = [
-	{"code": "es_CO", "native": "español", "region": "colombia"},
-	{"code": "en_GB", "native": "english", "region": "uk"},
+	{"code": "es_CO", "native": "español", "flag": "res://assets/sprites/UX/icons/flag_colombia.tres"},
+	{"code": "en_GB", "native": "english", "flag": "res://assets/sprites/UX/icons/flag_uk.tres"},
 ]
 
 const FALLBACK_LOCALE: String = "en_GB"

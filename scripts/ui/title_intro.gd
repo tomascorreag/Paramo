@@ -50,6 +50,13 @@ extends CanvasLayer
 # ============================================================================
 
 
+## The player picked a language and the cinematic is starting. RunController
+## waits on this before starting the season clock: the gate freezes the world
+## at night, and starting the run earlier unpauses TimeManager — the "frozen"
+## entry screen then drifts from midnight toward dawn while the player decides
+## (and their idle time burns season days).
+signal begun
+
 ## Set false on debug/test scenes to skip the intro entirely.
 @export var play_intro: bool = true
 
@@ -60,9 +67,11 @@ extends CanvasLayer
 ## then stays whatever LocaleManager resolved at boot.
 @export var wait_for_click: bool = true
 
-## Curtain color shown during the initial reveal + static hold. Cold paramo
-## pre-dawn navy.
-@export var color_a: Color = Color(0.04, 0.09, 0.18, 1.0)
+## Curtain color shown during the initial reveal + static hold, and the solid
+## backdrop the language gate sits on. Palette P30 deep night — the SAME color
+## as the loading overlay's backdrop, so the overlay's fade-out hands over to
+## the curtain invisibly (navy over identical navy).
+@export var color_a: Color = Palette.PANEL_BG
 
 ## Curtain color flashed to right before the animation plays. Warm dusk
 ## terracotta — high-contrast against color_a so the flash reads as an event,
@@ -146,6 +155,13 @@ extends CanvasLayer
 ## between prompt_min_alpha and prompt_max_alpha to show at all — at or below the
 ## floor it is inert, at the max it is indistinguishable from a hover.
 @export_range(0.0, 1.0, 0.01) var prompt_preselect_alpha: float = 0.7
+## Curtain alpha while the language gate is up: the night world (the laguna
+## start pose) shows THROUGH the navy curtain, dimmed. 0 = the plain night
+## grade (read too bright as an entry screen), 1 = solid navy (hides the
+## laguna entirely). The pick's cinematic then fades this same curtain the
+## rest of the way to opaque, so the gate is simply an early stop on the
+## fade the player was already going to see.
+@export_range(0.0, 1.0, 0.01) var gate_dim_alpha: float = 0.6
 ## Distance from a box at which intensity bottoms out at prompt_min_alpha.
 ## Measured in the project's base-resolution units (stretch=canvas_items over a
 ## 480x270 viewport), NOT physical pixels — so this spans the on-screen space
@@ -291,18 +307,22 @@ func _ready() -> void:
 	_build_language_boxes()
 
 	if wait_for_click:
-		# Frozen entry screen, shown ONCE the terrain has generated: the world is
-		# revealed at the camera's lake-centered start pose (curtain transparent,
-		# title hidden) with the two language boxes over it. The whole cinematic —
-		# navy fade-in, title, music, fullscreen and the straight-down camera pan —
-		# is deferred to the pick (see _choose). The opening pan is
-		# held by Player (it reads is_awaiting_click()), and TimeManager is paused
-		# so the static view stays at night until the pick.
+		# Entry screen: the night world at the camera's laguna start pose,
+		# DIMMED through the semi-transparent navy curtain, with the two
+		# language boxes over it. The scrim is up from frame 0 (the loading
+		# overlay — layer ABOVE this one, see UILayers — covers it until
+		# generation finishes, and its navy backdrop fades out onto the dimmed
+		# world with no bright frame in between). The whole cinematic — title,
+		# music, fullscreen and the camera pan — is deferred to the pick (see
+		# _choose); its reveal stage continues this same curtain from
+		# gate_dim_alpha up to opaque. The opening pan is held by Player (it
+		# reads is_awaiting_click()), and TimeManager is paused so the view
+		# stays at night until the pick.
 		#
-		# Until generation finishes (loading overlay up, layer 128, below this
-		# layer 200), the gate stays PENDING: boxes hidden, all input swallowed,
-		# no begin. _activate_gate flips it on at ProceduralWorld.generation_finished.
-		_curtain.modulate.a = 0.0
+		# Until generation finishes the gate stays PENDING: boxes hidden, all
+		# input swallowed, no begin. _activate_gate flips it on at
+		# ProceduralWorld.generation_finished.
+		_curtain.modulate.a = gate_dim_alpha
 		_title.modulate.a = 0.0
 		# Container stays opaque and the BOXES carry the alpha: the proximity ramp
 		# is per-box, and the container's own modulate is reserved for the single
@@ -351,7 +371,8 @@ func _build_language_boxes() -> void:
 			continue
 		_boxes.append(box)
 		(box.get_node(^"Stack/Name") as Label).text = String(supported[i]["native"])
-		(box.get_node(^"Stack/Region") as Label).text = String(supported[i]["region"])
+		(box.get_node(^"Stack/Flag") as TextureRect).texture = \
+			load(String(supported[i]["flag"])) as Texture2D
 	if _boxes.size() < supported.size():
 		push_warning("TitleIntro: %d locales shipped but only %d boxes authored in %s."
 			% [supported.size(), _boxes.size(), scene_file_path])
@@ -637,10 +658,14 @@ func _stage_fade_out_duration() -> float:
 # Click-to-begin gate
 # ----------------------------------------------------------------------------
 
-## True while the frozen entry screen is up and waiting for the first input.
-## Player reads this so it can hold the opening camera pan until we release it.
+## True from _ready until the player picks a language — covers BOTH phases:
+## _gate_pending (world still generating behind the loading overlay) and
+## _awaiting_click (boxes up). Player reads this to hold the opening camera pan,
+## so it must be true the moment Player checks it, which happens while the gate
+## is still pending — returning only _awaiting_click started the pan during
+## the loading screen.
 func is_awaiting_click() -> bool:
-	return _awaiting_click
+	return _awaiting_click or _gate_pending
 
 
 # Generation finished (loading overlay gone, world visible at the lake): reveal
@@ -651,10 +676,10 @@ func _activate_gate() -> void:
 	_gate_pending = false
 	_awaiting_click = true
 	_running = true
-	# Start dim; proximity tracking in _process ramps each box up as the mouse
-	# nears it. The pre-selected box settles higher via its floor alpha.
-	for box: Panel in _boxes:
-		box.modulate.a = prompt_min_alpha
+	# Boxes stay at alpha 0 here and _update_prompt_intensity lerps each one up
+	# toward its resting level from the next frame — a ~0.3s fade-in. Setting
+	# them straight to prompt_min_alpha made them POP fully-formed on the exact
+	# frame the loading overlay finished fading.
 	_tracking_prompt = true
 
 
@@ -735,6 +760,9 @@ func _begin_from_click() -> void:
 	var player := get_tree().get_first_node_in_group(&"player")
 	if player != null and player.has_method(&"start_opening_pan"):
 		player.start_opening_pan()
+
+	# After the pause restore above, so start_run's own unpause isn't clobbered.
+	begun.emit()
 
 	_run_intro()
 

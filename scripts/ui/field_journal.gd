@@ -28,6 +28,16 @@ const _WHEEL_PIVOT: Vector2 = Vector2(32, 32)
 @onready var _season_wheel: TextureRect = %SeasonWheel
 @onready var _inventory: JournalInventory = %Inventory
 
+## The three page/gauge SubViewports. Each is its own render target, so leaving
+## them on UPDATE_ALWAYS costs three extra render passes (plus a page_warp and a
+## journal_ink pass) EVERY frame of the run, for a book that is off screen almost
+## all of it — UPDATE_ALWAYS does not consult visibility, that is the whole
+## difference from UPDATE_WHEN_VISIBLE. They are authored DISABLED and switched on
+## with the layer below. UPDATE_WHEN_VISIBLE would not do this on its own: these
+## hang under a CanvasLayer, and a CanvasLayer's `visible` is not part of the
+## CanvasItem visible-in-tree chain the viewport tests.
+var _page_viewports: Array[SubViewport] = []
+
 var _open: bool = false
 var _tween: Tween
 
@@ -42,6 +52,12 @@ func _ready() -> void:
 	# the book itself) closes the journal.
 	_dim.gui_input.connect(_on_dim_gui_input)
 	_season_wheel.pivot_offset = _WHEEL_PIVOT
+	# Driven off `visibility_changed` rather than from open()/close() so the
+	# preview/verify tools — which skip open() and set `visible` directly to
+	# render a still — get their pages rendered too.
+	_collect_page_viewports()
+	visibility_changed.connect(_sync_page_viewports)
+	_sync_page_viewports()
 	# Start the book parked below the bottom edge so the first open rises cleanly.
 	var h := _viewport_height()
 	_book.offset_top = h
@@ -159,3 +175,21 @@ func close() -> void:
 
 func _viewport_height() -> float:
 	return get_viewport().get_visible_rect().size.y
+
+
+func _collect_page_viewports() -> void:
+	# "*" not "" — the pattern goes through String.match(), where an empty
+	# pattern matches only an empty name, i.e. nothing.
+	for node: Node in find_children("*", "SubViewport", true, false):
+		_page_viewports.append(node as SubViewport)
+
+
+# ALWAYS while shown: the pages animate (the book slides, the calendar and the
+# wheel move), so UPDATE_ONCE would freeze the first frame. DISABLED while
+# hidden keeps the last rendered frame in the target, which is what the container
+# shows for the one frame between `visible = true` and the child viewport's next
+# render — harmless, since the book is still parked off the bottom edge then.
+func _sync_page_viewports() -> void:
+	var mode := SubViewport.UPDATE_ALWAYS if visible else SubViewport.UPDATE_DISABLED
+	for vp: SubViewport in _page_viewports:
+		vp.render_target_update_mode = mode

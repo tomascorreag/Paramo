@@ -95,7 +95,7 @@ var _base_visual_y_offset: float = 0.0
 
 # Lerped shadow taper cutoff (screen px from entity cell center, positive in
 # the taper direction). _push_shadow_cell_state computes a target from the
-# pathfinder's altitude deltas; _physics_process slides current toward target
+# pathfinder's altitude deltas; _tick_movement slides current toward target
 # at iso step speed (cell_width / step_duration) so the shadow extends/retracts
 # at roughly the same pace as the player walks. The "no clip" sentinel is
 # pinned to the shadow's own max extent (+ 1 px) so the lerp range stays
@@ -245,7 +245,7 @@ func get_shadow_material() -> ShaderMaterial:
 
 func follow_path(cells: Array[Vector2i]) -> void:
 	_path = cells.duplicate()
-	# If not currently stepping, the next _physics_process will begin one.
+	# If not currently stepping, the next _tick_movement will begin one.
 	# If currently stepping, finish the current step first (stay grid-aligned)
 	# then consume the new path starting from _step_to_cell.
 	if debug_logging:
@@ -268,10 +268,18 @@ func current_altitude() -> float:
 
 
 # ----------------------------------------------------------------------------
-# Physics loop
+# Movement loop
 # ----------------------------------------------------------------------------
 
-func _physics_process(delta: float) -> void:
+# Driven from _process (the RENDER clock), not _physics_process. Camera2D's
+# position_smoothing runs on CAMERA2D_PROCESS_IDLE by default, i.e. once per
+# rendered frame; stepping the player on the 60 Hz physics clock instead left
+# the character the only thing on screen with a stale position between ticks,
+# so the world scrolled smoothly while the sprite visibly stuttered against it.
+# Nothing here needs a fixed timestep — this is a CharacterBody2D that never
+# calls move_and_slide, it writes global_position directly. If the camera's
+# process_callback is ever switched to PHYSICS, this has to move back with it.
+func _tick_movement(delta: float) -> void:
 	_update_lantern()
 	_tick_shadow_cutoff(delta)
 
@@ -358,7 +366,7 @@ func _finish_step() -> void:
 	_altitude = _step_to_alt
 	_apply_position(_step_to_cell, _altitude)
 	# Intentionally don't reset sprite frame here — the walk cycle continues
-	# across step boundaries. Idle reset happens in _physics_process when the
+	# across step boundaries. Idle reset happens in _tick_movement when the
 	# path is empty.
 
 
@@ -429,7 +437,7 @@ func _apply_step_interp(t: float) -> void:
 # last call. `abs_frame` is the cycle-absolute frame index (not wrapped), so
 # _contacts_total is monotonic while walking and a plain > comparison is enough
 # — no edge-detection state to get wrong at cycle wrap or on a repeated call
-# with the same _walk_time (_begin_next_step and _physics_process can both land
+# with the same _walk_time (_begin_next_step and _tick_movement can both land
 # on one).
 func _tick_footfalls(abs_frame: int) -> void:
 	if _footsteps == null:
@@ -549,8 +557,8 @@ func _shadow_no_clip() -> float:
 
 
 # Slide _shadow_cutoff_current toward _shadow_cutoff_target at iso step speed
-# and push the result. Called every physics frame from _physics_process so the
-# shadow extends/retracts at the same pace as the player walks.
+# and push the result. Called every frame from _tick_movement so the shadow
+# extends/retracts at the same pace as the player walks.
 func _tick_shadow_cutoff(delta: float) -> void:
 	if _shadow == null:
 		return
@@ -756,6 +764,10 @@ func _cell_camera_world(cell: Vector2i) -> Vector2:
 
 
 func _process(delta: float) -> void:
+	# Movement first: the pan integrator below chases _camera_target_local_y,
+	# which _apply_visual_lift writes. Ticking movement after it would aim the
+	# pan at last frame's rest pose.
+	_tick_movement(delta)
 	if not _camera_panning or not _pan_running:
 		return
 	_pan_elapsed += delta

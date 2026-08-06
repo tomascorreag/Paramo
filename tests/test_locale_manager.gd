@@ -36,7 +36,8 @@ func test_ships_spanish_colombia_and_british_english() -> void:
 	for entry: Dictionary in LocaleManager.SUPPORTED:
 		codes.append(String(entry["code"]))
 		assert_false(String(entry["native"]).is_empty(), "%s needs a native label" % entry["code"])
-		assert_false(String(entry["region"]).is_empty(), "%s needs a region label" % entry["code"])
+		var flag := load(String(entry["flag"])) as Texture2D
+		assert_not_null(flag, "%s needs a loadable flag icon" % entry["code"])
 	assert_has(codes, "es_CO")
 	assert_has(codes, "en_GB")
 
@@ -100,8 +101,12 @@ func test_gate_boxes_are_labelled_from_the_supported_list() -> void:
 		var entry: Dictionary = LocaleManager.SUPPORTED[i]
 		assert_eq((visible_boxes[i].get_node("Stack/Name") as Label).text,
 			String(entry["native"]), "box %d name" % i)
-		assert_eq((visible_boxes[i].get_node("Stack/Region") as Label).text,
-			String(entry["region"]), "box %d region" % i)
+		# The flag is compared by resource_path: the script assigns via load(), so
+		# an equal path IS the same cached resource — and a mismatch names the
+		# offending .tres in the failure message.
+		var flag := (visible_boxes[i].get_node("Stack/Flag") as TextureRect).texture
+		assert_not_null(flag, "box %d flag" % i)
+		assert_eq(flag.resource_path, String(entry["flag"]), "box %d flag" % i)
 
 
 func test_gate_box_labels_are_not_translation_keys() -> void:

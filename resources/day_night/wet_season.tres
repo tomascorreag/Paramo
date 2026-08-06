@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="DayNightProfile" format=3]
+[gd_resource type="Resource" script_class="DayNightProfile" format=3 uid="uid://ddawp1gbmi8vf"]
 
 [ext_resource type="Script" uid="uid://dveykjelqtor6" path="res://scripts/data/day_night_profile.gd" id="1_2fq25"]
 

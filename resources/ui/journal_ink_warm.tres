@@ -1,59 +1,9 @@
-[gd_resource type="GradientTexture1D" load_steps=2 format=3]
-
-; WARM ramp for assets/shaders/journal_ink.gdshader — wood, earth and structures
-; (bridges, ladders). Selected for hues at BOTH ends of the wheel: reds through
-; yellows, and magentas/pinks wrapping back round.
-;
-; interpolation_mode = 1 (CONSTANT) is load-bearing on every one of these ramps,
-; not a style choice. The project locks every authored RGB to
-; assets/palettes/palette2.txt, and CONSTANT is what guarantees the shader can
-; only ever output a stop — LINEAR would blend between two stops and put
-; off-palette colours on the page. tests/test_journal_pages.gd checks the SAMPLED
-; image, not the authored stops, so flipping this back is caught.
-;
-; LOW CONTRAST by shadow-lift: the darkest stop is P08 (lum 0.28) rather than P07
-; (0.21) or anything near black, so ink never punches off the paper. The top end
-; deliberately DOES run into P13 — that is Book.png's own cream, so a sprite's
-; highlights dissolve into the page instead of sitting on it as a bright blob.
-;
-;   0.00  P08  593E47   lum 0.28   (lifted; was P07 3D3333 at 0.21)
-;   0.22  P06  734C44   lum 0.34   (the calendar's type and border)
-;   0.33  P09  7A5859   lum 0.39   (the calendar's stamp)
-;   0.45  P10  A57855   lum 0.51   (the calendar's rules)
-;   0.60  P11  DE9F47   lum 0.66   gold
-;   0.75  P12  FDD179   lum 0.83   gold
-;   0.88  P13  FEE1B8   lum 0.90   (the paper)
-;
-; The two GOLDS are the one place chroma is deliberately let back in. The upper end
-; used to run P02 BCAD9F -> P13, both near-neutral, and the money glyph came out
-; SILVER: its own DE9F47/FDD179 land at lum 0.66 and 0.83, which those stops mapped
-; to a pale warm grey and then to bare paper. A coin that reads as silver is a
-; different object, so this ramp is not purely a value scale up here.
-;
-; The cost, and it is real: wood highlights above lum 0.80 now take P12 instead of
-; dissolving into the paper, so a bridge picks up a gold sheen. Judged on the render
-; and kept — it reads as sunlit timber. If that ever goes wrong, raise the LAST
-; offset (0.88) rather than removing the golds: that hands the brightest band back
-; to the paper without taking the coin's colour away.
-;
-; P09 sits only 0.05 above P06 in luminance, so as a RAMP stop it is a narrow,
-; slightly mauve band in the shadows — barely a change to how a swatch reads. It
-; is here for the other reason these ramps exist: their stops are the journal's
-; whole palette, and every colour authored anywhere on the pages has to be one of
-; them (test_journal_pages.gd enforces it). RunCalendar's X was P05 B55945, a
-; genuine red that is both off this list and higher contrast than anything on it;
-; P09 is the muted, faded-red ink it became. Drop this stop and the stamp has no
-; legal colour that is not also the rules' colour.
-;
-; Offsets sit slightly BELOW each colour's own luminance so a stop covers the band
-; of sprite tones that read as "that dark", rather than only tones lighter than
-; itself. Retune here in the inspector; paste palette hexes, never sampled ones.
+[gd_resource type="GradientTexture1D" format=3 uid="uid://bbpg5ojlxb0gh"]
 
 [sub_resource type="Gradient" id="Gradient_warm"]
 interpolation_mode = 1
 offsets = PackedFloat32Array(0, 0.22, 0.33, 0.45, 0.6, 0.75, 0.88)
-colors = PackedColorArray(0.34901961, 0.24313725, 0.27843137, 1, 0.45098039, 0.29803922, 0.26666667, 1, 0.47843137, 0.34509804, 0.34901961, 1, 0.64705882, 0.47058824, 0.33333333, 1, 0.87058824, 0.62352941, 0.27843137, 1, 0.99215686, 0.81960784, 0.4745098, 1, 0.99607843, 0.88235294, 0.72156863, 1)
+colors = PackedColorArray(0.34901962, 0.24313726, 0.27843136, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.47843137, 0.34509805, 0.34901962, 1, 0.64705884, 0.47058824, 0.33333334, 1, 0.87058824, 0.62352943, 0.27843136, 1, 0.99215686, 0.81960785, 0.4745098, 1, 0.99607843, 0.88235295, 0.72156864, 1)
 
 [resource]
 gradient = SubResource("Gradient_warm")
-width = 256

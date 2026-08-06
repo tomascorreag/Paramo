@@ -37,6 +37,14 @@ func _ready() -> void:
 	SeasonManager.season_started.connect(_on_season_started)
 	SeasonManager.run_completed.connect(_on_run_completed)
 
+	# Pre-apply season 1's day/night look before anything renders. start_run()
+	# re-applies the same profile object later, which is then a visual no-op —
+	# without this the swap from the scene's authored profile (tileset_test)
+	# to dry_season lands as a one-frame regrade snap in FRONT of the player:
+	# generation_finished fires only after the loading overlay has faded out.
+	# Deferred so peer _readys (DayNightController's own initial grade) run first.
+	call_deferred(&"_preapply_season_look")
+
 	if procedural_world != null:
 		# Generation is async and always yields at least one frame before
 		# emitting, so connecting here (same frame, synchronously) never misses
@@ -46,7 +54,21 @@ func _ready() -> void:
 		call_deferred(&"_start")
 
 
+func _preapply_season_look() -> void:
+	_on_season_started(0, SeasonManager.current_profile())
+
+
 func _start() -> void:
+	# The language gate freezes the world at night while the player decides.
+	# Starting the run there would unpause TimeManager (SeasonManager.start_run
+	# does) — the frozen entry screen then drifts from midnight toward dawn, and
+	# the player's idle time burns season days. Wait for the pick instead;
+	# TitleIntro emits `begun` as the cinematic starts.
+	var intro := get_tree().get_first_node_in_group(&"title_intro")
+	if intro != null and intro.has_method(&"is_awaiting_click") \
+			and intro.is_awaiting_click() and intro.has_signal(&"begun"):
+		intro.connect(&"begun", _start, CONNECT_ONE_SHOT)
+		return
 	SeasonManager.start_run()
 	if debug_controls:
 		var p: SeasonProfile = SeasonManager.current_profile()

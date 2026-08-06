@@ -37,9 +37,9 @@ const TITLE_PATH := "res://scenes/ui/title_intro.tscn"
 
 const VIEW_SIZE := Vector2i(480, 270)
 const PIXEL_SCALE := 4
-## The boxes sit 40..88 below screen centre, i.e. y 175..223 of the 270-tall
+## The boxes sit 40..96 below screen centre, i.e. y 175..231 of the 270-tall
 ## view, spanning x 136..344. This crop is those boxes plus a margin.
-const CROP := Rect2i(120, 160, 240, 76)
+const CROP := Rect2i(120, 160, 240, 84)
 ## Palette P30 #14233A — stands in for the night world behind the gate.
 const BG := Color8(0x14, 0x23, 0x3A, 0xFF)
 

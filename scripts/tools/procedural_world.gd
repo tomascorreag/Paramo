@@ -110,6 +110,10 @@ signal generation_finished
 ## generates / paints / spawns, then fades it out. Disable to skip the overlay
 ## (e.g. when this scene is embedded inside another that owns its own loading UI).
 @export var show_loading_overlay: bool = true
+## Seconds the finished loading screen lingers (bar full) before fading out into
+## whatever is behind it (the language gate on gameplay maps). Pure pacing: a
+## fade that starts the instant the bar fills reads as an abrupt cut.
+@export var overlay_linger: float = 1.0
 
 @export_tool_button("Regenerate") var regenerate_action := regenerate
 @export_tool_button("Clear") var clear_action := clear
@@ -119,13 +123,25 @@ signal generation_finished
 # Lifecycle
 # ----------------------------------------------------------------------------
 
-func _ready() -> void:
+func _enter_tree() -> void:
 	if Engine.is_editor_hint():
 		return
 	# Discoverable by TitleIntro, which waits on generation_finished before
-	# showing its "click to begin" gate (so the prompt isn't drawn over the
-	# loading overlay and clicks aren't accepted before the world exists).
+	# showing its language gate (so the boxes aren't drawn over the loading
+	# overlay and clicks aren't accepted before the world exists).
+	#
+	# Joined in _enter_tree, NOT _ready: this node is ADDED in procedural_base,
+	# so it sits after every inherited gameplay_base child in tree order and its
+	# _ready runs after TitleIntro's. TitleIntro's group lookup then found
+	# nothing and activated the gate over the loading screen. _enter_tree
+	# propagates through the whole subtree before any _ready fires, so the
+	# membership is visible no matter the ready order.
 	add_to_group(&"procedural_world")
+
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		return
 	if randomize_seed_on_ready:
 		# randi() is non-negative (0..2^32-1 mod int range), so it satisfies
 		# the `seed_override >= 0` sentinel in _resolve_params.
@@ -276,10 +292,13 @@ func regenerate_async() -> void:
 
 	# Shader pre-warm: hold the overlay up while the just-painted world (water /
 	# post-process / rain materials) draws hidden, so WebGL compiles those
-	# shaders before the player can see the map. Then fade out and free.
+	# shaders before the player can see the map. Then linger (pacing — see
+	# overlay_linger), fade out and free.
 	if overlay != null:
 		for _i in SHADER_WARM_FRAMES:
 			await get_tree().process_frame
+		if overlay_linger > 0.0:
+			await get_tree().create_timer(overlay_linger).timeout
 		await overlay.fade_out()
 		overlay.queue_free()
 

@@ -13,6 +13,8 @@ config_version=5
 config/name="Paramo"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
+boot_splash/bg_color=Color(0.0784314, 0.137255, 0.227451, 1)
+boot_splash/show_image=false
 config/icon="uid://cqg4ew8b5y73e"
 
 [autoload]
@@ -93,6 +95,7 @@ rendering_device/driver.windows="d3d12"
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.0784314, 0.137255, 0.227451, 1)
 
 [shader_globals]
 
