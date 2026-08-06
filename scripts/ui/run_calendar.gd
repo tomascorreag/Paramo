@@ -204,12 +204,12 @@ extends Control
 		queue_redraw()
 
 @export_group("Editor preview")
-@export var preview_seasons: int = 4:
+@export var preview_seasons: int = 6:
 	set(value):
 		preview_seasons = value
 		queue_redraw()
 
-@export var preview_days_per_season: int = 6:
+@export var preview_days_per_season: int = 4:
 	set(value):
 		preview_days_per_season = value
 		queue_redraw()
@@ -221,7 +221,7 @@ extends Control
 
 ## Stands in for SeasonManager.season_cycle's ids, applied by index modulo its
 ## length exactly as the real cycle is.
-@export var preview_season_names: PackedStringArray = ["SEASON_DRY", "SEASON_WET"]:
+@export var preview_season_names: PackedStringArray = ["SEASON_WET", "SEASON_DRY"]:
 	set(value):
 		preview_season_names = value
 		queue_redraw()

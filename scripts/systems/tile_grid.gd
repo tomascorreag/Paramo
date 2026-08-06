@@ -159,6 +159,11 @@ var _layer_altitudes: Dictionary[TileMapLayer, int] = {}
 # Unique layer altitudes sorted descending — used by resolve_click.
 var _altitudes_desc: Array[int] = []
 
+# Distinct cells with at least one tile on any layer, inside the (clipped)
+# bounds. Fixed at build(); the denominator for "fraction of the mountain"
+# metrics (visitor appeal reads it via FireManager.grid_cell_count).
+var _cell_count: int = 0
+
 # Per-TileSet custom-data layer-id cache populated during build(). Avoids
 # scanning tile_set.get_custom_data_layer_name(i) on every roughness/walkable
 # query downstream.
@@ -237,6 +242,15 @@ func build(layers: Array[TileMapLayer], clip_rect: Rect2i = Rect2i()) -> void:
 
 	for layer in _layers:
 		_ingest_layer(layer)
+
+	# Count once here rather than incrementing in _put_raw: stacked layers
+	# merge-write the same cell several times, so only the post-ingest pass
+	# counts distinct cells.
+	_cell_count = 0
+	for row: Array[CellData] in _tiles:
+		for data: CellData in row:
+			if data != null:
+				_cell_count += 1
 
 
 func _compute_bounds_union(layers: Array[TileMapLayer]) -> Rect2i:
@@ -518,6 +532,13 @@ func inspect_tile_at(layer: TileMapLayer, cell: Vector2i) -> CellData:
 	return CellData.make_walkable(
 		layer, kind, rise_dir, altitude_low, altitude_high, visual_top
 	)
+
+
+## Distinct cells carrying at least one tile, inside the clipped bounds.
+## The bounds RECT overcounts (a disc-shaped map leaves its corners empty);
+## this is the honest "how many tiles is the mountain" total.
+func cell_count() -> int:
+	return _cell_count
 
 
 func in_bounds(cell: Vector2i) -> bool:

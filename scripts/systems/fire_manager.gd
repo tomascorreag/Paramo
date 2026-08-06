@@ -31,7 +31,10 @@ extends Node
 
 # Per-sample chance, before all multipliers. Combined with K_IGNITION_SAMPLES
 # this becomes ~K * BASE expected new-fire attempts per tick.
-const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.04
+# 0.04 -> 0.01 (balance decision 2026-08-06): at 0.04 a 128-run sim sweep
+# averaged ~2,450 ignitions/run with ~150 concurrent fires — 90% burned out
+# untouched and the bot's ~6 douses/day were statistically irrelevant.
+const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.01
 const K_IGNITION_SAMPLES: int = 4 # per ignition tick
 const IGNITION_TICK_SECONDS: float = 0.25
 
@@ -228,6 +231,14 @@ func detach_world() -> void:
 ## Number of currently burning cells.
 func burning_count() -> int:
 	return _burning.size()
+
+
+## Total cells in the attached world's TileGrid (0 with no world). Fire is the
+## grid's owner-of-record among the autoloads, so consumers that need a
+## whole-mountain denominator (RegrowthManager's appeal) read it here instead
+## of finding the pathfinder themselves.
+func grid_cell_count() -> int:
+	return _grid.cell_count() if _grid != null else 0
 
 
 ## Read-only view of the burning set (cell -> entry). Returned BY REFERENCE

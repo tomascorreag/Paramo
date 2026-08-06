@@ -48,13 +48,13 @@ const CROP := Rect2i(54, 14, 169, 246)
 ## Palette P30 #14233A behind everything, so transparent margins read as "not page".
 const BG := Color8(0x14, 0x23, 0x3A, 0xFF)
 
-## name -> [season_index, days_into_season, phase]. days_per_season is pinned to 6
-## below, and season_count is 4, so the run is 24 days.
+## name -> [season_index, days_into_season, phase]. days_per_season is pinned to 4
+## below, and season_count is 6, so the run is 24 days.
 const STATES: Array[Array] = [
 	["0_idle", 0, 0, 0],       # Phase.IDLE
 	["1_early", 0, 3, 1],      # Phase.ACTIVE
-	["2_mid", 1, 6, 1],
-	["3_survived", 3, 6, 3],   # Phase.RUN_OVER
+	["2_mid", 2, 4, 1],
+	["3_survived", 5, 4, 3],   # Phase.RUN_OVER
 ]
 
 var _out_dir: String = "user://"
@@ -143,11 +143,11 @@ func _process(_delta: float) -> bool:
 	if _frames == 1:
 		_apply_locale()
 		_open_instantly(_journal)
-		# 6 days a season x 4 seasons = a 6-wide, 4-tall grid. days_per_season is
-		# derived, so retune it through days_per_year.
+		# 4 days a season x 6 seasons = a 4-wide, 6-tall grid (the shipped
+		# shape). days_per_season is derived, so retune it through days_per_year.
 		var seasons: int = maxi(1, (_season().get(&"season_cycle") as Array).size())
-		_season().set(&"days_per_year", 6 * seasons)
-		_season().set(&"season_count", 4)
+		_season().set(&"days_per_year", 4 * seasons)
+		_season().set(&"season_count", 6)
 		return false
 	if _frames < 4:
 		return false

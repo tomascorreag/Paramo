@@ -28,9 +28,6 @@ const SOURCE_GRASS: int = 0
 @export var base_recovery_per_day: float = 0.15
 ## Added recovery probability at full-day full rain.
 @export var rain_recovery_bonus: float = 0.5
-## Charred-cell count at which visitor appeal reaches 0. The map has thousands
-## of cells; 30 charred is already "the mountain is visibly scarred".
-@export var charred_for_zero_appeal: int = 30
 
 # cell -> {"coord": Vector2i, "layer": TileMapLayer}
 var _charred: Dictionary = {}
@@ -58,11 +55,17 @@ static func recovery_probability(day_avg_rain: float, base_p: float,
 	return clampf(base_p + bonus * clampf(day_avg_rain, 0.0, 1.0), 0.0, 1.0)
 
 
-## Pure appeal model: 1.0 pristine, 0.0 at saturation charred cells.
-static func appeal_factor(charred_count: int, saturation: int) -> float:
-	if saturation <= 0:
+## Pure appeal model (balance decision 2026-08-06): every tile has a NATURAL
+## state, and appeal is simply the fraction of the mountain still in it —
+## water, stone and cliffs count in the total and are always natural; the only
+## non-natural state today is charred ex-grass, which returns to natural when
+## it regrows. 1.0 pristine, 0.0 only if literally everything is char.
+## (Replaces the old 30-cell saturation constant, under which steady-state
+## char of ~200+ cells pinned appeal to 0 for entire runs.)
+static func appeal_factor(non_natural_count: int, total_cells: int) -> float:
+	if total_cells <= 0:
 		return 1.0
-	return 1.0 - minf(1.0, float(charred_count) / float(saturation))
+	return 1.0 - minf(1.0, float(non_natural_count) / float(total_cells))
 
 
 func charred_count() -> int:
@@ -70,9 +73,12 @@ func charred_count() -> int:
 
 
 ## Read by VisitorFlow (group lookup, fallback 1.0). Future trail/flora
-## bonuses multiply in at the caller, not here — this is only the char term.
+## bonuses multiply in at the caller, not here — this is only the natural-
+## fraction term. The denominator is the whole TileGrid, via FireManager (the
+## grid's owner among the autoloads); no grid attached -> 1.0, matching the
+## static's total<=0 rule.
 func get_appeal_factor() -> float:
-	return appeal_factor(_charred.size(), charred_for_zero_appeal)
+	return appeal_factor(_charred.size(), FireManager.grid_cell_count())
 
 
 func rain_intensity() -> float:

@@ -21,9 +21,11 @@ const TOKENS: StringName = &"tokens"
 const SOURCE: StringName = &"visitors"
 
 ## Visitors on a perfect day (no rain, pristine mountain). Small on purpose:
-## at 5 tokens each, a good day pays 2 unlocks' worth.
+## at 1 token each, an unlock (10) costs roughly three perfect days' income.
+## (5 -> 1 on 2026-08-06: with natural-fraction appeal keeping income alive
+## all run, 5/visitor banked ~230 unspent tokens per simulated run.)
 @export var base_visitors_per_day: int = 4
-@export var tokens_per_visitor: float = 5.0
+@export var tokens_per_visitor: float = 1.0
 
 const REGROWTH_GROUP: StringName = &"regrowth"
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"

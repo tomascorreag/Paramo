@@ -24,6 +24,9 @@ class GridStub:
 	func get_tile(cell: Vector2i) -> Variant:
 		return cells.get(cell)
 
+	func cell_count() -> int:
+		return cells.size()
+
 
 # The slice of CellData FireManager reads while a fire is live: the flat/altitude
 # fields its spread rule tests. A flat tile with no painted neighbours means the
@@ -79,6 +82,14 @@ func _add_burning(cell: Vector2i) -> void:
 		"grass_coord": Vector2i(0, 0),
 		"grass_layer": _layer,
 	}
+
+
+func test_grid_cell_count_reads_the_attached_grid() -> void:
+	# The whole-mountain denominator RegrowthManager's appeal divides by.
+	assert_eq(_manager.grid_cell_count(), 0, "no world attached -> 0")
+	_add_burning(Vector2i(1, 1))
+	_add_burning(Vector2i(2, 1))
+	assert_eq(_manager.grid_cell_count(), 2)
 
 
 func test_graph_changed_does_not_put_fires_out() -> void:

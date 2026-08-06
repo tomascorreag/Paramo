@@ -28,7 +28,10 @@ extends Resource
 @export var decision_noise: float = 0.0
 
 ## Placements attempted per planning phase (5 tokens each, after unlocks).
-@export var place_per_planning: int = 1
+## 3 sized against 1-token visitors: 5 planning breaks x 3 x 5 tokens ~= a
+## full run's income, so the bot spends at the economy's edge instead of
+## banking (1 left ~230 tokens idle under the old 5-token income).
+@export var place_per_planning: int = 3
 
 ## Random walkable cells sampled when searching for a legal ladder wall or a
 ## frailejon spot (bounds the per-planning search cost).

@@ -209,7 +209,7 @@ unique_name_in_owner = true
 anchors_preset = 0
 anchor_right = 1.0
 offset_top = 36.0
-offset_bottom = 162.0
+offset_bottom = 180.0
 mouse_filter = 2
 script = ExtResource("10_cal")
 cell_size = Vector2i(18, 18)
@@ -221,9 +221,9 @@ font_size = 8
 block_px = 18
 rule_color = Color(0.64705882, 0.47058824, 0.33333333, 1)
 stamp_color = Color(0.47843137, 0.34509804, 0.34901961, 1)
-preview_seasons = 4
-preview_days_per_season = 6
-preview_season_names = PackedStringArray("SEASON_DRY", "SEASON_WET")
+preview_seasons = 6
+preview_days_per_season = 4
+preview_season_names = PackedStringArray("SEASON_WET", "SEASON_DRY")
 
 [node name="PageRight" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1780670663]
 texture_filter = 1
@@ -337,7 +337,7 @@ stretch_mode = 5
 unique_name_in_owner = true
 anchors_preset = 0
 offset_left = 8.0
-offset_top = 162.0
+offset_top = 180.0
 offset_right = 152.0
 offset_bottom = 198.0
 mouse_filter = 2
@@ -345,7 +345,7 @@ script = ExtResource("12_inv")
 
 [node name="water" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557003]
 anchors_preset = 0
-offset_right = 145.0
+offset_right = 70.0
 offset_bottom = 18.0
 mouse_filter = 2
 
@@ -370,9 +370,9 @@ text = "0"
 
 [node name="tokens" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557006]
 anchors_preset = 0
-offset_top = 18.0
+offset_left = 76.0
 offset_right = 145.0
-offset_bottom = 36.0
+offset_bottom = 18.0
 mouse_filter = 2
 
 [node name="Icon" type="TextureRect" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/tokens" unique_id=1904557007]

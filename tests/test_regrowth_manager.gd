@@ -77,13 +77,16 @@ func test_recovery_rate_rises_with_rain() -> void:
 			"clamped — an out-of-range debug rain must not exceed certainty")
 
 
-func test_appeal_falls_linearly_with_char() -> void:
-	assert_eq(RegrowthManager.appeal_factor(0, 30), 1.0)
-	assert_almost_eq(RegrowthManager.appeal_factor(15, 30), 0.5, 0.0001)
-	assert_eq(RegrowthManager.appeal_factor(30, 30), 0.0)
-	assert_eq(RegrowthManager.appeal_factor(99, 30), 0.0, "floored at zero")
+func test_appeal_is_the_natural_fraction_of_the_mountain() -> void:
+	# appeal = tiles still in their natural state / all tiles. Water and stone
+	# are always natural; char is the only non-natural state today.
+	assert_eq(RegrowthManager.appeal_factor(0, 2304), 1.0)
+	assert_almost_eq(RegrowthManager.appeal_factor(576, 2304), 0.75, 0.0001)
+	assert_almost_eq(RegrowthManager.appeal_factor(1152, 2304), 0.5, 0.0001)
+	assert_eq(RegrowthManager.appeal_factor(2304, 2304), 0.0)
+	assert_eq(RegrowthManager.appeal_factor(9999, 2304), 0.0, "floored at zero")
 	assert_eq(RegrowthManager.appeal_factor(5, 0), 1.0,
-			"saturation 0 disables the penalty rather than dividing by zero")
+			"no grid (total 0) means no penalty rather than dividing by zero")
 
 
 # --- char bookkeeping --------------------------------------------------------
@@ -91,7 +94,11 @@ func test_appeal_falls_linearly_with_char() -> void:
 func test_burnout_registers_a_charred_cell() -> void:
 	_burn_out(Vector2i(4, 4))
 	assert_eq(_regrowth.charred_count(), 1)
-	assert_almost_eq(_regrowth.get_appeal_factor(), 1.0 - 1.0 / 30.0, 0.0001)
+	# This fixture attaches no world to FireManager, so the whole-mountain
+	# denominator is 0 and appeal stays pinned at 1.0 — the no-grid rule.
+	# The denominator's live path is covered by test_fire_manager's grid
+	# fixture via FireManager.grid_cell_count().
+	assert_eq(_regrowth.get_appeal_factor(), 1.0)
 
 
 func test_extinguished_fires_do_not_char() -> void:

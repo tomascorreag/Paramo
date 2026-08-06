@@ -39,11 +39,11 @@ enum Phase { IDLE, ACTIVE, PLANNING, RUN_OVER }
 
 # --- Configuration (tunable; migrate to a RunConfig .tres in the balance pass) ---
 
-## Length of a full year in day/night cycles. The bimodal calendar splits this
-## evenly across `season_cycle`, so each season runs `days_per_year /
-## season_cycle.size()` days. N=24 -> 6 days per season for the default 4-season
-## (Dry-Wet-Dry-Wet) year. Run length = days_per_season * seconds_per_game_day *
-## season_count.
+## Length of a full year in day/night cycles. The calendar splits this evenly
+## across `season_cycle`, so each season runs `days_per_year /
+## season_cycle.size()` days. N=24 -> 4 days per season for the default
+## 6-season (Wet-Dry x3) year. Run length = days_per_season *
+## seconds_per_game_day * season_count.
 @export var days_per_year: int = 24
 
 ## Day/night cycles per season — derived from days_per_year and the number of
@@ -54,9 +54,9 @@ var days_per_season: int:
 	get:
 		return maxi(1, days_per_year / maxi(1, season_cycle.size()))
 
-## Total seasons in a run — one full bimodal year (Dry-Wet-Dry-Wet). Equal to
-## season_cycle.size(), so a run never crosses a year boundary and year stays 1.
-@export var season_count: int = 4
+## Total seasons in a run. Equal to season_cycle.size(), so a run never
+## crosses a year boundary and year stays 1.
+@export var season_count: int = 6
 
 ## Water the run starts with. Firefighting costs 1 per cell doused and WaterCycle
 ## refills continuously (fast while it rains), so this is the buffer that decides
@@ -192,6 +192,9 @@ func _load_default_cycle_if_empty() -> void:
 	var dry: Resource = load("res://resources/seasons/dry.tres")
 	var wet: Resource = load("res://resources/seasons/wet.tres")
 	if dry != null and wet != null:
-		# Bimodal year: two dry windows (Dec-Feb, Jun-Aug) alternating with two
-		# wet (Mar-May, Sep-Nov). Profiles are reused until DJF/JJA need to differ.
-		season_cycle = [dry, wet, dry, wet]
+		# Wet-first alternation (balance decision 2026-08-06): opening wet keeps
+		# the run's first day from being a map-wide cold-start burn — the whole
+		# map is contiguous fuel at day 1, and sim sweeps showed a dry opening
+		# chars ~45% of it before the player can matter. Departs from the strict
+		# bimodal-calendar framing (which had 2 dry + 2 wet per year).
+		season_cycle = [wet, dry, wet, dry, wet, dry]
