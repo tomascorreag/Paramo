@@ -11,34 +11,36 @@
 [ext_resource type="Shader" uid="uid://c88n8ti56qvxq" path="res://assets/shaders/page_slit.gdshader" id="9_slitsh"]
 [ext_resource type="Script" uid="uid://dhciw5330fbbu" path="res://scripts/ui/run_calendar.gd" id="10_cal"]
 [ext_resource type="FontFile" uid="uid://c2aw5fmhnmntg" path="res://assets/fonts/Eggmode-Pd8g.ttf" id="11_egg"]
-[ext_resource type="Script" uid="uid://j0bwb77mcqwe" path="res://scripts/ui/journal_inventory.gd" id="12_inv"]
-[ext_resource type="Texture2D" uid="uid://cwrdu208heb4c" path="res://assets/sprites/UX/icons/water.tres" id="14_water"]
-[ext_resource type="Texture2D" uid="uid://cdqpb0ioeqmvm" path="res://assets/sprites/UX/icons/money.tres" id="15_money"]
+[ext_resource type="Script" uid="uid://llfjwj6xucbe" path="res://scripts/ui/journal_resources.gd" id="12_res"]
+[ext_resource type="Texture2D" uid="uid://coe5b20mflg00" path="res://assets/sprites/UX/icons/water_small.tres" id="14_water"]
+[ext_resource type="Texture2D" uid="uid://beyudk1uthn0j" path="res://assets/sprites/UX/icons/money_small.tres" id="15_money"]
 [ext_resource type="FontFile" uid="uid://vgqs6kp2kuxg" path="res://assets/fonts/Tiny5-Regular.ttf" id="16_tiny5"]
 [ext_resource type="Script" uid="uid://cdnm8m3obine8" path="res://scripts/ui/journal_known_set.gd" id="17_known"]
 [ext_resource type="Script" uid="uid://cuhv3wpitx6uo" path="res://scripts/ui/journal_shop_input.gd" id="17_shop"]
 [ext_resource type="Shader" uid="uid://csf5f2xufxrdy" path="res://assets/shaders/journal_ink.gdshader" id="18_inksh"]
-[ext_resource type="Texture2D" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
+[ext_resource type="Texture2D" uid="uid://bbpg5ojlxb0gh" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
 [ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="20_tiles"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="21_frail"]
-[ext_resource type="Texture2D" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
-[ext_resource type="Texture2D" path="res://resources/ui/journal_ink_cool.tres" id="23_inkcool"]
-[ext_resource type="Texture2D" path="res://resources/ui/journal_ink_neutral.tres" id="24_inkneutral"]
+[ext_resource type="Texture2D" uid="uid://beuuvvk0p5pnv" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
+[ext_resource type="Texture2D" uid="uid://dsacbgjb0dpw" path="res://resources/ui/journal_ink_cool.tres" id="23_inkcool"]
+[ext_resource type="Texture2D" uid="uid://dnfw5nq3847p3" path="res://resources/ui/journal_ink_neutral.tres" id="24_inkneutral"]
+[ext_resource type="Texture2D" uid="uid://cwrdu208heb4c" path="res://assets/sprites/UX/icons/water.tres" id="26_waterbig"]
+[ext_resource type="Texture2D" uid="uid://cdqpb0ioeqmvm" path="res://assets/sprites/UX/icons/money.tres" id="27_moneybig"]
 
-[sub_resource type="CurveTexture" id="CurveTexture_pc8j5"]
+[sub_resource type="CurveTexture" id="CurveTexture_d0ded"]
 width = 157
 texture_mode = 1
 curve = ExtResource("7_curlbot")
 
-[sub_resource type="CurveTexture" id="CurveTexture_acge4"]
+[sub_resource type="CurveTexture" id="CurveTexture_yuxm7"]
 width = 157
 texture_mode = 1
 curve = ExtResource("6_curltop")
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_page_l"]
 shader = ExtResource("5_warpsh")
-shader_parameter/curve_top_tex = SubResource("CurveTexture_acge4")
-shader_parameter/curve_bottom_tex = SubResource("CurveTexture_pc8j5")
+shader_parameter/curve_top_tex = SubResource("CurveTexture_yuxm7")
+shader_parameter/curve_bottom_tex = SubResource("CurveTexture_d0ded")
 shader_parameter/amp_top_px = -5.0
 shader_parameter/amp_bottom_px = 5.0
 shader_parameter/tex_h_px = 231.0
@@ -63,20 +65,20 @@ shader_parameter/hue_cool_end = 0.88
 shader_parameter/ink_amount = 1.0
 shader_parameter/dim = 1.0
 
-[sub_resource type="CurveTexture" id="CurveTexture_d0ded"]
+[sub_resource type="CurveTexture" id="CurveTexture_rfbw6"]
 width = 156
 texture_mode = 1
 curve = ExtResource("7_curlbot")
 
-[sub_resource type="CurveTexture" id="CurveTexture_yuxm7"]
+[sub_resource type="CurveTexture" id="CurveTexture_glffc"]
 width = 156
 texture_mode = 1
 curve = ExtResource("6_curltop")
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_page_r"]
 shader = ExtResource("5_warpsh")
-shader_parameter/curve_top_tex = SubResource("CurveTexture_yuxm7")
-shader_parameter/curve_bottom_tex = SubResource("CurveTexture_d0ded")
+shader_parameter/curve_top_tex = SubResource("CurveTexture_glffc")
+shader_parameter/curve_bottom_tex = SubResource("CurveTexture_rfbw6")
 shader_parameter/amp_top_px = -5.0
 shader_parameter/amp_bottom_px = 5.0
 shader_parameter/tex_h_px = 231.0
@@ -87,14 +89,14 @@ shader_parameter/row_block_px = 18.0
 shader_parameter/col_block_px = 4.0
 shader_parameter/flip_x = true
 
-[sub_resource type="CurveTexture" id="CurveTexture_rfbw6"]
+[sub_resource type="CurveTexture" id="CurveTexture_oyyps"]
 width = 157
 texture_mode = 1
 curve = ExtResource("6_curltop")
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_slit"]
 shader = ExtResource("9_slitsh")
-shader_parameter/curve_tex = SubResource("CurveTexture_rfbw6")
+shader_parameter/curve_tex = SubResource("CurveTexture_oyyps")
 shader_parameter/amp_px = -3.732394366197183
 shader_parameter/u_min = 0.2929936305732484
 shader_parameter/u_max = 0.7006369426751592
@@ -207,83 +209,33 @@ mouse_filter = 2
 
 [node name="RunCalendar" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content" unique_id=1961899847]
 unique_name_in_owner = true
-anchors_preset = 0
+layout_mode = 1
+anchors_preset = 10
 anchor_right = 1.0
 offset_top = 36.0
-offset_bottom = 180.0
+offset_bottom = 181.0
+grow_horizontal = 2
 mouse_filter = 2
 script = ExtResource("10_cal")
-cell_size = Vector2i(18, 18)
-label_width_px = 38
+cell_size = Vector2i(29, 22)
+label_width_px = 37
+header_underline_offset_px = 1
+day_number_offset_px = 8
 font = ExtResource("16_tiny5")
 header_font = ExtResource("11_egg")
-block_px = 18
+block_px = 16
 rule_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
-stamp_color = Color(0.47843137, 0.34509805, 0.34901962, 1)
+stamp_scale = 0.44999999999999996
+stamp_aspect = 2.0
+stamp_offset = Vector2i(14, 0)
+stamp_band_px = 12
+stat_icons = Array[Texture2D]([ExtResource("14_water"), ExtResource("15_money")])
+ink_material = SubResource("ShaderMaterial_ink")
+stat_icon_offset = Vector2i(-9, 2)
+preview_stats = PackedInt32Array(6, 4, 3, 2, 5, 1, 0, 4, 2)
+stamp_wobble_px = 2
+wobble_segment_px = 24
 preview_season_names = PackedStringArray("SEASON_WET", "SEASON_DRY")
-
-[node name="Inventory" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content" unique_id=1904557001]
-unique_name_in_owner = true
-anchors_preset = 0
-offset_left = 8.0
-offset_top = 180.0
-offset_right = 152.0
-offset_bottom = 198.0
-mouse_filter = 2
-script = ExtResource("12_inv")
-
-[node name="water" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557003]
-anchors_preset = 0
-offset_right = 70.0
-offset_bottom = 18.0
-mouse_filter = 2
-
-[node name="Icon" type="TextureRect" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/water" unique_id=1904557004]
-texture_filter = 1
-material = SubResource("ShaderMaterial_ink")
-layout_mode = 0
-offset_top = 1.0
-offset_right = 16.0
-offset_bottom = 17.0
-mouse_filter = 2
-texture = ExtResource("14_water")
-
-[node name="Count" type="Label" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/water" unique_id=1904557005]
-layout_mode = 0
-offset_left = 22.0
-offset_right = 90.0
-offset_bottom = 18.0
-theme_override_colors/font_color = Color(0.4509804, 0.29803923, 0.26666668, 1)
-theme_override_fonts/font = ExtResource("16_tiny5")
-theme_override_font_sizes/font_size = 16
-text = "0"
-
-[node name="tokens" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory" unique_id=1904557006]
-anchors_preset = 0
-offset_left = 76.0
-offset_right = 145.0
-offset_bottom = 18.0
-mouse_filter = 2
-
-[node name="Icon" type="TextureRect" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/tokens" unique_id=1904557007]
-texture_filter = 1
-material = SubResource("ShaderMaterial_ink")
-layout_mode = 0
-offset_top = 1.0
-offset_right = 16.0
-offset_bottom = 17.0
-mouse_filter = 2
-texture = ExtResource("15_money")
-
-[node name="Count" type="Label" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content/Inventory/tokens" unique_id=1904557008]
-layout_mode = 0
-offset_left = 22.0
-offset_right = 90.0
-offset_bottom = 18.0
-theme_override_colors/font_color = Color(0.4509804, 0.29803923, 0.26666668, 1)
-theme_override_fonts/font = ExtResource("16_tiny5")
-theme_override_font_sizes/font_size = 16
-text = "0"
 
 [node name="PageRight" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1780670663]
 texture_filter = 1
@@ -322,26 +274,53 @@ offset_right = 156.0
 offset_bottom = 222.0
 mouse_filter = 2
 
+[node name="Resources" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1904557001]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 8.0
+offset_bottom = 62.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("12_res")
+resource_ids = PackedStringArray("water", "tokens")
+icons = Array[Texture2D]([ExtResource("26_waterbig"), ExtResource("27_moneybig")])
+column_px = 48
+block_px = 16
+header_font = ExtResource("11_egg")
+font = ExtResource("16_tiny5")
+font_size = 12
+ink_material = SubResource("ShaderMaterial_ink")
+preview_amounts = PackedInt32Array(12, 40)
+
 [node name="KnownBuildings" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899848]
 unique_name_in_owner = true
-anchors_preset = 0
+layout_mode = 1
+anchors_preset = 10
 anchor_right = 1.0
-offset_top = 18.0
-offset_bottom = 90.0
+offset_top = 62.0
+offset_bottom = 134.0
+grow_horizontal = 2
 mouse_filter = 2
 script = ExtResource("17_known")
 tile_kinds = PackedStringArray("HALF_STAIR_NE", "LADDER_NE")
 entry_ids = PackedStringArray("bridge", "ladder")
 tileset = ExtResource("20_tiles")
+cell_size = Vector2i(24, 16)
+block_px = 16
+hit_padding_px = null
 header_font = ExtResource("11_egg")
 ink_material = SubResource("ShaderMaterial_ink")
 
 [node name="KnownFlora" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899849]
 unique_name_in_owner = true
-anchors_preset = 0
+layout_mode = 1
+anchors_preset = 10
 anchor_right = 1.0
-offset_top = 108.0
-offset_bottom = 180.0
+offset_top = 134.0
+offset_bottom = 206.0
+grow_horizontal = 2
 mouse_filter = 2
 script = ExtResource("17_known")
 title = "JOURNAL_KNOWN_FLORA"
@@ -349,6 +328,9 @@ tile_kinds = PackedStringArray()
 textures = Array[Texture2D]([ExtResource("21_frail")])
 entry_ids = PackedStringArray("frailejon")
 tileset = ExtResource("20_tiles")
+cell_size = Vector2i(24, 16)
+block_px = 16
+hit_padding_px = null
 header_font = ExtResource("11_egg")
 ink_material = SubResource("ShaderMaterial_ink")
 

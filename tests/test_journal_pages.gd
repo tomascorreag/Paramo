@@ -41,6 +41,9 @@ const FONT_EM_PX := {
 ## Body copy is the theme's Tiny5; Eggmode is reserved for TITLES.
 const BODY_FONT := "res://assets/fonts/Tiny5-Regular.ttf"
 const TITLE_FONT := "res://assets/fonts/Eggmode-Pd8g.ttf"
+## Every sprite printed on a page goes through this, so it can only ever emit a
+## colour one of the four ink ramps contains.
+const INK_SHADER := "res://assets/shaders/journal_ink.gdshader"
 
 var journal: CanvasLayer
 
@@ -173,23 +176,22 @@ func test_body_copy_is_tiny5_and_titles_are_the_written_face() -> void:
 	# only legal at 16px and a page of 16px handwriting does not fit. Everything a
 	# player reads for DATA stays on Tiny5 at 8. Every label carries its override
 	# explicitly — theme propagation does not cross a SubViewport.
-	# Loops over DIRECT Label children of a page's Content. There are none today —
-	# the pages draw their type (RunCalendar, JournalKnownSet) or nest it a level
-	# down (the inventory rows) — so this is the guard for the next label somebody
-	# authors straight onto a page, not a check on current content. The count
-	# assertion below therefore rides on the inventory, which is real body copy.
+	# Loops over DIRECT Label children of a page's Content. There are NONE at all
+	# now — every piece of type on both pages is drawn (RunCalendar,
+	# JournalKnownSet, JournalResources), because the written face cannot be a Label
+	# on an 18-texel block (18 % 16 != 0, see the row-block test below). So this is
+	# the guard for the next label somebody authors straight onto a page, not a
+	# check on current content; the real body copy is asserted through the drawn
+	# sections' own faces.
 	for name_: String in PAGE_RECTS:
 		for label: Label in _labels_on(_page(name_)):
 			assert_eq(
 				label.get_theme_font(&"font").resource_path, BODY_FONT,
 				"%s/%s: page body copy must be Tiny5" % [name_, label.name])
-	var found := 0
-	for inv: Label in _inventory_labels():
-		found += 1
-		assert_eq(
-			inv.get_theme_font(&"font").resource_path, BODY_FONT,
-			"inventory/%s: page body copy must be Tiny5" % inv.get_parent().name)
-	assert_gt(found, 0, "the left page should carry the supplies list")
+
+	var res := _resources()
+	assert_eq(res.active_font().resource_path, BODY_FONT, "resources counts")
+	assert_eq(res.active_header_font().resource_path, TITLE_FONT, "resources title")
 
 	var cal := _cal()
 	assert_eq(cal.active_font().resource_path, BODY_FONT, "calendar body")
@@ -228,10 +230,14 @@ func test_journal_type_is_on_the_faces_native_em() -> void:
 	var cal := _cal()
 	used.append([cal.active_font().resource_path, cal.font_size, "calendar body"])
 	used.append([cal.active_header_font().resource_path, cal.header_font_size, "calendar title"])
-	for inv: Label in _inventory_labels():
-		used.append([inv.get_theme_font(&"font").resource_path,
-			inv.get_theme_font_size(&"font_size"), "inventory/" + inv.get_parent().name])
-	assert_gt(used.size(), 3, "expected page labels, the calendar AND the inventory")
+	var res := _resources()
+	used.append([res.active_font().resource_path, res.font_size, "resources counts"])
+	used.append([res.active_header_font().resource_path, res.header_font_size, "resources title"])
+	for section: JournalKnownSet in _sections():
+		used.append([section.active_header_font().resource_path,
+			section.header_font_size, "known set/" + section.name])
+	assert_gt(used.size(), 3,
+		"expected the calendar, the resources row AND the known sets")
 	for entry: Array in used:
 		assert_true(FONT_EM_PX.has(entry[0]), "unknown face %s at %s" % [entry[0], entry[2]])
 		var em: int = FONT_EM_PX.get(entry[0], 8)
@@ -245,43 +251,57 @@ func _cal() -> RunCalendar:
 	return _page("PageLeft").get_node("SubViewport/Content/RunCalendar") as RunCalendar
 
 
-func _inventory() -> JournalInventory:
-	return _page("PageLeft").get_node("SubViewport/Content/Inventory") as JournalInventory
+func _resources() -> JournalResources:
+	return _page("PageRight").get_node("SubViewport/Content/Resources") as JournalResources
 
 
-func _inventory_labels() -> Array[Label]:
-	var out: Array[Label] = []
-	for row in _inventory().get_children():
-		var count := (row as Node).get_node_or_null(^"Count") as Label
-		if count != null:
-			out.append(count)
-	return out
+func test_resources_are_printed_on_the_right_page() -> void:
+	# Stock written INTO the book, so it must go through the page's viewport and bend
+	# with the paper — the opposite of the season wheel, which PageSlit keeps out of
+	# any viewport precisely so it stays flat.
+	#
+	# It lives on the RIGHT page (it used to be `Inventory` at the foot of the left
+	# one) because the left page is the RUN — the season slot and the calendar — and
+	# stock is the state of the moment, not a record of the run.
+	var res := _resources()
+	assert_gt(res.resource_ids.size(), 0, "the page should carry a supplies row")
+	assert_eq(
+		res.icons.size(), res.resource_ids.size(),
+		"every resource needs its glyph")
+	for tex: Texture2D in res.icons:
+		assert_not_null(tex, "a resource glyph failed to resolve")
+		# The FULL-SIZE icons, unlike the calendar's: here the glyph and its count
+		# sit side by side, so the row's 18-texel block need only hold the taller of
+		# the two rather than their sum. This is the page's headline figure.
+		assert_eq(tex.get_size(), Vector2(16, 16),
+			"resource glyphs must be the full-size 16x16 icons")
+	assert_eq(res.font_size, 16, "the supplies counts are set large, at 2x Tiny5's em")
 
 
-func test_inventory_is_printed_on_the_left_page() -> void:
-	# It is stock written INTO the book, so it must go through the page's viewport and
-	# bend with the paper — the opposite of the season wheel, which PageSlit keeps out
-	# of any viewport precisely so it stays flat.
-	var rows := _inventory_labels()
-	assert_eq(rows.size(), 2, "expected a water row and a tokens row")
-	for row: Label in rows:
-		var icon := row.get_parent().get_node(^"Icon") as TextureRect
-		assert_not_null(icon, "every row needs its glyph")
-		assert_gte(
-			row.position.x, icon.position.x + icon.size.x,
-			"the count must sit to the RIGHT of its icon, clear of it")
+func test_resources_row_sits_inside_one_warp_block() -> void:
+	# The row is glyph over count; split across a block seam, the shader would shear
+	# the glyph away from its number.
+	var block: int = int(_page("PageRight").row_block_px)
+	var res := _resources()
+	assert_eq(res.block_px, block, "the section must quantise like its page")
+	assert_eq(int(res.position.y) % block, 0, "the section must start on a block")
+	assert_eq(res.header_row_px() % block, 0, "the heading must be whole blocks")
+	assert_eq(
+		res.section_height_px(), res.header_row_px() + block,
+		"the supplies row must be exactly one block tall")
 
 
-func test_inventory_rows_sit_inside_one_warp_block() -> void:
-	# A row is icon + count on one line; split across a block seam, the shader would
-	# shear the glyph away from its number.
-	var block: float = _page("PageLeft").row_block_px
-	var inv := _inventory()
-	for row: Label in _inventory_labels():
-		var group := row.get_parent() as Control
-		var top: float = inv.position.y + group.position.y
-		assert_eq(fmod(top, block), 0.0, "row %s must start on a block" % group.name)
-		assert_lt(group.size.y, block + 1.0, "row %s must not outgrow its block" % group.name)
+func test_resources_counts_go_through_the_ink() -> void:
+	# The glyphs are UI art (the water icon is blues, the visitor icon a flat black
+	# silhouette) and would look pasted on without the ramp. The material must sit on
+	# the child ink layer, NOT on the section: a CanvasItem's material covers
+	# everything it draws, and the heading and counts must stay flat ink.
+	var res := _resources()
+	assert_not_null(res.ink_material, "the supplies glyphs need the ink shader")
+	assert_eq(
+		res.ink_material.shader.resource_path, INK_SHADER,
+		"supplies glyphs must go through journal_ink.gdshader")
+	assert_null(res.material, "the ink must not be on the section itself")
 
 
 func test_gauge_is_unwarped_and_drawn_last() -> void:
@@ -397,15 +417,25 @@ func test_known_set_swatches_carry_the_ink_material() -> void:
 	# they read as live game sprites pasted into the notebook, which is exactly what
 	# the ink ramp exists to prevent — so a missing material is a visual regression
 	# no geometry test would catch.
+	#
+	# Each swatch carries its OWN duplicate of the material, not the section's
+	# instance, because hover and lock drive the `dim` uniform per entry — one
+	# shared material would fade and brighten the whole section together. The
+	# duplicate is shallow, so the shader and all four ramp textures are still the
+	# same objects and retuning the ink stays a single resource edit. That is what
+	# this asserts: same SHADER, not same material.
 	for s: JournalKnownSet in _sections():
 		assert_not_null(s.ink_material, "%s: no ink material" % s.title)
 		var swatches := 0
 		for child in s.get_children():
 			if child is TextureRect:
 				swatches += 1
+				var mat := (child as TextureRect).material as ShaderMaterial
+				assert_not_null(
+					mat, "%s: a swatch is not going through the ink shader" % s.title)
 				assert_same(
-					(child as TextureRect).material, s.ink_material,
-					"%s: a swatch is not going through the ink shader" % s.title)
+					mat.shader, s.ink_material.shader,
+					"%s: a swatch is on the wrong shader" % s.title)
 				assert_eq(
 					(child as TextureRect).texture_filter,
 					CanvasItem.TEXTURE_FILTER_NEAREST,
@@ -520,26 +550,28 @@ func test_every_authored_journal_colour_is_in_the_reduced_palette() -> void:
 	# is an object mounted BEHIND the book rather than ink on the page, and the cut's
 	# shadow is the paper's own edge — neither is drawn ON the page. `Dim` is the
 	# scrim behind the whole book, also not on a page.
+	#
+	# Nor the day STAMP — it has its own test below. It is the one mark on either
+	# page that is deliberately not ink.
 	var cal := _cal()
 	var checked: Array[Array] = [
 		[cal.rule_color, "RunCalendar.rule_color"],
 		[cal.border_color, "RunCalendar.border_color"],
 		[cal.text_color, "RunCalendar.text_color"],
-		[cal.stamp_color, "RunCalendar.stamp_color"],
 	]
 	for s: JournalKnownSet in _sections():
 		checked.append([s.text_color, "%s.text_color" % s.title])
-	for label: Label in _inventory_labels():
-		checked.append([
-			label.get_theme_color(&"font_color"),
-			"inventory/%s font_color" % label.get_parent().name])
+	checked.append([_resources().text_color, "JournalResources.text_color"])
 	for name_: String in PAGE_RECTS:
 		for label: Label in _labels_on(_page(name_)):
 			checked.append([
 				label.get_theme_color(&"font_color"),
 				"%s/%s font_color" % [name_, label.name]])
 
-	assert_gt(checked.size(), 6, "expected the calendar, both sections and the supplies")
+	# 3 calendar colours (rule, border, text — the stamp has its own test) + one
+	# per known set + the supplies row.
+	assert_gte(checked.size(), 6,
+		"expected the calendar, both known sets and the supplies row")
 	for entry: Array in checked:
 		var c: Color = entry[0]
 		assert_true(
@@ -558,26 +590,76 @@ func test_every_authored_journal_colour_is_in_the_reduced_palette() -> void:
 				% [entry[1], c.a])
 
 
-func test_inventory_icons_go_through_the_ink() -> void:
-	# The supplies glyphs are world-palette sprites like the swatches are, so they
-	# need the same treatment — a full-colour coin and water drop beside inked
-	# swatches is the exact mismatch the ramps exist to remove. They cannot be fixed
-	# by authoring a colour the way type can; the shader is the only route.
-	var inv := _inventory()
-	var icons := 0
-	for row in inv.get_children():
-		var icon := (row as Node).get_node_or_null(^"Icon") as TextureRect
-		if icon == null:
-			continue
-		icons += 1
-		assert_not_null(
-			icon.material, "inventory/%s: glyph is not going through the ink" % row.name)
-		assert_true(
-			icon.material is ShaderMaterial and
-				(icon.material as ShaderMaterial).shader.resource_path
-					== "res://assets/shaders/journal_ink.gdshader",
-			"inventory/%s: wrong material on the glyph" % row.name)
-	assert_gt(icons, 0, "expected the supplies rows to carry glyphs")
+func test_the_day_stamp_is_red_and_opaque_but_not_ink() -> void:
+	# The ONE exception to the reduced-palette rule above, and it is a deliberate
+	# one: a stamp is not written on the paper, it is pressed onto it, and the mark
+	# only does its job if it reads as a different medium from the record it sits
+	# on. So it is held to palette2 and to full opacity, but NOT to the ink ramps —
+	# none of whose stops is a red (the ramps are low-contrast by authoring, and
+	# their reddest entries are within a shade of the brown body text).
+	#
+	# If the stamp ever becomes ink, delete this and put stamp_color back in the
+	# list above rather than widening a ramp to accommodate it.
+	var c: Color = _cal().stamp_color
+	assert_true(_is_palette_color(c),
+		"the stamp is %s, which is not a palette2 entry" % c.to_html(false))
+	assert_eq(c.a, 1.0, "the stamp is pressed at full strength")
+	assert_false(_in_journal_palette(c),
+		"the stamp must NOT be an ink ramp stop — that is the whole point of it")
+	assert_gt(c.r, maxf(c.g, c.b), "the stamp reads as red")
+
+
+func test_calendar_stat_glyphs_go_through_the_ink() -> void:
+	# The day-stat glyphs are UI sprites like the swatches are, so they need the same
+	# treatment — a full-colour coin and water drop stamped over a hand-ruled grid is
+	# the exact mismatch the ramps exist to remove. They cannot be fixed by authoring
+	# a colour the way type can; the shader is the only route.
+	#
+	# And it must be on the CHILD layer, not the calendar: a CanvasItem's material
+	# covers everything it draws, so putting it here would push the title, the rules
+	# and the day numbers through the ramp too.
+	var cal := _cal()
+	assert_not_null(cal.ink_material, "the stat glyphs need the ink shader")
+	assert_eq(
+		cal.ink_material.shader.resource_path, INK_SHADER,
+		"stat glyphs must go through journal_ink.gdshader")
+	assert_null(cal.material, "the ink must not be on the calendar itself")
+	# TWO channels, one per stat row. A third would need a 24-texel content stack in
+	# a 17-texel cell interior, i.e. a 36-texel cell, and 6 of those overflow the
+	# page — see RunCalendar's class comment for the arithmetic.
+	assert_eq(cal.stat_icons.size(), 2, "expected the water and token glyphs")
+	for tex: Texture2D in cal.stat_icons:
+		assert_not_null(tex, "a stat glyph failed to resolve")
+		assert_eq(tex.get_size(), Vector2(8, 8),
+			"stat glyphs must be the 8x8 _small variants")
+
+
+func test_day_stats_fit_the_cell() -> void:
+	# The cell is the binding constraint on this whole page (see RunCalendar's class
+	# comment): three glyph columns over three counts, in whatever the gutter leaves
+	# of 157 texels. This is the check that a longer season — or a wider gutter —
+	# has not quietly squeezed the columns into each other.
+	var cal := _cal()
+	var grid := cal.grid_size()
+	var usable: int = int(cal.size.x) - cal.label_width_px
+	var cell_w: int = cal.cell_size.x
+	assert_lte(
+		grid.x * cell_w + cal.rule_width, usable,
+		"the grid has outgrown the page beside its gutter")
+	# The cell splits LEFT/RIGHT: a stamp band, then an 8-texel glyph, 1 of air and
+	# an 8-texel number (17). Kept as literals rather than reaching for the private
+	# constants — this test exists to notice when those change. The stamp needs a
+	# band of its own because it is drawn at FULL opacity: layered under the
+	# numbers, as it was while it was faded, a red stroke through an 8px digit makes
+	# the digit unreadable.
+	assert_gte(cell_w - cal.rule_width, 17 + 8,
+		"a cell must hold the yield group AND a band for the stamp")
+	# Two stat rows of 8 inside one 18-texel block, leaving interior row 16 bare
+	# against the seam. Anything taller puts ink on that seam — and 36, the next
+	# legal height, overflows the page at 6 season rows.
+	assert_eq(cal.cell_size.y, 18, "a stat cell is exactly one warp block tall")
+	assert_gte(cal.cell_size.y - cal.rule_width, 2 * 8 + 1,
+		"two 8-texel stat rows must fit with a bare row against the bottom seam")
 
 
 func _is_palette_color(c: Color) -> bool:

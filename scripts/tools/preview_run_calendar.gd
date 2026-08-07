@@ -123,6 +123,7 @@ func _install_autoloads() -> void:
 		["FireManager", "res://scripts/systems/fire_manager.gd"],
 		["ResourceLedger", "res://scripts/systems/resource_ledger.gd"],
 		["SeasonManager", "res://scripts/systems/season_manager.gd"],
+		["DayLog", "res://scripts/systems/day_log.gd"],
 	]
 	for entry in order:
 		var name_: String = entry[0]
@@ -190,7 +191,34 @@ func _write_state(state: Array) -> void:
 	_season().set(&"_day_at_season_start", state[1] * 4)
 	_clock().set(&"day_count", state[1] * 4 + state[2])
 	_clock().set(&"time_of_day", 0.0)
+	_seed_day_stats(state[1] * 4 + state[2])
 	_calendar().queue_redraw()
+
+
+# Each stamped cell also prints what that day YIELDED, and a zero prints nothing
+# at all — so without this every still shows bare stamps and the feature is
+# invisible in exactly the tool built to look at it. The clock is teleported by
+# _write_state rather than advanced, so DayLog's own accumulation never runs and
+# the history has to be written in directly.
+#
+# The series is deliberately UNEVEN, including days that yielded nothing on a
+# channel: an even fill hides the one thing worth checking here, which is whether
+# a sparse grid still reads as a record rather than as a texture.
+const _PREVIEW_YIELD: Array[Array] = [
+	[6, 4, 4], [0, 4, 4], [12, 3, 3], [2, 0, 0],
+	[0, 5, 5], [8, 4, 4], [3, 4, 4], [0, 0, 0],
+	[14, 2, 2], [5, 4, 4], [0, 4, 4], [9, 1, 1],
+]
+
+
+func _seed_day_stats(days: int) -> void:
+	if not root.has_node(^"DayLog"):
+		return
+	var log_ := root.get_node(^"DayLog")
+	for i: int in range(days):
+		var y: Array = _PREVIEW_YIELD[i % _PREVIEW_YIELD.size()]
+		log_.call(&"seed_day", i,
+			{&"water": y[0], &"tokens": y[1], &"visitors": y[2]})
 
 
 # The autoloads are hand-installed in _initialize (see _install_autoloads), and a

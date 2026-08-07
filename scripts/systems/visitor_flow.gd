@@ -17,6 +17,12 @@ extends Node
 ## quantized — a continuous trickle would invite per-second optimization. The
 ## day boundary is the quantum the user asked for.
 
+## How many came today. Emitted once per completed day, INCLUDING zero-visitor
+## days — a washout is a fact about that day, not an absence of one. DayLog folds
+## this into the day's yield; the count is otherwise unrecoverable, since the
+## ledger only ever sees the tokens it was multiplied into.
+signal visitors_arrived(count: int)
+
 const TOKENS: StringName = &"tokens"
 const SOURCE: StringName = &"visitors"
 
@@ -38,6 +44,7 @@ var _regrowth: Node = null
 
 func _ready() -> void:
 	TimeManager.day_completed.connect(_on_day_completed)
+	DayLog.bind_visitor_flow(self)
 
 
 ## Pure daily model, static for tree-free tests. Rain and appeal both clamp to
@@ -92,6 +99,9 @@ func _on_day_completed(_day_count: int) -> void:
 	_rain_elapsed = 0.0
 
 	var visitors: int = visitors_for(avg_rain, appeal(), base_visitors_per_day)
+	# Announced before the early-out, so a rained-off day records a real 0 rather
+	# than leaving the previous day's figure to be read as today's.
+	visitors_arrived.emit(visitors)
 	if visitors <= 0:
 		return
 	ResourceLedger.add(TOKENS, float(visitors) * tokens_per_visitor, SOURCE)

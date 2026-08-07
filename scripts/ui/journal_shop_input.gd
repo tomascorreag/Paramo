@@ -17,6 +17,12 @@ extends Control
 ## Purchases go through the scene's UnlockState (group lookup). Without one
 ## (preview tools, layout tests) every entry renders owned/full-ink and clicks
 ## fall through to nothing — the page behaves exactly as before the shop.
+##
+## HOVER runs through the identical arithmetic as the click, deliberately: the
+## entry that lights up under the pointer and the entry a click would buy are
+## computed by one code path, so they cannot disagree. What the hover DOES is
+## JournalKnownSet's business (see HOVER_LIFT_PX there); this node only says where
+## the pointer is.
 
 ## The right page's SubViewportContainer, whose local space equals its
 ## viewport's canvas space.
@@ -34,23 +40,64 @@ var _unlocks: Node = null
 
 func _ready() -> void:
 	ResourceLedger.resource_changed.connect(_on_resource_changed)
+	_ready_hover()
 	# Deferred: UnlockState joins its group in its own _ready, order unknown.
 	_refresh_states.call_deferred()
 
 
+func _ready_hover() -> void:
+	# Nothing hovers what the pointer has left the book entirely for.
+	mouse_exited.connect(_clear_hover)
+
+
 func _gui_input(event: InputEvent) -> void:
+	if page_right == null:
+		return
+	var motion := event as InputEventMouseMotion
+	if motion != null:
+		handle_hover(_to_page(motion.position))
+		return
 	var mb := event as InputEventMouseButton
 	if mb == null or mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
 		return
-	if page_right == null:
-		return
-	# BookHit-local -> canvas -> PageRight-local. Both live on the same
-	# CanvasLayer, so the global transforms are directly comparable.
-	var canvas_point: Vector2 = get_global_transform() * mb.position
-	var pr_local: Vector2 = \
-			page_right.get_global_transform().affine_inverse() * canvas_point
-	if handle_click(pr_local):
+	if handle_click(_to_page(mb.position)):
 		accept_event()
+
+
+# BookHit-local -> canvas -> PageRight-local. Both live on the same CanvasLayer,
+# so the global transforms are directly comparable.
+func _to_page(local: Vector2) -> Vector2:
+	var canvas_point: Vector2 = get_global_transform() * local
+	return page_right.get_global_transform().affine_inverse() * canvas_point
+
+
+## The hover path from PageRight-local space down, mirroring handle_click's
+## arithmetic exactly so what lights up is always what a click would buy. Public
+## for the same reason: tests drive it without synthesizing mouse events.
+func handle_hover(pr_local: Vector2) -> void:
+	var hit_section: JournalKnownSet = null
+	var hit_index: int = -1
+	if content != null and Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
+		for section: JournalKnownSet in sections:
+			if section == null:
+				continue
+			var idx: int = section.entry_at(
+					pr_local - content.position - section.position)
+			if idx >= 0:
+				hit_section = section
+				hit_index = idx
+				break
+	# Every section is told, not just the hit one: the pointer moving from one
+	# section to another has to un-hover the entry it left.
+	for section: JournalKnownSet in sections:
+		if section != null:
+			section.set_hovered(hit_index if section == hit_section else -1)
+
+
+func _clear_hover() -> void:
+	for section: JournalKnownSet in sections:
+		if section != null:
+			section.set_hovered(-1)
 
 
 ## The click path from PageRight-local space down. Public so tests can drive
@@ -66,18 +113,24 @@ func handle_click(pr_local: Vector2) -> bool:
 		var local: Vector2 = pr_local - content.position - section.position
 		var idx: int = section.entry_at(local)
 		if idx >= 0:
-			return _try_buy(section.entry_id_at(idx))
+			return _try_buy(section, idx)
 	return false
 
 
-func _try_buy(id: StringName) -> bool:
+func _try_buy(section: JournalKnownSet, index: int) -> bool:
+	var id: StringName = section.entry_id_at(index)
 	if id == &"" or _unlocks_node() == null:
 		return false
 	if bool(_unlocks.call(&"is_unlocked", id)):
 		return false
+	# Asked BEFORE the attempt, because try_unlock reports the same false for
+	# "too poor" and "nothing happened" and only the first deserves a recoil.
+	if not bool(_unlocks.call(&"can_afford_unlock")):
+		section.flash_denied(index)
+		return false
 	var bought: bool = bool(_unlocks.call(&"try_unlock", id))
-	# Bought or refused-broke, the presentation may need updating (try_unlock's
-	# spend also fires resource_changed, but a refusal does not).
+	# Bought or refused, the presentation may need updating (try_unlock's spend
+	# also fires resource_changed, but a refusal does not).
 	_refresh_states()
 	return bought
 

@@ -113,6 +113,18 @@ extends Control
 		block_px = value
 		_rebuild()
 
+## Extra texels around a swatch that still count as pointing at it. On top of
+## `entry_rect`'s own rule that the whole DRAWN swatch is hittable, which is the
+## part that matters when the art is bigger than its cell.
+##
+## Only the outer ends get it horizontally — see entry_rect for why. Raising it
+## past half a cell's height starts letting the section's own heading answer for
+## the entry underneath it.
+@export_range(0, 8) var hit_padding_px: int = 2:
+	set(value):
+		hit_padding_px = value
+		queue_redraw()
+
 @export_group("Type")
 ## Title face. Leave null to fall back to the theme's Label font. The journal sets
 ## Eggmode — a section heading is something you WROTE at the top of the list.
@@ -129,6 +141,13 @@ extends Control
 		header_font_size = value
 		_rebuild()
 
+## Rows below the title's block that its underline sits at. Must stay clear of both
+## seams of the block it lands in.
+@export_range(0, 17) var header_underline_offset_px: int = 2:
+	set(value):
+		header_underline_offset_px = value
+		queue_redraw()
+
 @export var text_color: Color = Palette.P06:
 	set(value):
 		text_color = value
@@ -144,16 +163,34 @@ extends Control
 		_rebuild()
 
 
-## Rows the title is pushed down inside its warp block, for the reason spelled out
-## in RunCalendar.TITLE_INK_INSET_PX: the shader translates each block rigidly and
-## the seam duplicates or drops the row next to it, so no ink may touch a block
-## edge. Eggmode at 16 inks 17 rows in an 18-row block — one row of slack, spent
-## here at the top, leaving the descender row exposed at the bottom.
-const TITLE_INK_INSET_PX: int = 1
-
 ## Swatches are laid out from this node's left edge with this much lead-in, on the
 ## 4-texel column grid the page's `col_block_px` snaps to.
 const _LEFT_INSET_PX: int = 8
+
+## How far a hovered swatch lifts off the paper, in texels.
+##
+## A LIFT, not the 1.12 scale-up radial_menu_item uses for the same job, and the
+## difference is the viewport. That menu renders at window resolution, where a
+## fractional scale is resampled by the GPU and looks fine. These swatches sit in a
+## 1:1 nearest-filtered SubViewport where a 1.12 scale on 32px pixel art visibly
+## breaks the grid — the same reason _rebuild floors every swatch position. One
+## whole texel is the smallest honest "it moved" this page can express.
+const HOVER_LIFT_PX: int = 1
+
+## A hovered LOCKED swatch inks up toward owned instead of only moving. Reads as
+## the thing surfacing when you point at it, and costs nothing extra: the `dim`
+## uniform is already the mechanism the lock state uses.
+const HOVER_ALPHA: float = 0.7
+
+## How far an unaffordable entry recoils when clicked, in texels.
+const DENY_SHAKE_PX: int = 1
+
+## Length of that recoil.
+const DENY_DURATION: float = 0.18
+
+## Half-cycles of shake over DENY_DURATION. Odd multiples of PI end the sine back
+## at zero, so the swatch cannot be left parked off its own column.
+const DENY_SHAKES: float = 6.0
 
 # Shared across every section on the page. Building a TileKindIndex scans the whole
 # atlas AND validates every TileSlots constant against it, pushing a warning per
@@ -166,12 +203,20 @@ static var _indices: Dictionary[String, TileKindIndex] = {}
 const LOCKED_ALPHA: float = 0.4
 
 var _swatches: Array[TextureRect] = []
+# Where each swatch RESTS, before the hover lift and the denial shake are added.
+# Kept separately so those two offsets can be applied and removed without
+# accumulating rounding into the authored layout.
+var _rest_positions: Array[Vector2] = []
 # id -> {"locked": bool, "cost": int, "affordable": bool}. Empty (the default
 # everywhere outside a live run) renders every swatch owned/full-ink.
 var _states: Dictionary = {}
-# ink_material with dim = LOCKED_ALPHA, built lazily, shared by every locked
-# swatch in this section.
-var _dim_material: ShaderMaterial = null
+# Which swatch the pointer is over, -1 for none. Driven by JournalShopInput.
+var _hovered: int = -1
+# The swatch currently recoiling from an unaffordable click, and how far through
+# that recoil it is (1 -> 0).
+var _denied: int = -1
+var _deny_phase: float = 0.0
+var _deny_tween: Tween
 
 
 func _ready() -> void:
@@ -181,13 +226,11 @@ func _ready() -> void:
 	_rebuild()
 
 
-## Height of the title row, rounded UP to a whole block. Everything below it is
-## therefore in phase with the page whatever face the title ends up using.
+## Height of the title row, rounded UP to a whole block, PLUS the block holding its
+## rule. Everything below it is therefore in phase with the page whatever face the
+## title ends up using. See JournalTitle for why the rule needs a block of its own.
 func header_row_px() -> int:
-	var face := active_header_font()
-	var h: float = face.get_height(header_font_size) if face != null else float(header_font_size)
-	var block: int = maxi(1, block_px)
-	return int(ceilf(h / float(block))) * block
+	return JournalTitle.row_px(active_header_font(), header_font_size, block_px)
 
 
 ## The title face actually used: the export if set, else the theme's Label font.
@@ -228,17 +271,39 @@ func set_entry_state(id: StringName, locked: bool, cost: int,
 	_apply_states()
 
 
-## The swatch cell rect for one entry, in this node's local space. Same layout
-## arithmetic as _rebuild, so hit-testing and rendering cannot drift apart.
+## What a pointer has to be over to hit one entry, in this node's local space.
+##
+## Covers what is DRAWN, not the slot it was allotted. `_rebuild` centres each
+## swatch in its cell at the ART's own size and does not scale it, so the moment
+## the art is bigger than `cell_size` — 32px tile swatches in a 24x16 cell, say —
+## most of what the player can see sits outside the cell. Hit-testing the cell then
+## means only the middle of the picture responds, which reads as the page being
+## broken rather than as a tight target.
+##
+## Vertical padding is free: a section is a single ROW of entries, so there is
+## nothing above or below to steal from. Horizontal padding only goes on the outer
+## ends, because cells abut — widening an inner edge would put two entries over the
+## same texels, and `entry_at` would silently award them to whichever comes first.
 func entry_rect(index: int) -> Rect2:
-	return Rect2(
-			Vector2(_LEFT_INSET_PX + index * cell_size.x, header_row_px()),
+	var pitch: int = maxi(1, cell_size.x)
+	var r := Rect2(
+			Vector2(_LEFT_INSET_PX + index * pitch, header_row_px()),
 			Vector2(cell_size))
+	if index >= 0 and index < _swatches.size() and index < _rest_positions.size() \
+			and is_instance_valid(_swatches[index]):
+		var art := Rect2(_rest_positions[index], _swatches[index].size)
+		var top: float = minf(r.position.y, art.position.y)
+		r = Rect2(Vector2(r.position.x, top),
+				Vector2(r.size.x, maxf(r.end.y, art.end.y) - top))
+	var pad := float(maxi(0, hit_padding_px))
+	return r.grow_individual(
+			pad if index == 0 else 0.0, pad,
+			pad if index == _swatches.size() - 1 else 0.0, pad)
 
 
 ## Which entry a local-space point lands on, -1 for a miss. Hit-tested in
 ## UNWARPED page space: the page warp displaces this content by at most a few
-## texels near the spine, and a 40x36 cell absorbs that error (the accepted
+## texels near the spine, and a cell absorbs that error (the accepted
 ## simplification — see preview_page_warp.gd's findings).
 func entry_at(point: Vector2) -> int:
 	for i in _swatches.size():
@@ -257,28 +322,68 @@ func _state_for(index: int) -> Dictionary:
 	return _states.get(entry_id_at(index), {})
 
 
+# --- Pointer feedback (JournalShopInput drives these too) --------------------
+
+## Which swatch the pointer is over, or -1. Idempotent, so the input node can call
+## it every mouse-motion event without churning.
+func set_hovered(index: int) -> void:
+	if index == _hovered:
+		return
+	_hovered = index
+	_apply_states()
+
+
+## Recoil + redden one entry, for a click the player cannot afford. Purely
+## presentational: nothing about the purchase is decided here.
+##
+## The SWATCH ITSELF cannot be tinted, and that is not an oversight —
+## journal_ink.gdshader writes COLOR outright and never multiplies the vertex
+## modulate back in, so self_modulate on one of these is silently ignored (its own
+## header says so). What moves is the swatch's POSITION, and what reddens is the
+## cost text, which this node draws itself and is therefore not under that material.
+func flash_denied(index: int) -> void:
+	if index < 0 or index >= _swatches.size():
+		return
+	if _deny_tween and _deny_tween.is_valid():
+		_deny_tween.kill()
+	_denied = index
+	# Decaying rather than constant amplitude: a recoil that fades reads as the
+	# page absorbing the poke, where an even shake reads as a broken animation.
+	_deny_tween = create_tween()
+	_deny_tween.tween_method(_set_deny_phase, 1.0, 0.0, DENY_DURATION)
+	_deny_tween.tween_callback(func() -> void:
+		_denied = -1
+		_set_deny_phase(0.0))
+
+
+func _set_deny_phase(value: float) -> void:
+	_deny_phase = value
+	_apply_states()
+
+
+# Whole texels, and zero at both ends of the tween: a swatch left parked on a
+# fractional offset would resample the pixel art it spent _rebuild floors avoiding.
+func _deny_offset(index: int) -> int:
+	if index != _denied or _deny_phase <= 0.0:
+		return 0
+	return int(roundf(sin(_deny_phase * PI * DENY_SHAKES) * _deny_phase)) * DENY_SHAKE_PX
+
+
 func _apply_states() -> void:
 	for i in _swatches.size():
 		var r: TextureRect = _swatches[i]
 		if not is_instance_valid(r):
 			continue
-		if _state_for(i).get("locked", false):
-			r.material = _locked_material()
-		else:
-			r.material = ink_material
+		var locked: bool = _state_for(i).get("locked", false)
+		var hovered: bool = i == _hovered
+		var m := r.material as ShaderMaterial
+		if m != null:
+			m.set_shader_parameter(&"dim",
+				(HOVER_ALPHA if hovered else LOCKED_ALPHA) if locked else 1.0)
+		if i < _rest_positions.size():
+			r.position = _rest_positions[i] + Vector2(
+				_deny_offset(i), -HOVER_LIFT_PX if hovered else 0)
 	queue_redraw()
-
-
-# One duplicate per section, not per swatch: every locked swatch fades the
-# same amount, and the duplicate exists only because the shared ink material
-# must keep dim = 1.0 for everything else on the page.
-func _locked_material() -> ShaderMaterial:
-	if ink_material == null:
-		return null
-	if _dim_material == null:
-		_dim_material = ink_material.duplicate() as ShaderMaterial
-		_dim_material.set_shader_parameter(&"dim", LOCKED_ALPHA)
-	return _dim_material
 
 
 # Cuts one tile's art out of the atlas. get_tile_texture_region accounts for
@@ -326,18 +431,27 @@ func _rebuild() -> void:
 			remove_child(r)
 			r.queue_free()
 	_swatches.clear()
+	_rest_positions.clear()
 
 	var top: int = header_row_px()
 	var x: int = _LEFT_INSET_PX
 	for tex: Texture2D in swatch_textures():
 		var r := PixelUI.make_icon_sized(tex)
-		r.material = ink_material
+		# ONE MATERIAL PER SWATCH, where a single shared one would once have done.
+		# Hover and lock now drive `dim` per entry, so a shared material would fade
+		# and brighten every swatch in the section together. duplicate() is shallow
+		# — the shader and all four ramp textures stay the same objects — so
+		# retuning the ink is still a single resource edit, which was the point of
+		# sharing in the first place.
+		if ink_material != null:
+			r.material = ink_material.duplicate() as ShaderMaterial
 		# Centred in its cell, then floored to whole texels: a swatch on a half
 		# texel resamples 32px pixel art the whole style depends on staying hard.
 		var art := tex.get_size()
 		r.position = Vector2(
 			floorf(x + (float(cell_size.x) - art.x) * 0.5),
 			floorf(top + (float(cell_size.y) - art.y) * 0.5))
+		_rest_positions.append(r.position)
 		add_child(r)
 		# Deliberately NOT set_owner: under @tool an owned child would be written
 		# into field_journal.tscn, and the authored arrays would then have a stale
@@ -349,13 +463,12 @@ func _rebuild() -> void:
 
 
 func _draw() -> void:
-	var face := active_header_font()
-	if face != null and not title.is_empty():
-		# tr() INSIDE _draw, not cached: Control queue_redraw()s itself on
-		# NOTIFICATION_TRANSLATION_CHANGED, so resolving here is all a locale
-		# switch needs. A cached translation would need its own handler.
-		draw_string(face, Vector2(_LEFT_INSET_PX, face.get_ascent(header_font_size) + TITLE_INK_INSET_PX),
-			tr(title), HORIZONTAL_ALIGNMENT_LEFT, -1, header_font_size, text_color)
+	# The rule gets a block of its own here, unlike the calendar's — what sits under
+	# this heading is a 36-texel swatch row, not 8px body copy, so there is nothing
+	# to share a block with.
+	JournalTitle.draw(self, active_header_font(), header_font_size, title,
+		int(size.x), text_color,
+		maxi(1, block_px) + header_underline_offset_px)
 	_draw_costs()
 
 
@@ -379,6 +492,14 @@ func _draw_costs() -> void:
 				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE).x
 		var color := text_color if state.get("affordable", false) \
 				else Palette.with_alpha(text_color, LOCKED_ALPHA)
+		if i == _denied and _deny_phase > 0.0:
+			# The one place this page prints something that is NOT a journal ink
+			# ramp stop. A refusal has to read at a glance, and the ramps are low
+			# contrast by authoring (see the tests' minimum-luminance guard) — every
+			# red in them sits within a shade of the brown it would replace. It is
+			# transient and code-side, so it never reaches the authored-colour rule
+			# the ramps exist to enforce.
+			color = Palette.with_alpha(Palette.DANGER, _deny_phase)
 		draw_string(face,
-				Vector2(rect.end.x - w - 2.0, rect.end.y - 2.0),
+				Vector2(rect.end.x - w - 2.0 + _deny_offset(i), rect.end.y - 2.0),
 				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE, color)
