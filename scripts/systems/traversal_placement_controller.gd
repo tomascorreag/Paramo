@@ -387,6 +387,11 @@ func _place_bridge(far_cell: Vector2i) -> void:
 		cancel()
 		return
 
+	# Charge at commit — after validate, so a rejected aim costs nothing.
+	if not _pay_placement(&"bridge"):
+		cancel()
+		return
+
 	if _placer == null:
 		_placer = StructurePlacer.new(structure_layer_manager)
 
@@ -400,7 +405,8 @@ func _place_bridge(far_cell: Vector2i) -> void:
 		# build() rolls back its own paint state and leaves no traversal edge;
 		# just drop the node so we don't accumulate orphans. Successful builds
 		# self-register on the occupant registry — no controller-side tracking
-		# needed.
+		# needed. Refund: the player paid for a bridge that does not exist.
+		_refund_placement(&"bridge")
 		inst.queue_free()
 
 	cancel()
@@ -438,14 +444,43 @@ func _place_ladder(target_cell: Vector2i) -> void:
 		upper_cell = _origin_cell
 		base_alt = b_tile.altitude_low
 
+	# Charge at commit — parity with bridge.
+	if not _pay_placement(&"ladder"):
+		cancel()
+		return
+
 	var inst: Ladder = ladder_scene.instantiate()
 	world.add_child(inst)
 	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
 	if not inst.build():
-		# Successful builds self-register; only failures need cleanup.
+		# Successful builds self-register; only failures need cleanup + refund.
+		_refund_placement(&"ladder")
 		inst.queue_free()
 
 	cancel()
+
+
+# ----------------------------------------------------------------------------
+# Placement cost
+# ----------------------------------------------------------------------------
+
+# The scene's UnlockState, resolved lazily by group. Null (bare test scenes,
+# tools) means placement is free — the token economy only exists where the
+# node does.
+var _unlocks: Node = null
+
+
+func _pay_placement(type: StringName) -> bool:
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	if _unlocks != null and _unlocks.has_method(&"try_pay_placement"):
+		return bool(_unlocks.call(&"try_pay_placement", type))
+	return true
+
+
+func _refund_placement(type: StringName) -> void:
+	if _unlocks != null and _unlocks.has_method(&"refund_placement"):
+		_unlocks.call(&"refund_placement", type)
 
 
 # ----------------------------------------------------------------------------

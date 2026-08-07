@@ -1,27 +1,14 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/hud.gd" id="1_hud"]
 [ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/frailejon.tres" id="2_icon"]
-[ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/season_wheel.tres" id="3_wheel"]
 [ext_resource type="StyleBox" path="res://resources/ui/styleboxes/frame_border.tres" id="4_frame"]
-
-; Stepped (constant-interpolation) glow rising from the slit, behind the wheel.
-; Single palette colour (index 30 #14233A) fading to transparent over 4 hard
-; bands → pixel-art look, no smooth ramp. interpolation_mode 1 = CONSTANT.
-[sub_resource type="Gradient" id="Gradient_glow"]
-interpolation_mode = 1
-offsets = PackedFloat32Array(0, 0.33, 0.66, 1)
-colors = PackedColorArray(0.078431, 0.137255, 0.227451, 0.85, 0.078431, 0.137255, 0.227451, 0.5, 0.078431, 0.137255, 0.227451, 0.22, 0.078431, 0.137255, 0.227451, 0)
-
-[sub_resource type="GradientTexture2D" id="GradientTexture2D_glow"]
-gradient = SubResource("Gradient_glow")
-width = 8
-height = 32
-fill_from = Vector2(0, 1)
-fill_to = Vector2(0, 0)
 
 ; Frames are built in code (see hud.gd::_frame_stylebox). Marker fills below
 ; use palette2.aseprite index 12 (#FDD179). Alpha stays 1 here.
+;
+; The season gauge and run-info readout that used to live here moved into the
+; Field Journal (scenes/ui/field_journal.tscn), opened by JournalButton below.
 
 ; layer 110 sits ABOVE PostProcessLayer (layer 100, hint_screen_texture grading +
 ; vignette) in gameplay_base, so HUD elements render on top of the post-process
@@ -29,73 +16,6 @@ fill_to = Vector2(0, 0)
 [node name="HUD" type="CanvasLayer"]
 layer = 110
 script = ExtResource("1_hud")
-
-; Glow behind the gauge — listed before SeasonWheelMask so the wheel draws over
-; it. Rises from the slit (bottom) and fades out above the dome; nearest filter
-; keeps the gradient's bands crisp when stretched.
-[node name="WheelGlow" type="TextureRect" parent="."]
-texture_filter = 1
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 2.0
-offset_top = -50.0
-offset_right = 74.0
-offset_bottom = -6.0
-grow_vertical = 0
-mouse_filter = 2
-texture = SubResource("GradientTexture2D_glow")
-expand_mode = 1
-
-; Half-dome season gauge, bottom-left. The mask clips to its top half (64x32);
-; the 64x64 wheel inside rotates around the mask's bottom-center (32,32), so only
-; the top semicircle shows and the current season's weather rides the top.
-[node name="SeasonWheelMask" type="Control" parent="."]
-unique_name_in_owner = true
-clip_contents = true
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = -38.0
-offset_right = 70.0
-offset_bottom = -6.0
-grow_vertical = 0
-mouse_filter = 2
-
-[node name="SeasonWheel" type="TextureRect" parent="SeasonWheelMask"]
-unique_name_in_owner = true
-texture_filter = 1
-offset_right = 64.0
-offset_bottom = 64.0
-mouse_filter = 2
-texture = ExtResource("3_wheel")
-expand_mode = 1
-stretch_mode = 5
-
-; Slot lip the wheel appears inserted into. Long, thin, dark (palette2 index 30
-; #14233A — the darkest entry); drawn AFTER the mask so it overlaps the wheel's
-; flat bottom edge and reads as a slit the semicircle emerges from.
-[node name="WheelSlit" type="ColorRect" parent="."]
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 2.0
-offset_top = -8.0
-offset_right = 74.0
-offset_bottom = -5.0
-grow_vertical = 0
-mouse_filter = 2
-color = Color(0.078431, 0.137255, 0.227451, 1)
-
-; Dev run readout, sits just above the season gauge (retired once HUD bars land).
-; RunController (procedural_base) writes here via NodePath ../HUD/RunDebugLabel.
-[node name="RunDebugLabel" type="Label" parent="."]
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = -58.0
-offset_right = 474.0
-offset_bottom = -40.0
-grow_vertical = 0
-text = "—"
 
 [node name="Minimap" type="Panel" parent="."]
 visible = false
@@ -198,7 +118,7 @@ grow_vertical = 0
 mouse_filter = 1
 
 ; Pause affordance, bottom-right corner (mirrors EquippedSlot's bottom-left 32x32).
-; Styled + given its glyph in hud.gd; opens the PauseMenu via the pause_menu group.
+; Styled + given its glyph in hud.gd; opens the PauseMenu via the exported pause_menu ref.
 [node name="PauseButton" type="Button" parent="."]
 unique_name_in_owner = true
 anchor_left = 1.0
@@ -208,6 +128,22 @@ anchor_bottom = 1.0
 offset_left = -20.0
 offset_top = -20.0
 offset_right = -4.0
+offset_bottom = -4.0
+grow_horizontal = 0
+grow_vertical = 0
+focus_mode = 0
+
+; Field-journal affordance, one 16x16 slot left of PauseButton (2px gap). Styled +
+; iconed in hud.gd (_setup_journal_button); opens FieldJournal via the exported ref.
+[node name="JournalButton" type="Button" parent="."]
+unique_name_in_owner = true
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -38.0
+offset_top = -20.0
+offset_right = -22.0
 offset_bottom = -4.0
 grow_horizontal = 0
 grow_vertical = 0

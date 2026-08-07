@@ -110,6 +110,10 @@ signal generation_finished
 ## generates / paints / spawns, then fades it out. Disable to skip the overlay
 ## (e.g. when this scene is embedded inside another that owns its own loading UI).
 @export var show_loading_overlay: bool = true
+## Seconds the finished loading screen lingers (bar full) before fading out into
+## whatever is behind it (the language gate on gameplay maps). Pure pacing: a
+## fade that starts the instant the bar fills reads as an abrupt cut.
+@export var overlay_linger: float = 1.0
 
 @export_tool_button("Regenerate") var regenerate_action := regenerate
 @export_tool_button("Clear") var clear_action := clear
@@ -119,13 +123,25 @@ signal generation_finished
 # Lifecycle
 # ----------------------------------------------------------------------------
 
-func _ready() -> void:
+func _enter_tree() -> void:
 	if Engine.is_editor_hint():
 		return
 	# Discoverable by TitleIntro, which waits on generation_finished before
-	# showing its "click to begin" gate (so the prompt isn't drawn over the
-	# loading overlay and clicks aren't accepted before the world exists).
+	# showing its language gate (so the boxes aren't drawn over the loading
+	# overlay and clicks aren't accepted before the world exists).
+	#
+	# Joined in _enter_tree, NOT _ready: this node is ADDED in procedural_base,
+	# so it sits after every inherited gameplay_base child in tree order and its
+	# _ready runs after TitleIntro's. TitleIntro's group lookup then found
+	# nothing and activated the gate over the loading screen. _enter_tree
+	# propagates through the whole subtree before any _ready fires, so the
+	# membership is visible no matter the ready order.
 	add_to_group(&"procedural_world")
+
+
+func _ready() -> void:
+	if Engine.is_editor_hint():
+		return
 	if randomize_seed_on_ready:
 		# randi() is non-negative (0..2^32-1 mod int range), so it satisfies
 		# the `seed_override >= 0` sentinel in _resolve_params.
@@ -185,7 +201,7 @@ func regenerate() -> void:
 		# editor mode (Pathfinder is a placeholder) and when `world` is
 		# unwired (defensive — emits a single error).
 		if world != null:
-			_OBJECT_PAINTER.paint(grid, world, pathfinder)
+			_OBJECT_PAINTER.paint(grid, world, pathfinder, _object_rng(params))
 
 	_place_player_on_walkable(grid)
 
@@ -229,7 +245,7 @@ func regenerate_async() -> void:
 	_validate_layer_ceiling(params, layers_by_altitude)
 
 	if overlay != null:
-		overlay.set_status("Generando terreno…")
+		overlay.set_status("LOADING_TERRAIN")
 	var grid: TerrainGrid = await _generate_grid_async(params, overlay)
 	if grid == null:
 		push_error("ProceduralWorld: terrain generation returned null — aborting.")
@@ -239,7 +255,7 @@ func regenerate_async() -> void:
 
 	# Paint the playable grid + south-cliff skirt, a few rows per frame.
 	if overlay != null:
-		overlay.set_status("Dibujando el mundo…")
+		overlay.set_status("LOADING_PAINTING")
 	var paint_ctx: Dictionary = TerrainPainter.begin_paint(
 		grid, layers_by_altitude, tile_set, params
 	)
@@ -255,8 +271,9 @@ func regenerate_async() -> void:
 		pathfinder.rebuild()
 		if world != null:
 			if overlay != null:
-				overlay.set_status("Sembrando vegetación…")
-			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(grid, world, pathfinder)
+				overlay.set_status("LOADING_PLANTING")
+			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(
+					grid, world, pathfinder, _object_rng(params))
 			if not spawn_ctx.is_empty():
 				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
 					if overlay != null:
@@ -275,10 +292,13 @@ func regenerate_async() -> void:
 
 	# Shader pre-warm: hold the overlay up while the just-painted world (water /
 	# post-process / rain materials) draws hidden, so WebGL compiles those
-	# shaders before the player can see the map. Then fade out and free.
+	# shaders before the player can see the map. Then linger (pacing — see
+	# overlay_linger), fade out and free.
 	if overlay != null:
 		for _i in SHADER_WARM_FRAMES:
 			await get_tree().process_frame
+		if overlay_linger > 0.0:
+			await get_tree().create_timer(overlay_linger).timeout
 		await overlay.fade_out()
 		overlay.queue_free()
 
@@ -361,6 +381,15 @@ func _validate_layer_ceiling(
 # that mutates a band (e.g. weight tweak per pass) would silently mutate the
 # saved asset. If no resource is assigned, falls back to default values
 # (defined on TerrainGenerationParams) and warns.
+# Object placement draws from a seed-derived stream so rock layouts are part
+# of the seed's identity (a "favorite seed" bake reproduces its rocks, and
+# the balance simulator sees the same layouts as the game).
+func _object_rng(params: TerrainGenerationParams) -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = params.seed ^ ObjectPainter.OBJECT_SEED_XOR
+	return rng
+
+
 func _resolve_params() -> TerrainGenerationParams:
 	var p: TerrainGenerationParams
 	if generation_params != null:

@@ -30,6 +30,12 @@ const FACING_NW: int = 3
 const WALK_FRAMES_PER_DIR: int = 6
 const WALK_FPS: float = 8.0
 
+# Frames of the walk cycle where a foot contacts the ground, authored in the
+# sprite sheet. Footstep SFX fire on these, so the sound lands with the visible
+# footfall instead of on a clock of its own. At WALK_FPS these two are evenly
+# spaced (3 frames apart), giving a footfall every 0.375 s while walking.
+const WALK_CONTACT_FRAMES: Array[int] = [2, 5]
+
 # Grid-axis step direction -> facing index. Keys cover the 4 legal path
 # transitions. Any other direction is a bug in the pathfinder.
 const DIR_TO_FACING: Dictionary = {
@@ -75,6 +81,7 @@ const ITEM_LANTERN: StringName = &"lantern"
 @onready var _shadow: Sprite2D = $Shadow
 @onready var _camera: Camera2D = $Camera2D
 @onready var _light: PlayerLightController = $PlayerLight
+@onready var _footsteps: FootstepAudio = $FootstepAudio
 
 # Base sprite offset from the scene (feet-to-center). Altitude lift is added
 # on top of this so the visual shifts up while global_position stays at
@@ -88,7 +95,7 @@ var _base_visual_y_offset: float = 0.0
 
 # Lerped shadow taper cutoff (screen px from entity cell center, positive in
 # the taper direction). _push_shadow_cell_state computes a target from the
-# pathfinder's altitude deltas; _physics_process slides current toward target
+# pathfinder's altitude deltas; _tick_movement slides current toward target
 # at iso step speed (cell_width / step_duration) so the shadow extends/retracts
 # at roughly the same pace as the player walks. The "no clip" sentinel is
 # pinned to the shadow's own max extent (+ 1 px) so the lerp range stays
@@ -130,6 +137,12 @@ var _facing: int = FACING_SE
 # the cycle at WALK_FPS regardless of step_duration, so cadence stays natural
 # even when steps are faster or slower than one cycle.
 var _walk_time: float = 0.0
+
+# Running count of foot contacts the walk cycle has passed since the last idle.
+# Compared each tick to fire footstep SFX; counting (rather than testing
+# "is the current frame a contact frame?") means a frame hitch that skips past
+# a contact still produces exactly one footfall, never zero and never a burst.
+var _contacts_passed: int = 0
 
 # Step state. _stepping == true iff we're mid-lerp between two cells.
 var _stepping: bool = false
@@ -232,7 +245,7 @@ func get_shadow_material() -> ShaderMaterial:
 
 func follow_path(cells: Array[Vector2i]) -> void:
 	_path = cells.duplicate()
-	# If not currently stepping, the next _physics_process will begin one.
+	# If not currently stepping, the next _tick_movement will begin one.
 	# If currently stepping, finish the current step first (stay grid-aligned)
 	# then consume the new path starting from _step_to_cell.
 	if debug_logging:
@@ -255,10 +268,18 @@ func current_altitude() -> float:
 
 
 # ----------------------------------------------------------------------------
-# Physics loop
+# Movement loop
 # ----------------------------------------------------------------------------
 
-func _physics_process(delta: float) -> void:
+# Driven from _process (the RENDER clock), not _physics_process. Camera2D's
+# position_smoothing runs on CAMERA2D_PROCESS_IDLE by default, i.e. once per
+# rendered frame; stepping the player on the 60 Hz physics clock instead left
+# the character the only thing on screen with a stale position between ticks,
+# so the world scrolled smoothly while the sprite visibly stuttered against it.
+# Nothing here needs a fixed timestep — this is a CharacterBody2D that never
+# calls move_and_slide, it writes global_position directly. If the camera's
+# process_callback is ever switched to PHYSICS, this has to move back with it.
+func _tick_movement(delta: float) -> void:
 	_update_lantern()
 	_tick_shadow_cutoff(delta)
 
@@ -277,8 +298,11 @@ func _physics_process(delta: float) -> void:
 	if not _path.is_empty():
 		_begin_next_step()
 	elif _walk_time != 0.0:
-		# Fully idle: snap back to the planted-foot pose.
+		# Fully idle: snap back to the planted-foot pose and rewind the walk
+		# cycle, so the next walk starts from frame 0 and its first footfall
+		# lands on that cycle's first contact frame.
 		_walk_time = 0.0
+		_contacts_passed = 0
 		_sprite.frame = _facing * WALK_FRAMES_PER_DIR
 
 
@@ -313,26 +337,18 @@ func _begin_next_step() -> void:
 	_step_is_climb = (kind == TileGrid.StepKind.LADDER)
 	_step_climb_turned = false
 	var alt_delta: float = absf(_step_to_alt - _step_from_alt)
-	match kind:
-		TileGrid.StepKind.LADDER:
-			# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
-			# validated to integer-cube heights, so this divides evenly; floats
-			# are used only to tolerate any future sub-cube edges without
-			# collapsing to zero. Clamp to >=1 so a degenerate 0-delta edge
-			# still takes one climb step's worth of time.
-			var cubes: float = maxf(alt_delta / 2.0, 1.0)
-			_step_duration_effective = step_duration * climb_duration_multiplier * cubes
-		TileGrid.StepKind.SCRAMBLE:
-			# No-ladder ledge climb: scales with height, no clamp, so a half-step
-			# ledge → 0.5 cube → 2× a step and a full cube → 4×. Double the cost
-			# of climbing the same height on a ladder.
-			_step_duration_effective = step_duration * scramble_duration_multiplier * (alt_delta / 2.0)
-		TileGrid.StepKind.RAMP_SIDE:
-			# Stepping onto/off a ramp from the side: flat 2× (same as a 1-cube
-			# ladder), regardless of the sub-step change to the ramp center.
-			_step_duration_effective = step_duration * climb_duration_multiplier
-		_:
-			_step_duration_effective = step_duration
+	# Duration table lives on TileGrid (step_duration_for) so the balance
+	# simulator's bot pays exactly these times without duplicating the rules.
+	_step_duration_effective = TileGrid.step_duration_for(
+			kind, alt_delta, step_duration,
+			climb_duration_multiplier, scramble_duration_multiplier)
+
+	# Footstep SFX. Keyed on the DESTINATION cell — the surface being stepped
+	# onto. FootstepAudio runs its own free-running footfall clock (a pace is
+	# shorter than a tile), so this only refreshes the surface/interval; the
+	# rhythm is not restarted per cell.
+	if _footsteps != null:
+		_footsteps.step_started(_pathfinder, next_cell, kind)
 
 	# Commit the "logical" cell now: future pathfinds will plan from
 	# _step_to_cell, not from the cell we're leaving. This lets reclicks
@@ -350,7 +366,7 @@ func _finish_step() -> void:
 	_altitude = _step_to_alt
 	_apply_position(_step_to_cell, _altitude)
 	# Intentionally don't reset sprite frame here — the walk cycle continues
-	# across step boundaries. Idle reset happens in _physics_process when the
+	# across step boundaries. Idle reset happens in _tick_movement when the
 	# path is empty.
 
 
@@ -411,8 +427,41 @@ func _apply_step_interp(t: float) -> void:
 	# Compensate the Y snap on sprite/camera so movement looks smooth.
 	_apply_visual_lift(alt, pos.y - snap_y)
 	# Walk cycle runs at WALK_FPS independent of step_duration.
-	var walk_frame: int = int(_walk_time * WALK_FPS) % WALK_FRAMES_PER_DIR
+	var abs_frame: int = int(_walk_time * WALK_FPS)
+	var walk_frame: int = abs_frame % WALK_FRAMES_PER_DIR
 	_sprite.frame = _facing * WALK_FRAMES_PER_DIR + walk_frame
+	_tick_footfalls(abs_frame)
+
+
+# Fire a footstep for every foot contact the walk cycle has passed since the
+# last call. `abs_frame` is the cycle-absolute frame index (not wrapped), so
+# _contacts_total is monotonic while walking and a plain > comparison is enough
+# — no edge-detection state to get wrong at cycle wrap or on a repeated call
+# with the same _walk_time (_begin_next_step and _tick_movement can both land
+# on one).
+func _tick_footfalls(abs_frame: int) -> void:
+	if _footsteps == null:
+		return
+	var total := _contacts_total(abs_frame)
+	if total <= _contacts_passed:
+		return
+	_contacts_passed = total
+	_footsteps.footfall()
+
+
+# Number of foot contacts at or before `abs_frame`. Counts whole cycles, then
+# the contacts reached within the partial cycle. Reads WALK_CONTACT_FRAMES
+# rather than assuming the contacts are evenly spaced, so re-authoring the
+# sheet's contact frames is a one-line change with no other edits.
+static func _contacts_total(abs_frame: int) -> int:
+	if abs_frame < 0:
+		return 0
+	var total: int = (abs_frame / WALK_FRAMES_PER_DIR) * WALK_CONTACT_FRAMES.size()
+	var within: int = abs_frame % WALK_FRAMES_PER_DIR
+	for c: int in WALK_CONTACT_FRAMES:
+		if c <= within:
+			total += 1
+	return total
 
 
 func _apply_position(cell: Vector2i, alt: float) -> void:
@@ -508,8 +557,8 @@ func _shadow_no_clip() -> float:
 
 
 # Slide _shadow_cutoff_current toward _shadow_cutoff_target at iso step speed
-# and push the result. Called every physics frame from _physics_process so the
-# shadow extends/retracts at the same pace as the player walks.
+# and push the result. Called every frame from _tick_movement so the shadow
+# extends/retracts at the same pace as the player walks.
 func _tick_shadow_cutoff(delta: float) -> void:
 	if _shadow == null:
 		return
@@ -715,6 +764,10 @@ func _cell_camera_world(cell: Vector2i) -> Vector2:
 
 
 func _process(delta: float) -> void:
+	# Movement first: the pan integrator below chases _camera_target_local_y,
+	# which _apply_visual_lift writes. Ticking movement after it would aim the
+	# pan at last frame's rest pose.
+	_tick_movement(delta)
 	if not _camera_panning or not _pan_running:
 		return
 	_pan_elapsed += delta

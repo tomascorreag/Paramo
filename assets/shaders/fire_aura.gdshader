@@ -29,25 +29,42 @@ uniform sampler2D aura_tex : repeat_enable, filter_linear;
 // must agree or the glow lands off-direction.
 uniform float aspect = 1.777;
 
-// Fire ramp, palette-locked to fire_blobs.gdshader's own colours: faint edges
-// read red (P05), strong edges gold (P12), the same white->yellow->orange->red
-// ramp the flames use — so the aura is unmistakably "fire", not a generic alert.
+// Size of one LOW-RES texel in this rect's 0..1 UV (= N / window_size, set by the
+// CPU from DisplayManager.current_scale). This rect draws at full monitor res —
+// above post-process, outside the low-res SubViewport — so without this it would
+// bloom smoothly at monitor-pixel resolution and clash with the pixel-art world.
+// We snap UV to this grid before doing ANY maths, so the whole aura (bearing,
+// colour, band edge) resolves in chunky texels locked to the terrain's grid.
+uniform vec2 texel = vec2(0.0);
+
+// Fire ramp: faint edges read red (P05), strong edges read orange (P04) — a
+// red->orange ramp with no yellow, so the aura reads as warm firelight bleeding
+// past the frame rather than a bright sodium glow.
 uniform vec3 color_lo : source_color = vec3(0.710, 0.349, 0.271); // P05 #B55945
-uniform vec3 color_hi : source_color = vec3(0.992, 0.820, 0.475); // P12 #FDD179
+uniform vec3 color_hi : source_color = vec3(0.922, 0.588, 0.380); // P04 #EB9661
 
 // Overall brightness of the emitted glow.
-uniform float strength : hint_range(0.0, 3.0) = 1.15;
+uniform float strength : hint_range(0.0, 3.0) = 0.7;
 // How deep the glow reaches inward from the edge, at the FAINTEST (min) and
 // STRONGEST (max) weight. A bigger/closer fire pushes the band further in — the
 // "size proportional to proximity/intensity" half of the brief.
-uniform float min_thickness : hint_range(0.0, 0.5) = 0.05;
-uniform float max_thickness : hint_range(0.0, 0.8) = 0.30;
+uniform float min_thickness : hint_range(0.0, 0.5) = 0.04;
+uniform float max_thickness : hint_range(0.0, 0.8) = 0.18;
 
 // TAU / PI are built into the Godot shading language — do not redefine them.
 
 void fragment() {
+	// Snap UV to the low-res texel grid (block centre) so everything downstream —
+	// bearing, borderness, band edge — steps in whole terrain texels instead of
+	// smooth monitor pixels. texel == 0 (unset) disables the snap, leaving the old
+	// smooth behaviour as a safe fallback.
+	vec2 puv = UV;
+	if (texel.x > 0.0 && texel.y > 0.0) {
+		puv = (floor(UV / texel) + 0.5) * texel;
+	}
+
 	// Bearing of this fragment from screen centre (aspect-corrected, y down).
-	vec2 d = UV - vec2(0.5);
+	vec2 d = puv - vec2(0.5);
 	d.x *= aspect;
 	float ang = atan(d.y, d.x);        // -PI..PI
 	float u = ang / TAU + 0.5;         // 0..1, wraps via repeat_enable
@@ -56,7 +73,7 @@ void fragment() {
 	// Borderness: 0 at centre, 1 at the nearest screen edge. max() (not min())
 	// so the level set at a given b is a rectangle hugging all four edges — the
 	// angular weight `v` is what localises the glow to the fire's direction.
-	float b = max(abs(UV.x - 0.5), abs(UV.y - 0.5)) * 2.0;
+	float b = max(abs(puv.x - 0.5), abs(puv.y - 0.5)) * 2.0;
 
 	float vc = clamp(v, 0.0, 1.0);
 	float thickness = mix(min_thickness, max_thickness, vc);

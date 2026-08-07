@@ -35,6 +35,12 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
 [ext_resource type="Script" path="res://scripts/vfx/fire_aura_overlay.gd" id="34_aura_scr"]
 [ext_resource type="Material" path="res://resources/materials/fire_aura.tres" id="35_aura_mat"]
+[ext_resource type="PackedScene" path="res://scenes/ui/field_journal.tscn" id="36_journal"]
+[ext_resource type="Script" path="res://scripts/systems/water_cycle.gd" id="37_water"]
+[ext_resource type="Script" path="res://scripts/systems/climate_controller.gd" id="38_climate"]
+[ext_resource type="Script" path="res://scripts/systems/regrowth_manager.gd" id="39_regrowth"]
+[ext_resource type="Script" path="res://scripts/systems/visitor_flow.gd" id="40_visitors"]
+[ext_resource type="Script" path="res://scripts/systems/unlock_state.gd" id="41_unlocks"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -219,6 +225,21 @@ background_rect = NodePath("../BackgroundLayer/BG")
 wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
 water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
 
+[node name="WaterCycle" type="Node" parent="." unique_id=480862932]
+script = ExtResource("37_water")
+
+[node name="ClimateController" type="Node" parent="." unique_id=480862933]
+script = ExtResource("38_climate")
+
+[node name="RegrowthManager" type="Node" parent="." unique_id=480862934]
+script = ExtResource("39_regrowth")
+
+[node name="VisitorFlow" type="Node" parent="." unique_id=480862935]
+script = ExtResource("40_visitors")
+
+[node name="UnlockState" type="Node" parent="." unique_id=480862936]
+script = ExtResource("41_unlocks")
+
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=156444878]
 layer = 100
 
@@ -262,7 +283,9 @@ mouse_filter = 2
 color = Color(0, 0, 0, 0)
 script = ExtResource("34_aura_scr")
 
-[node name="HUD" parent="." instance=ExtResource("32_hud")]
+[node name="HUD" parent="." node_paths=PackedStringArray("pause_menu", "field_journal") instance=ExtResource("32_hud")]
+pause_menu = NodePath("../PauseMenu")
+field_journal = NodePath("../FieldJournal")
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)
@@ -278,3 +301,5 @@ title_fade_in_delay = 3.5
 hold_duration = 3.0
 
 [node name="PauseMenu" parent="." instance=ExtResource("33_pause")]
+
+[node name="FieldJournal" parent="." instance=ExtResource("36_journal")]

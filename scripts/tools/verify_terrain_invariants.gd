@@ -658,7 +658,7 @@ func _init() -> void:
 			# exercise real flagged cells. Seeded RNG keeps this reproducible
 			# across harness runs even though runtime placement is randomized.
 			var obj_rng := RandomNumberGenerator.new()
-			obj_rng.seed = s ^ 0xC8FAB0CC
+			obj_rng.seed = s ^ ObjectPainter.OBJECT_SEED_XOR
 			ObjectPainter.assign_object_kinds(grid, obj_rng)
 			grand_total_grids += 1
 			for c in CHECKS:

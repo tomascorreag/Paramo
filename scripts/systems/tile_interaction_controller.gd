@@ -162,7 +162,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	var items := _assemble_menu_items(actions)
+	var items := _assemble_menu_items(actions, ctx)
 
 	_pending_cell = cell
 	var world_pos := pathfinder.cell_to_world(cell)
@@ -233,16 +233,33 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.tile_interaction = self
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
+	ctx.unlocks = _unlocks_node()
 	# Cached BFS from the player's cell — lets is_offerable answer "can the player
 	# reach a cell to act from?" without a per-action flood fill.
 	ctx.reachable = pathfinder.reachable_from(player.current_cell)
 	return ctx
 
 
+# The scene's UnlockState, resolved lazily by group (it sits beside this
+# controller in gameplay_base but _ready order is not guaranteed). Null in
+# scenes without the token economy — actions treat that as all-unlocked.
+var _unlocks: Node = null
+
+func _unlocks_node() -> Node:
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	return _unlocks
+
+
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
 # groups (group != &""). Group order follows registration order; within a
 # group, actions also keep registration order.
-func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
+#
+# Each entry carries "enabled" (from TileAction.is_enabled) so the wheel can dim
+# an action the player can't currently pay for rather than hiding it. A group
+# wrapper is enabled if ANY child is — dimming a submenu whose contents are
+# usable would hide working actions behind a dead-looking icon.
+func _assemble_menu_items(actions: Array[TileAction], ctx: ActionContext) -> Array[Dictionary]:
 	var top: Array[Dictionary] = []
 	var groups: Dictionary = {}            # StringName -> Array[Dictionary]
 	var group_order: Array[StringName] = []
@@ -250,6 +267,7 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 		var entry := {
 			"id": String(a.id),
 			"icon": a.icon,
+			"enabled": a.is_enabled(ctx),
 		}
 		if a.group == &"":
 			top.append(entry)
@@ -261,9 +279,15 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 
 	for group_id in group_order:
 		var submenu: Array = groups[group_id]
+		var any_enabled: bool = false
+		for entry: Dictionary in submenu:
+			if entry.get("enabled", true):
+				any_enabled = true
+				break
 		top.append({
 			"id": _GROUP_ID_PREFIX + String(group_id),
 			"icon": _GROUP_ICONS.get(group_id),
+			"enabled": any_enabled,
 			"submenu": submenu,
 		})
 	return top
@@ -309,6 +333,12 @@ func _on_item_selected(id: String) -> void:
 	if not action.is_offerable(ctx):
 		_deny(_pending_cell)
 		return
+	# Affordability is re-checked separately: the wheel dims an unaffordable
+	# action, but that snapshot is taken when the menu opens, and the balance can
+	# move before the click lands.
+	if not action.is_enabled(ctx):
+		_deny(_pending_cell)
+		return
 	# Already standing next to the target -> act immediately (unchanged UX).
 	if action.is_available(ctx):
 		action.execute(ctx)
@@ -352,7 +382,10 @@ func _process(_delta: float) -> void:
 	var target := _pending_target
 	_pending_action = null  # clear first so unlock/close guards see no pending
 	var ctx := _build_context(target)
-	if action.is_available(ctx):
+	# is_enabled as well as is_available: the walk takes real time, and a costed
+	# action the player could afford when they clicked may be unaffordable by the
+	# time they arrive.
+	if action.is_available(ctx) and action.is_enabled(ctx):
 		action.execute(ctx)
 		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
 		# for plant/remove it clears the walk marker.
@@ -402,6 +435,12 @@ func _deny(cell: Vector2i) -> void:
 # ---------------------------------------------------------------------------
 
 func plant_frailejon(cell: Vector2i) -> void:
+	# Charge at commit. Instancing never fails after this point (no validate
+	# step — _applies already vetted the cell), so no refund path is needed.
+	var unlocks := _unlocks_node()
+	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
+		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
+			return
 	var frailejon: Frailejon = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 

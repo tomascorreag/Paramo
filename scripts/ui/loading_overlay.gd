@@ -16,7 +16,7 @@ extends CanvasLayer
 # assets/palettes/palette2.txt (alpha is free; RGB is locked).
 #
 # Driving API (called by ProceduralWorld's async startup):
-#   set_status(text)    — phase label ("Generando terreno…", etc.)
+#   set_status(key)     — phase label, by translation key (LOADING_TERRAIN, etc.)
 #   set_progress(f)     — absolute bar fill, 0..1
 #   pulse_toward(t)     — ease bar toward `t` (used while threaded generation
 #                         runs and there's no fine-grained progress to show)
@@ -67,13 +67,15 @@ func _ready() -> void:
 	_canvas.add_child(box)
 
 	var title := Label.new()
+	# The game's name — a proper noun, identical in both locales, so it is left as
+	# literal text rather than given a key.
 	title.text = "Páramo"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 24)
 	box.add_child(title)
 
 	_status_label = Label.new()
-	_status_label.text = "Cargando…"
+	_status_label.text = "LOADING_LOADING"
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.add_theme_color_override("font_color", _COL_DIM)
 	box.add_child(_status_label)
@@ -88,9 +90,12 @@ func _ready() -> void:
 	box.add_child(_bar)
 
 
-func set_status(text: String) -> void:
+## Phase label. Takes a TRANSLATION KEY, not text — Label re-translates whatever
+## sits in `text` when the locale changes, so a pre-translated string would freeze
+## in whichever language was active when generation reached that phase.
+func set_status(key: String) -> void:
 	if _status_label != null:
-		_status_label.text = text
+		_status_label.text = key
 
 
 func set_progress(f: float) -> void:

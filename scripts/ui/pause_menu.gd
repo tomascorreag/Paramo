@@ -7,9 +7,9 @@ extends CanvasLayer
 ## live while everything else is frozen.
 ##
 ## The main view shows an inline Settings section (a single master-volume slider)
-## with Quit and Resume beneath it; Quit swaps to a confirm view. Volume is
-## web-only: it drives the page-side Strudel gain through JavaScriptBridge (there
-## is no Godot-side audio, so it's inert on desktop/editor). Quit confirms first,
+## with Quit and Resume beneath it; Quit swaps to a confirm view. Volume drives
+## two sinks: the page-side Strudel music gain through JavaScriptBridge (web
+## only) and the Godot-side SFX bus (all platforms). Quit confirms first,
 ## then fully restarts: on web a
 ## page reload (the truest reset — autoloads, JS and music all clear), on desktop
 ## a scene reload after resetting SeasonManager so RunController.start_run()
@@ -45,6 +45,9 @@ func _wire() -> void:
 	(%CancelBtn as Button).pressed.connect(_set_view.bind(View.MAIN))
 	(%YesBtn as Button).pressed.connect(_do_restart)
 	_volume_slider.value_changed.connect(_on_volume_changed)
+	# Apply the authored default now — otherwise the SFX bus sits at 0 dB (louder
+	# than the slider claims) until the player first drags it.
+	_on_volume_changed(_volume_slider.value)
 
 
 # --- Open / close -----------------------------------------------------------
@@ -89,15 +92,27 @@ func _set_view(v: View) -> void:
 	_view = v
 	_main.visible = v == View.MAIN
 	_confirm.visible = v == View.CONFIRM
-	_title.text = "quit?" if v == View.CONFIRM else "paused"
+	# Translation KEYS, not text: Label re-translates whatever is in `text` when
+	# the locale changes, so storing an already-translated string here would
+	# freeze this one label in the language it was set in.
+	_title.text = "UI_QUIT_Q" if v == View.CONFIRM else "UI_PAUSED"
 
 
 # --- Actions ----------------------------------------------------------------
 
 func _on_volume_changed(v: float) -> void:
-	# Master gain lives page-side (Strudel); no-op off web where there's no audio.
+	# Two sinks, because the game's audio comes from two places: the music is
+	# page-side (Strudel, web only) and the SFX are Godot-side (the SFX bus, all
+	# platforms). One slider drives both so it reads as a true master volume.
 	if OS.has_feature("web"):
 		JavaScriptBridge.eval("window.ParamoMusic && window.ParamoMusic.setVolume(%f);" % v)
+	var sfx := AudioServer.get_bus_index(&"SFX")
+	if sfx >= 0:
+		# linear_to_db(0) is -inf; mute instead so the bus doesn't carry a
+		# non-finite gain.
+		AudioServer.set_bus_mute(sfx, v <= 0.0)
+		if v > 0.0:
+			AudioServer.set_bus_volume_db(sfx, linear_to_db(v))
 
 
 func _do_restart() -> void:

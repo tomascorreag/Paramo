@@ -159,6 +159,11 @@ var _layer_altitudes: Dictionary[TileMapLayer, int] = {}
 # Unique layer altitudes sorted descending — used by resolve_click.
 var _altitudes_desc: Array[int] = []
 
+# Distinct cells with at least one tile on any layer, inside the (clipped)
+# bounds. Fixed at build(); the denominator for "fraction of the mountain"
+# metrics (visitor appeal reads it via FireManager.grid_cell_count).
+var _cell_count: int = 0
+
 # Per-TileSet custom-data layer-id cache populated during build(). Avoids
 # scanning tile_set.get_custom_data_layer_name(i) on every roughness/walkable
 # query downstream.
@@ -237,6 +242,15 @@ func build(layers: Array[TileMapLayer], clip_rect: Rect2i = Rect2i()) -> void:
 
 	for layer in _layers:
 		_ingest_layer(layer)
+
+	# Count once here rather than incrementing in _put_raw: stacked layers
+	# merge-write the same cell several times, so only the post-ingest pass
+	# counts distinct cells.
+	_cell_count = 0
+	for row: Array[CellData] in _tiles:
+		for data: CellData in row:
+			if data != null:
+				_cell_count += 1
 
 
 func _compute_bounds_union(layers: Array[TileMapLayer]) -> Rect2i:
@@ -520,6 +534,13 @@ func inspect_tile_at(layer: TileMapLayer, cell: Vector2i) -> CellData:
 	)
 
 
+## Distinct cells carrying at least one tile, inside the clipped bounds.
+## The bounds RECT overcounts (a disc-shaped map leaves its corners empty);
+## this is the honest "how many tiles is the mountain" total.
+func cell_count() -> int:
+	return _cell_count
+
+
 func in_bounds(cell: Vector2i) -> bool:
 	return _bounds.has_point(cell)
 
@@ -700,6 +721,31 @@ func classify_step(from: Vector2i, to: Vector2i) -> int:
 	return StepKind.FLAT
 
 
+## How long one step of `kind` takes, in REAL seconds (movement is real-time —
+## deliberately unscaled by TimeManager.time_scale). Extracted from the player's
+## step machinery so the balance simulator's bot pays exactly the player's
+## travel times; Player._begin_next_step calls this with its own exports.
+## `alt_delta` is |altitude_center(to) - altitude_center(from)| in half-steps.
+static func step_duration_for(kind: int, alt_delta: float, base: float,
+		climb_mult: float, scramble_mult: float) -> float:
+	match kind:
+		StepKind.LADDER:
+			# Ladder height (in full cubes) = |altitude delta| / 2. Ladders are
+			# validated to integer-cube heights; clamp to >=1 so a degenerate
+			# 0-delta edge still takes one climb step's worth of time.
+			return base * climb_mult * maxf(alt_delta / 2.0, 1.0)
+		StepKind.SCRAMBLE:
+			# No-ladder ledge climb: scales with height, no clamp — a half-step
+			# ledge → 2× a step, a full cube → 4×. Double the cost of the same
+			# height on a ladder.
+			return base * scramble_mult * (alt_delta / 2.0)
+		StepKind.RAMP_SIDE:
+			# Onto/off a ramp from the side: flat 2× (same as a 1-cube ladder).
+			return base * climb_mult
+		_:
+			return base
+
+
 # ----------------------------------------------------------------------------
 # Traversal edges (ladders, future: teleporters, etc.)
 # ----------------------------------------------------------------------------
@@ -719,6 +765,10 @@ func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_remove_edge_one_way(a, b)
 	_remove_edge_one_way(b, a)
+
+
+func clear_traversal_edges() -> void:
+	_traversal_edges.clear()
 
 
 func _add_edge_one_way(a: Vector2i, b: Vector2i) -> void:

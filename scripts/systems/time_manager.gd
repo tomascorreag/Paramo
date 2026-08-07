@@ -40,7 +40,7 @@ var day_count: int = 0
 # --- Configuration ---
 
 ## Real seconds per full game day.
-@export var seconds_per_game_day: float = 300.0
+@export var seconds_per_game_day: float = 240.0
 
 ## Speed multiplier. 1.0 = realtime. Set >1 for debug fast-forward.
 @export var time_scale: float = 1.0
@@ -56,11 +56,18 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	advance(delta)
+
+
+## The frame body, public so the headless simulator can drive fixed-dt steps
+## with _process disabled. Emits day_completed / time_changed / period_changed
+## synchronously, exactly like a frame.
+func advance(delta: float) -> void:
 	if paused or seconds_per_game_day <= 0.0:
 		return
 
-	var advance: float = delta * time_scale / seconds_per_game_day
-	time_of_day += advance
+	var step: float = delta * time_scale / seconds_per_game_day
+	time_of_day += step
 
 	if time_of_day >= 1.0:
 		time_of_day -= 1.0
@@ -74,6 +81,18 @@ func _process(delta: float) -> void:
 		var old: StringName = _current_period
 		_current_period = new_period
 		period_changed.emit(new_period, old)
+
+
+## Reset the clock to the start of day 0 for a fresh run. Re-evaluates the
+## period WITHOUT emitting: leaving _current_period at the previous run's
+## value makes the first advance() fire a spurious period_changed (and with
+## it a weather roll) — or, worse, NOT fire one that a fresh boot would,
+## so the outcome depends on what ran before. Silence is correct here for
+## the same reason _ready is silent: nothing has "changed" yet.
+func reset_clock() -> void:
+	time_of_day = 0.0
+	day_count = 0
+	_current_period = _evaluate_period(time_of_day)
 
 
 ## Returns the current named period.

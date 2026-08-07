@@ -39,12 +39,12 @@ enum Phase { IDLE, ACTIVE, PLANNING, RUN_OVER }
 
 # --- Configuration (tunable; migrate to a RunConfig .tres in the balance pass) ---
 
-## Length of a full year in day/night cycles. The bimodal calendar splits this
-## evenly across `season_cycle`, so each season runs `days_per_year /
-## season_cycle.size()` days. N=16 -> 4 days per season for the default 4-season
-## (Dry-Wet-Dry-Wet) year. Run length = days_per_season * seconds_per_game_day *
-## season_count.
-@export var days_per_year: int = 16
+## Length of a full year in day/night cycles. The calendar splits this evenly
+## across `season_cycle`, so each season runs `days_per_year /
+## season_cycle.size()` days. N=24 -> 4 days per season for the default
+## 6-season (Wet-Dry x3) year. Run length = days_per_season *
+## seconds_per_game_day * season_count.
+@export var days_per_year: int = 24
 
 ## Day/night cycles per season — derived from days_per_year and the number of
 ## seasons in a year (= season_cycle length). Read-only; set days_per_year to
@@ -54,13 +54,21 @@ var days_per_season: int:
 	get:
 		return maxi(1, days_per_year / maxi(1, season_cycle.size()))
 
-## Total seasons in a run. 5 per the min-loop plan (Dry-Wet-Dry-Wet-Dry).
-@export var season_count: int = 5
+## Total seasons in a run. Equal to season_cycle.size(), so a run never
+## crosses a year boundary and year stays 1.
+@export var season_count: int = 6
 
-## Water the run starts with. Until generation/laguna seep feed the ledger,
-## this is the whole pool the player spends on firefighting. Migrate to a
-## RunConfig .tres in the balance pass.
-@export var starting_water: float = 100.0
+## Water the run starts with. Firefighting costs 1 per cell doused and WaterCycle
+## refills continuously (fast while it rains), so this is the buffer that decides
+## how big a fire you can survive before the weather has to bail you out — small
+## on purpose. Migrate to a RunConfig .tres in the balance pass.
+@export var starting_water: float = 10.0
+
+## Tokens the run starts with. Everything placeable begins LOCKED (10 to
+## unlock a type + 5 per placement), so 15 buys exactly one unlock and one
+## placement — the opening has a verb without waiting for the first visitors.
+## Set to 0 for the barren opening. Migrate to a RunConfig .tres later.
+@export var starting_tokens: float = 15.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season
@@ -92,10 +100,10 @@ func start_run() -> void:
 		return
 	ResourceLedger.reset()
 	ResourceLedger.set_amount(&"water", starting_water, &"initial")
+	ResourceLedger.set_amount(&"tokens", starting_tokens, &"initial")
 	season_index = 0
 	year = 1
-	TimeManager.day_count = 0
-	TimeManager.time_of_day = 0.0
+	TimeManager.reset_clock()
 	TimeManager.paused = false
 	_day_at_season_start = 0
 	phase = Phase.ACTIVE
@@ -184,6 +192,9 @@ func _load_default_cycle_if_empty() -> void:
 	var dry: Resource = load("res://resources/seasons/dry.tres")
 	var wet: Resource = load("res://resources/seasons/wet.tres")
 	if dry != null and wet != null:
-		# Bimodal year: two dry windows (Dec-Feb, Jun-Aug) alternating with two
-		# wet (Mar-May, Sep-Nov). Profiles are reused until DJF/JJA need to differ.
-		season_cycle = [dry, wet, dry, wet]
+		# Wet-first alternation (balance decision 2026-08-06): opening wet keeps
+		# the run's first day from being a map-wide cold-start burn — the whole
+		# map is contiguous fuel at day 1, and sim sweeps showed a dry opening
+		# chars ~45% of it before the player can matter. Departs from the strict
+		# bimodal-calendar framing (which had 2 dry + 2 wet per year).
+		season_cycle = [wet, dry, wet, dry, wet, dry]

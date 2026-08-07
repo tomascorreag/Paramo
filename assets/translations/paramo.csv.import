@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://goyss7bxwdmq"
+
+[deps]
+
+files=["res://assets/translations/paramo.en_GB.translation", "res://assets/translations/paramo.es_CO.translation"]
+
+source_file="res://assets/translations/paramo.csv"
+dest_files=["res://assets/translations/paramo.en_GB.translation", "res://assets/translations/paramo.es_CO.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

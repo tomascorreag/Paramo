@@ -1,0 +1,368 @@
+[gd_scene format=3 uid="uid://d3b5rp4i6iybc"]
+
+[ext_resource type="Script" uid="uid://dbdihcnsuqwg5" path="res://scripts/ui/field_journal.gd" id="1_fj"]
+[ext_resource type="Texture2D" uid="uid://b5v4e3dccddha" path="res://assets/sprites/UX/Panels/Book.png" id="2_book"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/season_wheel.tres" id="3_wheel"]
+[ext_resource type="Script" uid="uid://d3ce7li1t4mnk" path="res://scripts/ui/page_warp.gd" id="4_warp"]
+[ext_resource type="Shader" uid="uid://jm7f6d744mw6" path="res://assets/shaders/page_warp.gdshader" id="5_warpsh"]
+[ext_resource type="Curve" uid="uid://b7ueeyevu40yx" path="res://resources/ui/page_curl_top.tres" id="6_curltop"]
+[ext_resource type="Curve" uid="uid://k7ei54awrq1y" path="res://resources/ui/page_curl_bottom.tres" id="7_curlbot"]
+[ext_resource type="Script" uid="uid://x7dfs44812m3" path="res://scripts/ui/page_slit.gd" id="8_slit"]
+[ext_resource type="Shader" uid="uid://c88n8ti56qvxq" path="res://assets/shaders/page_slit.gdshader" id="9_slitsh"]
+[ext_resource type="Script" uid="uid://dhciw5330fbbu" path="res://scripts/ui/run_calendar.gd" id="10_cal"]
+[ext_resource type="FontFile" uid="uid://c2aw5fmhnmntg" path="res://assets/fonts/Eggmode-Pd8g.ttf" id="11_egg"]
+[ext_resource type="Script" uid="uid://llfjwj6xucbe" path="res://scripts/ui/journal_resources.gd" id="12_res"]
+[ext_resource type="Texture2D" uid="uid://coe5b20mflg00" path="res://assets/sprites/UX/icons/water_small.tres" id="14_water"]
+[ext_resource type="Texture2D" uid="uid://beyudk1uthn0j" path="res://assets/sprites/UX/icons/money_small.tres" id="15_money"]
+[ext_resource type="FontFile" uid="uid://vgqs6kp2kuxg" path="res://assets/fonts/Tiny5-Regular.ttf" id="16_tiny5"]
+[ext_resource type="Script" uid="uid://cdnm8m3obine8" path="res://scripts/ui/journal_known_set.gd" id="17_known"]
+[ext_resource type="Script" uid="uid://cuhv3wpitx6uo" path="res://scripts/ui/journal_shop_input.gd" id="17_shop"]
+[ext_resource type="Shader" uid="uid://csf5f2xufxrdy" path="res://assets/shaders/journal_ink.gdshader" id="18_inksh"]
+[ext_resource type="Texture2D" uid="uid://bbpg5ojlxb0gh" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
+[ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="20_tiles"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="21_frail"]
+[ext_resource type="Texture2D" uid="uid://beuuvvk0p5pnv" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
+[ext_resource type="Texture2D" uid="uid://dsacbgjb0dpw" path="res://resources/ui/journal_ink_cool.tres" id="23_inkcool"]
+[ext_resource type="Texture2D" uid="uid://dnfw5nq3847p3" path="res://resources/ui/journal_ink_neutral.tres" id="24_inkneutral"]
+[ext_resource type="Texture2D" uid="uid://cwrdu208heb4c" path="res://assets/sprites/UX/icons/water.tres" id="26_waterbig"]
+[ext_resource type="Texture2D" uid="uid://cdqpb0ioeqmvm" path="res://assets/sprites/UX/icons/money.tres" id="27_moneybig"]
+
+[sub_resource type="CurveTexture" id="CurveTexture_d0ded"]
+width = 157
+texture_mode = 1
+curve = ExtResource("7_curlbot")
+
+[sub_resource type="CurveTexture" id="CurveTexture_yuxm7"]
+width = 157
+texture_mode = 1
+curve = ExtResource("6_curltop")
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_page_l"]
+shader = ExtResource("5_warpsh")
+shader_parameter/curve_top_tex = SubResource("CurveTexture_yuxm7")
+shader_parameter/curve_bottom_tex = SubResource("CurveTexture_d0ded")
+shader_parameter/amp_top_px = -5.0
+shader_parameter/amp_bottom_px = 5.0
+shader_parameter/tex_h_px = 231.0
+shader_parameter/tex_w_px = 157.0
+shader_parameter/content_top_px = 9.0
+shader_parameter/content_h_px = 213.0
+shader_parameter/row_block_px = 18.0
+shader_parameter/col_block_px = 4.0
+shader_parameter/flip_x = false
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ink"]
+resource_name = "JournalInk"
+shader = ExtResource("18_inksh")
+shader_parameter/ramp_warm = ExtResource("19_inkwarm")
+shader_parameter/ramp_green = ExtResource("22_inkgreen")
+shader_parameter/ramp_cool = ExtResource("23_inkcool")
+shader_parameter/ramp_neutral = ExtResource("24_inkneutral")
+shader_parameter/sat_threshold = 0.12
+shader_parameter/hue_warm_end = 0.17
+shader_parameter/hue_green_end = 0.47
+shader_parameter/hue_cool_end = 0.88
+shader_parameter/ink_amount = 1.0
+shader_parameter/dim = 1.0
+
+[sub_resource type="CurveTexture" id="CurveTexture_rfbw6"]
+width = 156
+texture_mode = 1
+curve = ExtResource("7_curlbot")
+
+[sub_resource type="CurveTexture" id="CurveTexture_glffc"]
+width = 156
+texture_mode = 1
+curve = ExtResource("6_curltop")
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_page_r"]
+shader = ExtResource("5_warpsh")
+shader_parameter/curve_top_tex = SubResource("CurveTexture_glffc")
+shader_parameter/curve_bottom_tex = SubResource("CurveTexture_rfbw6")
+shader_parameter/amp_top_px = -5.0
+shader_parameter/amp_bottom_px = 5.0
+shader_parameter/tex_h_px = 231.0
+shader_parameter/tex_w_px = 156.0
+shader_parameter/content_top_px = 9.0
+shader_parameter/content_h_px = 213.0
+shader_parameter/row_block_px = 18.0
+shader_parameter/col_block_px = 4.0
+shader_parameter/flip_x = true
+
+[sub_resource type="CurveTexture" id="CurveTexture_oyyps"]
+width = 157
+texture_mode = 1
+curve = ExtResource("6_curltop")
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_slit"]
+shader = ExtResource("9_slitsh")
+shader_parameter/curve_tex = SubResource("CurveTexture_oyyps")
+shader_parameter/amp_px = -3.732394366197183
+shader_parameter/u_min = 0.2929936305732484
+shader_parameter/u_max = 0.7006369426751592
+shader_parameter/rect_w_px = 64.0
+shader_parameter/rect_h_px = 38.0
+shader_parameter/slit_top_px = 9.0
+shader_parameter/slit_bottom_px = 29.0
+shader_parameter/shadow_color = Color(0.078431375, 0.13725491, 0.22745098, 1)
+shader_parameter/shadow_h_px = 4.0
+shader_parameter/shadow_strength = 0.5
+shader_parameter/shadow_feather_px = 5.0
+
+[node name="FieldJournal" type="CanvasLayer" unique_id=1601302349]
+layer = 140
+script = ExtResource("1_fj")
+
+[node name="Dim" type="ColorRect" parent="." unique_id=616720214]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.078431, 0.137255, 0.227451, 0.55)
+
+[node name="Book" type="Control" parent="." unique_id=19580607]
+unique_name_in_owner = true
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BookArt" type="Control" parent="Book" unique_id=187630286]
+anchors_preset = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -240.0
+offset_top = -135.0
+offset_right = 240.0
+offset_bottom = 135.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BookImage" type="TextureRect" parent="Book/BookArt" unique_id=253453719]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_book")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="BookHit" type="Control" parent="Book/BookArt" unique_id=1368919671 node_paths=PackedStringArray("page_right", "content", "sections")]
+anchors_preset = 0
+offset_left = 48.0
+offset_top = 17.0
+offset_right = 432.0
+offset_bottom = 256.0
+script = ExtResource("17_shop")
+page_right = NodePath("../Pages/PageRight")
+content = NodePath("../Pages/PageRight/SubViewport/Content")
+sections = [NodePath("../Pages/PageRight/SubViewport/Content/KnownBuildings"), NodePath("../Pages/PageRight/SubViewport/Content/KnownFlora")]
+
+[node name="Pages" type="Control" parent="Book/BookArt" unique_id=1020230992]
+anchors_preset = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="PageLeft" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1626829862]
+texture_filter = 1
+texture_repeat = 1
+material = SubResource("ShaderMaterial_page_l")
+layout_mode = 0
+offset_left = 60.0
+offset_top = 21.0
+offset_right = 217.0
+offset_bottom = 252.0
+mouse_filter = 2
+script = ExtResource("4_warp")
+curve_top = ExtResource("6_curltop")
+curve_bottom = ExtResource("7_curlbot")
+amplitude_top_px = -5.0
+amplitude_bottom_px = 5.0
+row_block_px = 18.0
+col_block_px = 4.0
+
+[node name="SubViewport" type="SubViewport" parent="Book/BookArt/Pages/PageLeft" unique_id=2048804732]
+disable_3d = true
+transparent_bg = true
+handle_input_locally = false
+canvas_item_default_texture_filter = 0
+gui_disable_input = true
+oversampling_override = 1.0
+size = Vector2i(157, 231)
+render_target_update_mode = 4
+
+[node name="Content" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport" unique_id=1166548329]
+layout_mode = 3
+anchors_preset = 0
+offset_top = 9.0
+offset_right = 157.0
+offset_bottom = 222.0
+mouse_filter = 2
+
+[node name="RunCalendar" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content" unique_id=1961899847]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 36.0
+offset_bottom = 181.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("10_cal")
+cell_size = Vector2i(29, 22)
+label_width_px = 37
+header_underline_offset_px = 1
+day_number_offset_px = 8
+font = ExtResource("16_tiny5")
+header_font = ExtResource("11_egg")
+block_px = 16
+rule_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
+stamp_scale = 0.44999999999999996
+stamp_aspect = 2.0
+stamp_offset = Vector2i(14, 0)
+stamp_band_px = 12
+stat_icons = Array[Texture2D]([ExtResource("14_water"), ExtResource("15_money")])
+ink_material = SubResource("ShaderMaterial_ink")
+stat_icon_offset = Vector2i(-9, 2)
+preview_stats = PackedInt32Array(6, 4, 3, 2, 5, 1, 0, 4, 2)
+stamp_wobble_px = 2
+wobble_segment_px = 24
+preview_season_names = PackedStringArray("SEASON_WET", "SEASON_DRY")
+
+[node name="PageRight" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1780670663]
+texture_filter = 1
+texture_repeat = 1
+material = SubResource("ShaderMaterial_page_r")
+layout_mode = 0
+offset_left = 264.0
+offset_top = 21.0
+offset_right = 420.0
+offset_bottom = 252.0
+mouse_filter = 2
+script = ExtResource("4_warp")
+curve_top = ExtResource("6_curltop")
+curve_bottom = ExtResource("7_curlbot")
+amplitude_top_px = -5.0
+amplitude_bottom_px = 5.0
+flip_x = true
+row_block_px = 18.0
+col_block_px = 4.0
+
+[node name="SubViewport" type="SubViewport" parent="Book/BookArt/Pages/PageRight" unique_id=332036470]
+disable_3d = true
+transparent_bg = true
+handle_input_locally = false
+canvas_item_default_texture_filter = 0
+gui_disable_input = true
+oversampling_override = 1.0
+size = Vector2i(156, 231)
+render_target_update_mode = 4
+
+[node name="Content" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport" unique_id=735662239]
+layout_mode = 3
+anchors_preset = 0
+offset_top = 9.0
+offset_right = 156.0
+offset_bottom = 222.0
+mouse_filter = 2
+
+[node name="Resources" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1904557001]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 8.0
+offset_bottom = 62.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("12_res")
+resource_ids = PackedStringArray("water", "tokens")
+icons = Array[Texture2D]([ExtResource("26_waterbig"), ExtResource("27_moneybig")])
+column_px = 48
+block_px = 16
+header_font = ExtResource("11_egg")
+font = ExtResource("16_tiny5")
+font_size = 12
+ink_material = SubResource("ShaderMaterial_ink")
+preview_amounts = PackedInt32Array(12, 40)
+
+[node name="KnownBuildings" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899848]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 62.0
+offset_bottom = 134.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("17_known")
+tile_kinds = PackedStringArray("HALF_STAIR_NE", "LADDER_NE")
+entry_ids = PackedStringArray("bridge", "ladder")
+tileset = ExtResource("20_tiles")
+cell_size = Vector2i(24, 16)
+block_px = 16
+hit_padding_px = null
+header_font = ExtResource("11_egg")
+ink_material = SubResource("ShaderMaterial_ink")
+
+[node name="KnownFlora" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899849]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 134.0
+offset_bottom = 206.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("17_known")
+title = "JOURNAL_KNOWN_FLORA"
+tile_kinds = PackedStringArray()
+textures = Array[Texture2D]([ExtResource("21_frail")])
+entry_ids = PackedStringArray("frailejon")
+tileset = ExtResource("20_tiles")
+cell_size = Vector2i(24, 16)
+block_px = 16
+hit_padding_px = null
+header_font = ExtResource("11_egg")
+ink_material = SubResource("ShaderMaterial_ink")
+
+[node name="SeasonGaugeHolder" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1423454152 node_paths=PackedStringArray("page")]
+texture_filter = 1
+texture_repeat = 1
+material = SubResource("ShaderMaterial_slit")
+layout_mode = 0
+offset_left = 106.0
+offset_top = 30.0
+offset_right = 170.0
+offset_bottom = 68.0
+mouse_filter = 2
+script = ExtResource("8_slit")
+page = NodePath("../PageLeft")
+
+[node name="SubViewport" type="SubViewport" parent="Book/BookArt/Pages/SeasonGaugeHolder" unique_id=473650912]
+disable_3d = true
+transparent_bg = true
+handle_input_locally = false
+canvas_item_default_texture_filter = 0
+gui_disable_input = true
+size = Vector2i(64, 38)
+render_target_update_mode = 4
+
+[node name="SeasonWheel" type="TextureRect" parent="Book/BookArt/Pages/SeasonGaugeHolder/SubViewport" unique_id=1837777786]
+unique_name_in_owner = true
+texture_filter = 1
+offset_top = 7.0
+offset_right = 64.0
+offset_bottom = 71.0
+mouse_filter = 2
+texture = ExtResource("3_wheel")
+expand_mode = 1
+stretch_mode = 5

@@ -33,6 +33,13 @@ var group: StringName = &""
 ## grass") would light up the reticle on half the map.
 var debug_only: bool = false
 
+## Non-empty = this action is gated behind a shop purchase of that type
+## (UnlockState / the journal's known-set pages). A LOCKED action is not
+## offered at all — it never reaches the wheel; the shop is where the player
+## learns it exists. Contrast is_enabled, which dims an unlocked-but-
+## unaffordable action in place.
+var unlock_id: StringName = &""
+
 
 ## "Can I act on this cell from where I stand RIGHT NOW?" gate. Combines the
 ## proximity rule with the subclass predicate. Unchanged contract: the controller
@@ -56,12 +63,43 @@ func is_available(ctx: ActionContext) -> bool:
 func is_offerable(ctx: ActionContext) -> bool:
 	if ctx == null or ctx.pathfinder == null:
 		return false
+	if not _is_unlocked(ctx):
+		return false
 	if not _applies(ctx):
 		return false
 	for s in standing_cells(ctx):
 		if ctx.reachable.has(s):
 			return true
 	return false
+
+
+## "Can the player currently PAY for this action?" — deliberately separate from
+## `_applies`, which asks whether the action makes sense on this cell at all.
+## The split is what lets an unaffordable action be SHOWN DIMMED in the radial
+## menu instead of silently vanishing: a fire with no extinguish entry reads as a
+## bug, a greyed extinguish entry reads as "you are out of water".
+##
+## Default: free actions are always enabled; unlock-gated actions are enabled
+## while the player can afford one placement (UnlockState.placement_cost).
+## Override for other cost models (extinguish checks water). Side-effect free;
+## called both when the wheel is built and again on selection, since a
+## walk-then-act can span a change in the balance.
+func is_enabled(ctx: ActionContext) -> bool:
+	if unlock_id == &"" or ctx == null or ctx.unlocks == null:
+		return true
+	if ctx.unlocks.has_method(&"can_afford_placement"):
+		return bool(ctx.unlocks.call(&"can_afford_placement"))
+	return true
+
+
+# Locked = not offered. ctx.unlocks == null (bare test scenes, tools without
+# the economy) means everything is unlocked and free.
+func _is_unlocked(ctx: ActionContext) -> bool:
+	if unlock_id == &"" or ctx.unlocks == null:
+		return true
+	if ctx.unlocks.has_method(&"is_unlocked"):
+		return bool(ctx.unlocks.call(&"is_unlocked", unlock_id))
+	return true
 
 
 ## Cells from which this action can be performed on `ctx.cell`: walkable cells
