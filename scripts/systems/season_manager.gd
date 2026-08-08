@@ -64,11 +64,13 @@ var days_per_season: int:
 ## on purpose. Migrate to a RunConfig .tres in the balance pass.
 @export var starting_water: float = 10.0
 
-## Tokens the run starts with. Everything placeable begins LOCKED (10 to
-## unlock a type + 5 per placement), so 15 buys exactly one unlock and one
-## placement — the opening has a verb without waiting for the first visitors.
-## Set to 0 for the barren opening. Migrate to a RunConfig .tres later.
-@export var starting_tokens: float = 15.0
+## Tokens the run starts with. Everything placeable begins LOCKED (20 to unlock
+## a type, then 1 per tile placed), so 10 buys NOTHING on day one: the opening
+## move is to survive a day of visitors and unlock a verb with what they paid.
+## Deliberately half an unlock — the first decision is which verb, and it should
+## cost a day's attention rather than be handed over at spawn. Migrate to a
+## RunConfig .tres later.
+@export var starting_tokens: float = 10.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season

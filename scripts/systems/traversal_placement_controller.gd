@@ -29,6 +29,7 @@ enum Mode { IDLE, AWAITING_ENDPOINT }
 @export var ux_overlay: Node2D
 @export var bridge_scene: PackedScene
 @export var ladder_scene: PackedScene
+@export var fence_scene: PackedScene
 ## When true, prints a one-line diagnostic on every left-click during
 ## placement: the resolved cell, hover cell, preview-valid state, and the
 ## specific Ladder/Bridge validate Result for the click target. Cheap but
@@ -51,7 +52,7 @@ var _player: Player
 # Kinds that count as "occupied" for new placement validation. Order doesn't
 # matter — _gather_blocked_cells unions them all into the blocked dict.
 const _BLOCKING_KINDS: Array[StringName] = [
-	&"frailejon", &"bridge_deck", &"ladder", &"rock"
+	&"frailejon", &"bridge_deck", &"ladder", &"rock", &"fence"
 ]
 
 
@@ -70,6 +71,8 @@ func _ready() -> void:
 		bridge_scene = load("res://scenes/traversals/bridge.tscn")
 	if ladder_scene == null:
 		ladder_scene = load("res://scenes/traversals/ladder.tscn")
+	if fence_scene == null:
+		fence_scene = load("res://scenes/traversals/fence.tscn")
 	_tile_interaction = get_tree().get_first_node_in_group(
 		TileInteractionController.GROUP_NAME
 	) as TileInteractionController
@@ -117,6 +120,16 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 					return g != null and Ladder.validate(
 						origin, cell, g, blocked_l
 					) == Ladder.Result.OK
+			&"fence":
+				candidates = Fence.find_candidates(
+					origin, grid, Fence.MAX_CELLS, _blocked_cells, pcell
+				)
+				var blocked_f := _blocked_cells
+				is_valid_endpoint = func(cell: Vector2i) -> bool:
+					var g := _require_grid()
+					return g != null and Fence.validate(
+						origin, cell, g, blocked_f, Fence.MAX_CELLS, pcell
+					) == Fence.Result.OK
 		ux_overlay.enter_placement_mode(origin, candidates, is_valid_endpoint)
 
 
@@ -229,6 +242,8 @@ func _refresh_preview(hover: Vector2i) -> void:
 			_paint_bridge_preview(hover)
 		&"ladder":
 			_paint_ladder_preview(hover)
+		&"fence":
+			_paint_fence_preview(hover)
 
 
 func _paint_bridge_preview(hover: Vector2i) -> void:
@@ -250,7 +265,12 @@ func _paint_bridge_preview(hover: Vector2i) -> void:
 	var result := Bridge.validate(
 		_origin_cell, hover, grid, _blocked_cells, Bridge.MAX_LENGTH, pcell
 	)
-	_preview_valid = result == Bridge.Result.OK
+	# Affordability is part of "can this be built", so the ghost carries it.
+	# A bridge is priced by span but cannot be TRUNCATED to fit the balance the
+	# way a fence run can — a walkway that stops in the gap is not a cheaper
+	# bridge — so here the answer is a red ghost, not a shorter one.
+	_preview_valid = result == Bridge.Result.OK \
+			and _can_afford(&"bridge", plan.size())
 	if _preview_valid:
 		structure_layer_manager.set_preview_valid()
 	else:
@@ -278,7 +298,52 @@ func _paint_ladder_preview(hover: Vector2i) -> void:
 		if placer.paint(entry["cell"], entry["kind"], entry["altitude"]):
 			_preview_cells.append(entry)
 	var result := Ladder.validate(_origin_cell, hover, grid, _blocked_cells)
-	_preview_valid = result == Ladder.Result.OK
+	# Same as the bridge: a ladder has one fixed footprint, so there is nothing
+	# to truncate and being too poor shows as a red ghost.
+	_preview_valid = result == Ladder.Result.OK \
+			and _can_afford(&"ladder", Ladder.OCCUPIED_CELLS)
+	if _preview_valid:
+		structure_layer_manager.set_preview_valid()
+	else:
+		structure_layer_manager.set_preview_invalid()
+
+
+func _paint_fence_preview(hover: Vector2i) -> void:
+	var placer := _ensure_preview_placer()
+	if placer == null:
+		return
+	var grid := _require_grid()
+	if grid == null:
+		return
+	var cells := _affordable_fence_cells(hover)
+	if cells.is_empty():
+		return  # true diagonal, or not one tile's worth of tokens — no ghost
+	var origin_tile := grid.get_tile(_origin_cell)
+	var alt: int = origin_tile.altitude_low if origin_tile != null else 0
+
+	# Every cell of the run counts as a fence for the others' orientation, so the
+	# ghost shows the line it will actually become rather than a row of
+	# unconnected posts. Fence.kind_at ages these as the youngest of all, so an
+	# existing fence still wins the tie at a junction — which is exactly what
+	# will happen when the run commits.
+	var pending: Dictionary = {}
+	for c in cells:
+		pending[c] = true
+
+	for c in cells:
+		var kind := Fence.kind_at(c, grid, pending)
+		if placer.paint(c, kind, alt):
+			_preview_cells.append({"cell": c, "kind": kind, "altitude": alt})
+
+	# Validate the CLAMPED run, not the hovered one: the ghost that is on screen
+	# is what the click will build, so a cell the player cannot afford must not
+	# turn the affordable part red.
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
+	var result := Fence.validate(
+		_origin_cell, cells[cells.size() - 1], grid, _blocked_cells,
+		Fence.MAX_CELLS, pcell
+	)
+	_preview_valid = result == Fence.Result.OK
 	if _preview_valid:
 		structure_layer_manager.set_preview_valid()
 	else:
@@ -358,6 +423,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_place_bridge(far_cell)
 		&"ladder":
 			_place_ladder(far_cell)
+		&"fence":
+			_place_fence(far_cell)
 		_:
 			push_warning("Traversal placement: unknown kind '%s'." % _traversal_kind)
 			cancel()
@@ -387,8 +454,15 @@ func _place_bridge(far_cell: Vector2i) -> void:
 		cancel()
 		return
 
-	# Charge at commit — after validate, so a rejected aim costs nothing.
-	if not _pay_placement(&"bridge"):
+	# Charge at commit — after validate, so a rejected aim costs nothing. Priced
+	# by SPAN (every cell the bridge paints, both stair ends included), so
+	# reaching further costs more.
+	#
+	# Unlike the fence this REFUSES rather than truncating to what is affordable:
+	# a fence stopping short is still a wall, a bridge stopping short is a walkway
+	# into the gap it was meant to cross.
+	var span: int = Bridge.plan_tiles(_origin_cell, far_cell, 0).size()
+	if not _pay_placements(&"bridge", span):
 		cancel()
 		return
 
@@ -406,7 +480,7 @@ func _place_bridge(far_cell: Vector2i) -> void:
 		# just drop the node so we don't accumulate orphans. Successful builds
 		# self-register on the occupant registry — no controller-side tracking
 		# needed. Refund: the player paid for a bridge that does not exist.
-		_refund_placement(&"bridge")
+		_refund_placements(&"bridge", span)
 		inst.queue_free()
 
 	cancel()
@@ -444,8 +518,13 @@ func _place_ladder(target_cell: Vector2i) -> void:
 		upper_cell = _origin_cell
 		base_alt = b_tile.altitude_low
 
-	# Charge at commit — parity with bridge.
-	if not _pay_placement(&"ladder"):
+	# Charge at commit — parity with bridge. A ladder's SPAN is the two cells it
+	# claims (foot and landing), whatever its height: the tile footprint is what
+	# is priced, and a ladder's height buys it no extra ground. Price by
+	# `Ladder.MAX_HEIGHT_CUBES`-style rise instead if a tall climb should cost
+	# more than a short one — that is a balance call, not a correctness one.
+	var span: int = Ladder.OCCUPIED_CELLS
+	if not _pay_placements(&"ladder", span):
 		cancel()
 		return
 
@@ -454,8 +533,74 @@ func _place_ladder(target_cell: Vector2i) -> void:
 	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
 	if not inst.build():
 		# Successful builds self-register; only failures need cleanup + refund.
-		_refund_placement(&"ladder")
+		_refund_placements(&"ladder", span)
 		inst.queue_free()
+
+	cancel()
+
+
+# A fence run lays N INDEPENDENT one-cell fences rather than one object spanning
+# N cells — that is what makes the trash action take out exactly the tile you
+# pointed at. `far_cell == _origin_cell` is the single-fence case and needs no
+# special handling: plan_cells returns one cell.
+func _place_fence(far_cell: Vector2i) -> void:
+	var grid := _require_grid()
+	if grid == null:
+		cancel()
+		return
+	# Re-gather just before placing (parity with bridge/ladder).
+	_blocked_cells = _gather_blocked_cells()
+
+	# Same clamp the preview drew, so the click builds exactly the ghost that was
+	# on screen — including the case where the player aimed past what they can
+	# pay for and the line stopped short.
+	var cells := _affordable_fence_cells(far_cell)
+	if cells.is_empty():
+		cancel()
+		return
+	var paid_far: Vector2i = cells[cells.size() - 1]
+
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
+	var result: int = Fence.validate(
+		_origin_cell, paid_far, grid, _blocked_cells, Fence.MAX_CELLS, pcell
+	)
+	if result != Fence.Result.OK:
+		push_warning(
+			"Fence placement rejected: %s (origin=%s, far=%s)."
+			% [Fence.result_name(result), _origin_cell, paid_far]
+		)
+		cancel()
+		return
+
+	# Every cell is charged for, and the whole run is charged AT ONCE: paying per
+	# fence as they go down could run the balance out midway and leave half a
+	# wall, which the player did not ask for and cannot undo for free.
+	if not _pay_placements(&"fence", cells.size()):
+		cancel()
+		return
+
+	if _placer == null:
+		_placer = StructurePlacer.new(structure_layer_manager)
+
+	var origin_tile := grid.get_tile(_origin_cell)
+	var alt: int = origin_tile.altitude_low if origin_tile != null else 0
+
+	# In order, so build_index increases along the run. That is what makes a
+	# later crossing run lose the tie at the junction and the first line read as
+	# continuous.
+	var built: int = 0
+	for c in cells:
+		var inst: Fence = fence_scene.instantiate()
+		world.add_child(inst)
+		Fence.configure(inst, c, alt, _placer, pathfinder)
+		if inst.build():
+			built += 1
+		else:
+			inst.queue_free()
+	# Refund only what failed. A partial run is still a fence the player owns, so
+	# tearing the successful ones back down would be worse than keeping them.
+	if built < cells.size():
+		_refund_placements(&"fence", cells.size() - built)
 
 	cancel()
 
@@ -470,17 +615,56 @@ func _place_ladder(target_cell: Vector2i) -> void:
 var _unlocks: Node = null
 
 
-func _pay_placement(type: StringName) -> bool:
+## Charge for `count` TILES at once, all or nothing — every placement here is
+## priced by span, so this is the only charging path (a fence run of N, a bridge
+## of N, a ladder's 2).
+func _pay_placements(type: StringName, count: int) -> bool:
 	if _unlocks == null or not is_instance_valid(_unlocks):
 		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
-	if _unlocks != null and _unlocks.has_method(&"try_pay_placement"):
-		return bool(_unlocks.call(&"try_pay_placement", type))
+	if _unlocks != null and _unlocks.has_method(&"try_pay_placements"):
+		return bool(_unlocks.call(&"try_pay_placements", type, count))
 	return true
 
 
-func _refund_placement(type: StringName) -> void:
-	if _unlocks != null and _unlocks.has_method(&"refund_placement"):
-		_unlocks.call(&"refund_placement", type)
+## "Could this be paid for right now?" — asked by the PREVIEW, so a build the
+## player cannot fund reads as a red ghost instead of a click that silently does
+## nothing. Never charges. No UnlockState (bare test scenes, tools) means free.
+func _can_afford(type: StringName, count: int) -> bool:
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	if _unlocks == null or not _unlocks.has_method(&"can_afford_placement"):
+		return true
+	return bool(_unlocks.call(&"can_afford_placement", type, count))
+
+
+## Undo of _pay_placements for the build()-failed path.
+func _refund_placements(type: StringName, count: int) -> void:
+	if _unlocks != null and _unlocks.has_method(&"refund_placements"):
+		_unlocks.call(&"refund_placements", type, count)
+
+
+## The cells a fence run from `_origin_cell` to `hover` would occupy, TRUNCATED
+## to what the player can pay for at `placement_cost_per_tile` each.
+##
+## Truncating rather than invalidating is the whole point: the run is a line the
+## player is dragging out, so the useful feedback is "it stops here", not "this
+## is red". Empty means either a true diagonal (no run exists) or not one tile's
+## worth of tokens.
+##
+## No UnlockState in the scene (bare test scenes, tools) means placement is free
+## and nothing is clamped.
+func _affordable_fence_cells(hover: Vector2i) -> Array[Vector2i]:
+	var cells := Fence.plan_cells(_origin_cell, hover)
+	if cells.is_empty():
+		return cells
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	if _unlocks == null or not _unlocks.has_method(&"max_affordable_tiles"):
+		return cells
+	var budget: int = int(_unlocks.call(&"max_affordable_tiles", cells.size()))
+	if budget >= cells.size():
+		return cells
+	return cells.slice(0, budget)
 
 
 # ----------------------------------------------------------------------------
@@ -552,6 +736,25 @@ func _log_click_diagnostic(far_cell: Vector2i) -> void:
 			else:
 				reason = Ladder.result_name(Ladder.validate(
 					_origin_cell, far_cell, grid, _blocked_cells))
+		&"fence":
+			if far_cell == Pathfinder.NO_CELL:
+				reason = "NO_CELL (click off grid)"
+			else:
+				# Report the run that would actually be BUILT. Validating the raw
+				# click instead would print a verdict on cells the clamp already
+				# dropped, which is the opposite of useful in a diagnostic.
+				var affordable := _affordable_fence_cells(far_cell)
+				if affordable.is_empty():
+					reason = "UNAFFORDABLE (no tokens for even one tile)"
+				else:
+					var paid: Vector2i = affordable[affordable.size() - 1]
+					reason = "%s (paid_far=%s, %d/%d cells)" % [
+						Fence.result_name(Fence.validate(
+							_origin_cell, paid, grid, _blocked_cells,
+							Fence.MAX_CELLS, pcell)),
+						paid, affordable.size(),
+						Fence.plan_cells(_origin_cell, far_cell).size(),
+					]
 
 	print("[TPC] kind=%s origin=%s base_alt=%d click_cell=%s target_alt=%s hover_cell=%s preview_valid=%s -> %s" % [
 		_traversal_kind, _origin_cell, base_alt, far_cell,

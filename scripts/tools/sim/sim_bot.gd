@@ -200,8 +200,12 @@ func _try_place(unlock_state: Node) -> bool:
 					Ladder.MAX_HEIGHT_CUBES, blocked)
 			if not tops.is_empty():
 				var top: Vector2i = tops[rng.randi() % tops.size()]
+				# Priced by SPAN, exactly as TraversalPlacementController._place_ladder
+				# does — the sim's token curve is only worth reading if it charges
+				# what the game charges.
 				if Ladder.validate(c, top, grid, blocked) == Ladder.Result.OK \
-						and bool(unlock_state.call(&"try_pay_placement", &"ladder")):
+						and bool(unlock_state.call(&"try_pay_placements", &"ladder",
+								Ladder.OCCUPIED_CELLS)):
 					pathfinder.add_traversal_edge(c, top)
 					_ladder_cells[c] = true
 					_ladder_cells[top] = true
@@ -220,7 +224,7 @@ func _try_place(unlock_state: Node) -> bool:
 # cells (see _ladder_cells).
 func _blocked_cells(grid: TileGrid) -> Dictionary:
 	var blocked: Dictionary = _ladder_cells.duplicate()
-	for kind: StringName in [&"frailejon", &"bridge_deck", &"ladder", &"rock"]:
+	for kind: StringName in [&"frailejon", &"bridge_deck", &"ladder", &"rock", &"fence"]:
 		for c: Vector2i in grid.occupants_of_kind(kind).keys():
 			blocked[c] = true
 	return blocked

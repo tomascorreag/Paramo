@@ -139,6 +139,14 @@ const _SHAPES: Dictionary = {
 # the floor non-walkable and defeat can_transition()'s traversal-edge override.
 const _DECORATIVE: Dictionary = {
 	&"LADDER_NE": true, &"LADDER_NW": true,
+	# Fences sit ON a walkable floor and must leave it walkable terrain — the
+	# blocking is the Fence occupant's blocks_movement(), checked below in
+	# is_walkable(). Without this entry the fence would fall through to the
+	# "not in _SHAPES" branch and _merge_blocked the floor, which reads the same
+	# in game but is NOT the same: resolve_click and the remove action both go
+	# through is_terrain_walkable, so a blocked floor makes the fence
+	# un-right-clickable and therefore unremovable.
+	&"FENCE_NE": true, &"FENCE_NW": true,
 }
 
 

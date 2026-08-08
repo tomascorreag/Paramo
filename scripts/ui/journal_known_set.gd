@@ -105,6 +105,25 @@ extends Control
 		cell_size = value
 		_rebuild()
 
+## Per-entry override of `cell_size`, index-aligned with draw order (tile_kinds
+## first, then textures). Shorter than the entry list is fine — anything past the
+## end, and any entry set to a non-positive size, falls back to `cell_size`.
+##
+## Exists because the swatches are NOT all the same size: a ladder inks about
+## 20x20 of its 32x32 atlas cell while a fence inks 24x30 of its own, so one
+## width either crowds the fence or leaves a hole beside the ladder. The cells
+## abut, so a wider cell pushes everything after it along rather than overlapping
+## it — `entry_rect` sums the widths before it instead of multiplying.
+##
+## The same warp-block rule applies to every Y here as to `cell_size`'s: a height
+## that is not a multiple of `block_px` straddles two blocks and gets a scanline
+## duplicated through the art. Varying the height also moves that entry's art
+## within the row, since each swatch is centred in its OWN cell.
+@export var cell_sizes: Array[Vector2i] = []:
+	set(value):
+		cell_sizes = value
+		_rebuild()
+
 ## The page's warp quantisation. The title row rounds up to a multiple of this, so
 ## changing the title face or size cannot knock the swatch row off phase. Keep it
 ## equal to the page's `row_block_px`; tests/test_journal_pages.gd guards that.
@@ -285,10 +304,9 @@ func set_entry_state(id: StringName, locked: bool, cost: int,
 ## ends, because cells abut — widening an inner edge would put two entries over the
 ## same texels, and `entry_at` would silently award them to whichever comes first.
 func entry_rect(index: int) -> Rect2:
-	var pitch: int = maxi(1, cell_size.x)
 	var r := Rect2(
-			Vector2(_LEFT_INSET_PX + index * pitch, header_row_px()),
-			Vector2(cell_size))
+			Vector2(_cell_left(index), header_row_px()),
+			Vector2(cell_size_for(index)))
 	if index >= 0 and index < _swatches.size() and index < _rest_positions.size() \
 			and is_instance_valid(_swatches[index]):
 		var art := Rect2(_rest_positions[index], _swatches[index].size)
@@ -310,6 +328,24 @@ func entry_at(point: Vector2) -> int:
 		if entry_rect(i).has_point(point):
 			return i
 	return -1
+
+
+## The cell allotted to one entry: its `cell_sizes` override if it has a usable
+## one, else the shared `cell_size`.
+func cell_size_for(index: int) -> Vector2i:
+	if index < 0 or index >= cell_sizes.size():
+		return cell_size
+	var c: Vector2i = cell_sizes[index]
+	return c if c.x > 0 and c.y > 0 else cell_size
+
+
+# Left edge of one entry's cell. Cells abut, so this is the sum of every cell
+# before it — NOT index * pitch, which only holds while they are all one width.
+func _cell_left(index: int) -> int:
+	var x: int = _LEFT_INSET_PX
+	for i in index:
+		x += maxi(1, cell_size_for(i).x)
+	return x
 
 
 func entry_id_at(index: int) -> StringName:
@@ -404,6 +440,37 @@ func _tile_texture(kind: StringName) -> AtlasTexture:
 	return tex
 
 
+# Opaque bounds of a swatch texture, in its own texture space. Falls back to the
+# whole texture when nothing can be read (a texture whose image isn't available)
+# so layout degrades to the old texture-centred behaviour rather than collapsing.
+#
+# Cached: this pulls the image off the GPU-side resource, and _rebuild runs on
+# every export setter poke — including in the editor, where they come in bursts.
+static var _ink_rects: Dictionary[String, Rect2] = {}
+
+
+static func _ink_rect(tex: Texture2D) -> Rect2:
+	var full := Rect2(Vector2.ZERO, tex.get_size())
+	# Keyed by the REGION, not by get_rid(): an AtlasTexture reports the RID of
+	# the atlas it cuts from, so every swatch sharing a spritesheet returns the
+	# same one. Cached under that, all three building swatches collapsed onto the
+	# first one's ink bounds and the layout silently fell back to the old
+	# texture-centred behaviour it was supposed to replace.
+	var key := "%s|%s" % [tex.get_rid(), full.size]
+	if tex is AtlasTexture:
+		var at := tex as AtlasTexture
+		key = "%s|%s" % [at.atlas.get_rid() if at.atlas != null else "?", at.region]
+	if _ink_rects.has(key):
+		return _ink_rects[key]
+	var img := tex.get_image()
+	if img == null:
+		return full
+	var used := img.get_used_rect()
+	var out: Rect2 = full if used.size.x <= 0 or used.size.y <= 0 else Rect2(used)
+	_ink_rects[key] = out
+	return out
+
+
 static func _index_for(ts: TileSet, src_id: int) -> TileKindIndex:
 	if ts == null:
 		return null
@@ -434,8 +501,11 @@ func _rebuild() -> void:
 	_rest_positions.clear()
 
 	var top: int = header_row_px()
-	var x: int = _LEFT_INSET_PX
+	var index: int = -1
 	for tex: Texture2D in swatch_textures():
+		index += 1
+		var cell := cell_size_for(index)
+		var x: int = _cell_left(index)
 		var r := PixelUI.make_icon_sized(tex)
 		# ONE MATERIAL PER SWATCH, where a single shared one would once have done.
 		# Hover and lock now drive `dim` per entry, so a shared material would fade
@@ -445,19 +515,27 @@ func _rebuild() -> void:
 		# sharing in the first place.
 		if ink_material != null:
 			r.material = ink_material.duplicate() as ShaderMaterial
-		# Centred in its cell, then floored to whole texels: a swatch on a half
-		# texel resamples 32px pixel art the whole style depends on staying hard.
+		# Centred in its cell by its INK, not by its texture, then floored to
+		# whole texels (a swatch on a half texel resamples the 32px pixel art the
+		# whole style depends on staying hard).
+		#
+		# By ink because these are atlas cut-outs and the art does not fill them:
+		# a ladder inks cols 16..29 of its 32-wide cell — the right half only —
+		# while a fence inks 4..27. Centring the TEXTURES lines up their
+		# transparent margins and leaves the visible pictures lopsided, close
+		# enough to touch. Measured: at 18 and 26 texel cells the ladder and fence
+		# ink overlapped by 4 texels while both cells stayed clear of each other.
 		var art := tex.get_size()
+		var ink := _ink_rect(tex)
 		r.position = Vector2(
-			floorf(x + (float(cell_size.x) - art.x) * 0.5),
-			floorf(top + (float(cell_size.y) - art.y) * 0.5))
+			floorf(x + (float(cell.x) - ink.size.x) * 0.5 - ink.position.x),
+			floorf(top + (float(cell.y) - ink.size.y) * 0.5 - ink.position.y))
 		_rest_positions.append(r.position)
 		add_child(r)
 		# Deliberately NOT set_owner: under @tool an owned child would be written
 		# into field_journal.tscn, and the authored arrays would then have a stale
 		# duplicate of themselves baked in beside them.
 		_swatches.append(r)
-		x += cell_size.x
 
 	_apply_states()
 

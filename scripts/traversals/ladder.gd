@@ -51,6 +51,11 @@ const VALID_DIRS: Array = [Vector2i(0, -1), Vector2i(-1, 0)]
 # layer stack covers the altitudes we want to paint at.
 const MAX_HEIGHT_CUBES: int = 4
 
+# Grid cells a ladder claims, however tall it is: the foot and the landing (see
+# occupied_cells). Named so the per-tile placement price has something to read
+# other than a literal 2.
+const OCCUPIED_CELLS: int = 2
+
 
 @export var origin_cell: Vector2i
 @export var top_cell: Vector2i

@@ -93,9 +93,9 @@ func test_a_completed_day_banks_one_lump() -> void:
 	_rain.intensity = 0.0
 	_appeal.appeal = 1.0
 	_flow._on_day_completed(1)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 4.0,
-			"4 visitors x 1 token, in one deposit")
-	assert_eq(ResourceLedger.source_total(TOKENS, VisitorFlow.SOURCE), 4.0)
+	assert_eq(ResourceLedger.get_amount(TOKENS), 8.0,
+			"4 visitors x 2 tokens, in one deposit")
+	assert_eq(ResourceLedger.source_total(TOKENS, VisitorFlow.SOURCE), 8.0)
 
 
 func test_a_rained_out_day_banks_nothing() -> void:
@@ -119,7 +119,7 @@ func test_m_key_burst_banks_once_per_emission_without_error() -> void:
 	_rain.intensity = 0.0
 	for i in 6:
 		_flow._on_day_completed(i)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 24.0, "6 days x 4 tokens")
+	assert_eq(ResourceLedger.get_amount(TOKENS), 48.0, "6 days x 8 tokens")
 
 
 func test_day_average_rain_comes_from_the_process_integral() -> void:
@@ -133,7 +133,7 @@ func test_day_average_rain_comes_from_the_process_integral() -> void:
 
 	# avg 0.5 -> 4 * 0.5 = 2 visitors even though it is bone dry RIGHT NOW.
 	_flow._on_day_completed(1)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 2.0,
+	assert_eq(ResourceLedger.get_amount(TOKENS), 4.0,
 			"the morning's storm must count against the evening's payout")
 
 

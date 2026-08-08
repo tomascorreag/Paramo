@@ -19,7 +19,7 @@ extends Resource
 ## would be broken (keeps a buffer for the next fire).
 @export var water_reserve: float = 2.0
 
-## Unlock purchase order during planning phases (10 tokens each).
+## Unlock purchase order during planning phases (20 tokens each).
 @export var unlock_priority: Array[StringName] = [&"ladder", &"bridge", &"frailejon"]
 
 ## Probability [0,1] of a suboptimal decision: targeting a random fire
@@ -27,10 +27,10 @@ extends Resource
 ## 0 = optimal scripted play; raise to model imperfect players.
 @export var decision_noise: float = 0.0
 
-## Placements attempted per planning phase (5 tokens each, after unlocks).
-## 3 sized against 1-token visitors: 5 planning breaks x 3 x 5 tokens ~= a
-## full run's income, so the bot spends at the economy's edge instead of
-## banking (1 left ~230 tokens idle under the old 5-token income).
+## Placements attempted per planning phase, after unlocks. The bot only places
+## ladders (2 tiles) and frailejones (1 tile + 1 water), so a planning phase now
+## costs single-digit tokens rather than 15 — this number no longer sizes the
+## bot's spend against income, and is due a re-tune off the balance sim.
 @export var place_per_planning: int = 3
 
 ## Random walkable cells sampled when searching for a legal ladder wall or a

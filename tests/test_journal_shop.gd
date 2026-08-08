@@ -40,11 +40,18 @@ func _click_point(section: JournalKnownSet, idx: int) -> Vector2:
 # --- hit-testing --------------------------------------------------------------
 
 func test_entry_at_maps_cells_and_misses_gutters() -> void:
+	# Probes are DERIVED from entry_rect rather than written as literals. They
+	# used to be literals, and they broke the moment the entries stopped being
+	# equal widths — x=95 was past the last cell at 24 texels each and inside it
+	# at the authored widths. A hit test wants to assert the MAPPING, not the
+	# layout the layout tests already cover.
 	var row: float = buildings.header_row_px() + 5.0
-	assert_eq(buildings.entry_at(Vector2(10.0, row)), 0, "first cell")
-	assert_eq(buildings.entry_at(Vector2(50.0, row)), 1, "second cell")
+	for i in buildings._swatches.size():
+		var r := buildings.entry_rect(i)
+		assert_eq(buildings.entry_at(Vector2(r.get_center().x, row)), i, "cell %d" % i)
 	assert_eq(buildings.entry_at(Vector2(10.0, 2.0)), -1, "the title row sells nothing")
-	assert_eq(buildings.entry_at(Vector2(95.0, row)), -1, "past the last swatch")
+	var last := buildings.entry_rect(buildings._swatches.size() - 1)
+	assert_eq(buildings.entry_at(Vector2(last.end.x + 8.0, row)), -1, "past the last swatch")
 
 
 func test_the_whole_drawn_swatch_is_hittable() -> void:
@@ -72,42 +79,101 @@ func test_the_whole_drawn_swatch_is_hittable() -> void:
 						% [section.title, i, probe, hit])
 
 
+# --- per-entry cell sizes -----------------------------------------------------
+
+func test_each_entry_gets_its_authored_cell_width() -> void:
+	# The three building swatches are deliberately different widths: the art is
+	# cut from the atlas and does not fill it, so a ladder (14 texels of ink) and
+	# a fence (24) need different room. One shared width either crowds one or
+	# leaves a hole beside the other.
+	# Against cell_size_for, not entry_rect: the latter is the HIT rect, which
+	# deliberately grows past the cell by hit_padding_px and by whatever the art
+	# overhangs.
+	for i in buildings.cell_sizes.size():
+		assert_eq(buildings.cell_size_for(i), buildings.cell_sizes[i],
+				"entry %d must get the cell it was authored" % i)
+		assert_true(buildings.entry_rect(i).size.x >= float(buildings.cell_sizes[i].x),
+				"entry %d's hit rect must cover its cell" % i)
+
+
+func test_entries_past_the_override_list_fall_back_to_cell_size() -> void:
+	# flora authors no overrides at all, so every entry takes the shared size.
+	assert_eq(flora.cell_size_for(0), flora.cell_size)
+	assert_eq(flora.cell_size_for(99), flora.cell_size,
+			"an index past the end must not read off the array")
+
+
+func test_a_zeroed_override_falls_back_rather_than_collapsing() -> void:
+	var original := buildings.cell_sizes.duplicate()
+	buildings.cell_sizes = [Vector2i.ZERO]
+	assert_eq(buildings.cell_size_for(0), buildings.cell_size)
+	buildings.cell_sizes = original
+
+
+func test_cells_abut_without_overlapping() -> void:
+	# Cells are laid end to end, so a wider one has to PUSH its neighbours along.
+	# The bug this catches is `index * pitch` arithmetic, which silently stacks
+	# entries on top of each other the moment the widths stop being equal.
+	for i in range(1, buildings.entry_ids.size()):
+		var prev := buildings.entry_rect(i - 1)
+		var cur := buildings.entry_rect(i)
+		assert_almost_eq(cur.position.x, prev.end.x, 4.0,
+				"entry %d must start where entry %d ends (hit padding aside)" % [i, i - 1])
+
+
+func test_drawn_swatches_do_not_collide() -> void:
+	# The claim the cell widths exist to support, checked on what is actually
+	# INKED rather than on the cells. Each swatch is a 32px texture whose art may
+	# sit anywhere inside it — the ladder's ink is entirely in the right half —
+	# so cells that clear each other are no guarantee the pictures do.
+	var boxes: Array[Rect2] = []
+	for i in buildings._swatches.size():
+		var r: TextureRect = buildings._swatches[i]
+		var ink := JournalKnownSet._ink_rect(r.texture)
+		boxes.append(Rect2(r.position + ink.position, ink.size))
+	for i in range(1, boxes.size()):
+		assert_true(boxes[i].position.x >= boxes[i - 1].end.x,
+				"swatch %d's art (%s) overlaps swatch %d's (%s)"
+					% [i, boxes[i], i - 1, boxes[i - 1]])
+
+
 func test_entry_ids_align_with_swatches() -> void:
 	# The authored swatch order IS the id order — a misalignment here would
 	# sell the wrong thing.
-	assert_eq(buildings.swatch_textures().size(), 2,
-			"both building swatches must resolve from the atlas")
+	assert_eq(buildings.swatch_textures().size(), 3,
+			"every building swatch must resolve from the atlas")
 	assert_eq(buildings.entry_id_at(0), &"bridge")
 	assert_eq(buildings.entry_id_at(1), &"ladder")
+	assert_eq(buildings.entry_id_at(2), &"fence")
 	assert_eq(flora.entry_id_at(0), &"frailejon")
 
 
 # --- buy flow -----------------------------------------------------------------
 
 func test_clicking_a_locked_entry_buys_it() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	assert_true(shop.handle_click(_click_point(buildings, 0)))
 	assert_true(_unlocks.is_unlocked(&"bridge"))
 	assert_eq(ResourceLedger.get_amount(TOKENS), 0.0)
 
 
 func test_clicking_while_broke_buys_nothing() -> void:
-	ResourceLedger.set_amount(TOKENS, 9.0)
+	ResourceLedger.set_amount(TOKENS, 19.0)
 	assert_false(shop.handle_click(_click_point(flora, 0)))
 	assert_false(_unlocks.is_unlocked(&"frailejon"))
-	assert_eq(ResourceLedger.get_amount(TOKENS), 9.0)
+	assert_eq(ResourceLedger.get_amount(TOKENS), 19.0)
 
 
 func test_clicking_an_owned_entry_spends_nothing() -> void:
-	ResourceLedger.set_amount(TOKENS, 20.0)
+	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop.handle_click(_click_point(buildings, 0))
-	assert_eq(ResourceLedger.get_amount(TOKENS), 10.0)
+	assert_eq(ResourceLedger.get_amount(TOKENS), 20.0)
 	assert_false(shop.handle_click(_click_point(buildings, 0)))
-	assert_eq(ResourceLedger.get_amount(TOKENS), 10.0, "no double charge")
+	assert_eq(ResourceLedger.get_amount(TOKENS), 20.0, "no double charge")
 
 
 func test_clicking_bare_paper_does_nothing() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	# The sections now abut (KnownBuildings 54..126, KnownFlora 126..198 in CONTENT
 	# space) because each heading grew a block for its rule, so there is no
 	# inter-section gap left to aim at. These are the bare-paper regions that remain.
@@ -121,13 +187,13 @@ func test_clicking_bare_paper_does_nothing() -> void:
 	assert_false(shop.handle_click(
 			shop.content.position + buildings.position + Vector2(20.0, 4.0)),
 		"a section's heading sells nothing")
-	assert_eq(ResourceLedger.get_amount(TOKENS), 10.0)
+	assert_eq(ResourceLedger.get_amount(TOKENS), 20.0)
 
 
 # --- presentation -------------------------------------------------------------
 
 func test_locked_entries_render_dimmed_with_owned_full_ink() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	var locked_mat := buildings._swatches[0].material as ShaderMaterial
 	assert_almost_eq(float(locked_mat.get_shader_parameter(&"dim")),
@@ -147,7 +213,7 @@ func test_locked_entries_render_dimmed_with_owned_full_ink() -> void:
 
 
 func test_hover_lifts_the_entry_under_the_pointer() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	var rest: Vector2 = buildings._swatches[0].position
 	shop.handle_hover(_click_point(buildings, 0))
@@ -162,7 +228,7 @@ func test_hover_lifts_the_entry_under_the_pointer() -> void:
 
 
 func test_hover_brightens_a_locked_entry() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	shop.handle_hover(_click_point(buildings, 0))
 	var mat := buildings._swatches[0].material as ShaderMaterial
@@ -178,7 +244,7 @@ func test_hover_brightens_a_locked_entry() -> void:
 
 
 func test_hover_moves_between_sections() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	shop.handle_hover(_click_point(buildings, 0))
 	shop.handle_hover(_click_point(flora, 0))
@@ -191,15 +257,15 @@ func test_hover_moves_between_sections() -> void:
 func test_an_unaffordable_click_flashes_instead_of_buying() -> void:
 	# The recoil is the only feedback a refused purchase gives — without it the
 	# click is silently swallowed and reads as a dead widget.
-	ResourceLedger.set_amount(TOKENS, 9.0)
+	ResourceLedger.set_amount(TOKENS, 19.0)
 	assert_false(shop.handle_click(_click_point(buildings, 0)))
 	assert_eq(buildings._denied, 0, "the clicked entry is the one that recoils")
 	assert_false(_unlocks.is_unlocked(&"bridge"))
-	assert_eq(ResourceLedger.get_amount(TOKENS), 9.0, "a refusal charges nothing")
+	assert_eq(ResourceLedger.get_amount(TOKENS), 19.0, "a refusal charges nothing")
 
 
 func test_an_affordable_click_does_not_flash() -> void:
-	ResourceLedger.set_amount(TOKENS, 10.0)
+	ResourceLedger.set_amount(TOKENS, 20.0)
 	assert_true(shop.handle_click(_click_point(buildings, 0)))
 	assert_eq(buildings._denied, -1)
 

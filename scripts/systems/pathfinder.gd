@@ -507,6 +507,19 @@ func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	graph_changed.emit()
 
 
+## Announce that the graph changed WITHOUT rebuilding it.
+##
+## For a structure whose effect is entirely an occupant claim — a fence blocks
+## its cell purely through blocks_movement(), painting no geometry — there is
+## nothing to re-ingest, so rebuild() would be a full grid scan to reach the
+## same state. But the emission itself still has to happen: graph_changed is
+## what drops the cached reachability set (`_reach_anchor`) that the action menu
+## and UXOverlay read, and without it a fenced cell stays reachable in the UI
+## until something else forces a rebuild.
+func notify_graph_changed() -> void:
+	graph_changed.emit()
+
+
 ## True iff a bidirectional traversal edge exists between `a` and `b`. Used by
 ## movers (Player) to detect ladder steps and adjust per-step timing. Delegates
 ## to TileGrid when a grid is built (O(1) dict lookup); falls back to the
