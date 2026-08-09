@@ -69,3 +69,7 @@ credentials.*
 
 # Balance-simulator CSV output (scripts/tools/sim/balance_sim.gd --out)
 sim_out/
+
+# Preview-tool renders (--out). Under res://, so Godot would otherwise import
+# every capture into the project and litter .import files beside them.
+preview_out/

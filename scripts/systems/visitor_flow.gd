@@ -34,16 +34,26 @@ const SOURCE: StringName = &"visitors"
 ## ended every run on ~197 unspent tokens, the same over-supply that forced the
 ## 2026-08-06 cut from 5 to 1. 2 keeps the unlock reachable inside a season
 ## without the pile-up.)
-@export var base_visitors_per_day: int = 4
+@export var base_visitors_per_day: int = 6
 @export var tokens_per_visitor: float = 2.0
 
 const REGROWTH_GROUP: StringName = &"regrowth"
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
 
+## How VisitorSpawner finds this node to hear `visitors_arrived`. The spawner is
+## a SEPARATE node on purpose: the headless balance simulator instantiates THIS
+## script directly (sim_runner.gd's _SYSTEM_DEFS), so anything that spawns scene
+## nodes must live somewhere the sim never constructs.
+const GROUP_NAME: StringName = &"visitor_flow"
+
 var _rain_integral: float = 0.0
 var _rain_elapsed: float = 0.0
 var _day_night: Node = null
 var _regrowth: Node = null
+
+
+func _enter_tree() -> void:
+	add_to_group(GROUP_NAME)
 
 
 func _ready() -> void:

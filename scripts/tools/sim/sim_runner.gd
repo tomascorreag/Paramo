@@ -16,11 +16,12 @@ extends Node
 ## here or in the game. Rows report trajectories and percentages.
 ##
 ## Player-model limitations (policy-level, deliberate — factor into any CSV
-## reading): the bot shops only during planning phases (a player can buy from
+## reading): the bot shops only at season boundaries (a player can buy from
 ## the journal any time); walks are commit-and-teleport (no mid-walk
 ## re-planning when a nearer fire ignites or the target burns out, no
-## cancel); remove verbs are never used; planning takes zero real time (fire
-## now freezes with the paused clock, so this costs nothing); bridge
+## cancel); remove verbs are never used; boundary shopping takes zero game
+## time, and unlike the old planning phase the clock no longer stops for it —
+## which costs nothing, since it resolves inside one tick; bridge
 ## placement is not modeled (unlock purchase only); the stand cell beside a
 ## fire is picked by Manhattan distance then ONE A* (the game's action layer
 ## A*s every reachable stand and takes the shortest actual path, so around
@@ -35,6 +36,11 @@ extends Node
 ##   tokens_final      ledger tokens at end
 ##   water_final       ledger water at end
 ##   tokens_visitors   total tokens earned from visitors
+##   visitors_walked   bodies actually put on the mountain over the run. NOT the
+##                     same as the arrivals VisitorFlow banked: opening hours
+##                     and the concurrency cap hold some back. The gap between
+##                     this and tokens_visitors is the crowd the economy was
+##                     paid for but the ground never carried.
 ##   water_rain        total water earned from rainfall
 ##   water_fog         total water earned from fog capture
 ##   water_douse       net water spent dousing (negative or 0)
@@ -43,9 +49,14 @@ extends Node
 ##   fires_doused_rain exact (FireManager.stats_rain_extinguished diff)
 ##   fires_active_end  burning cells left when the run ended
 ##   peak_fires        max concurrent burning cells observed
-##   charred_end       charred (unregrown) cells at end
-##   charred_cell_days sum of charred count sampled at each day boundary
-##   grass_frac_end    grass cells / initial grass cells at end
+##   charred_end       BARE (fully stripped, unregrown) cells at end. Fire is
+##                     the only thing that bares a cell in a sim run, so this
+##                     still means "charred" here; in the GAME trampling can
+##                     bare one too.
+##   charred_cell_days sum of that bare count sampled at each day boundary
+##   grass_frac_end    grass remaining / initial grass cells at end. CONTINUOUS
+##                     since vegetation became a per-cell amount: a half-worn
+##                     cell counts as half a cell of loss, not zero or one.
 ##   grass_frac_min    minimum of that fraction over the run (sampled per tick)
 ##   appeal_min        minimum visitor-appeal factor (day-boundary samples)
 ##   rain_frac         fraction of ticks with rain intensity > 0.1. Sampled
@@ -79,6 +90,7 @@ const RUN_COLUMNS: PackedStringArray = [
 	"unlock_day_bridge", "unlock_day_ladder", "unlock_day_frailejon",
 	"bot_douses", "bot_travel_seconds",
 	"placements_ladder", "placements_frailejon",
+	"visitors_walked",
 ]
 
 const DAY_COLUMNS: PackedStringArray = [
@@ -96,6 +108,9 @@ const _SYSTEM_DEFS: Array = [
 	["ClimateController", "res://scripts/systems/climate_controller.gd"],
 	["RegrowthManager", "res://scripts/systems/regrowth_manager.gd"],
 	["VisitorFlow", "res://scripts/systems/visitor_flow.gd"],
+	# AFTER VisitorFlow: it connects to that node's visitors_arrived by group
+	# lookup in _ready, so the flow has to exist first.
+	["VisitorSpawner", "res://scripts/systems/visitor_spawner.gd"],
 	["UnlockState", "res://scripts/systems/unlock_state.gd"],
 ]
 
@@ -165,12 +180,20 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	var climate: ClimateController = systems["ClimateController"]
 	var regrowth: RegrowthManager = systems["RegrowthManager"]
 	var visitors: VisitorFlow = systems["VisitorFlow"]
+	var spawner: VisitorSpawner = systems["VisitorSpawner"]
 	var unlocks: UnlockState = systems["UnlockState"]
 
 	# --- seeding + fire wiring ----------------------------------------------
 	host.rng.seed = run_seed ^ SEED_XOR_WEATHER
 	FireManager.rng.seed = run_seed ^ SEED_XOR_FIRE
 	regrowth.rng.seed = run_seed ^ SEED_XOR_REGROWTH
+	# The crowd walks the real world: bodies parented into it, the derived entry
+	# anchored on the player's spawn (SimBot is RefCounted and cannot be found by
+	# group), and its own derived stream via set_seed. Without this the run has
+	# no trampling, and trampling is now part of what the run measures.
+	spawner.set_seed(run_seed)
+	spawner.entity_parent = world.object_parent
+	spawner.anchor_cell_override = world.spawn_cell
 	FireManager.spawn_vfx = false
 	# Frozen autoload _process for the run's duration — restored in cleanup so
 	# a GUT suite (which shares the autoloads with every other test) doesn't
@@ -208,12 +231,26 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		bot.object_parent = world.object_parent
 		bot.fire_manager = FireManager
 		bot.ledger = ResourceLedger
+		bot.regrowth = regrowth
 		bot.cell = world.spawn_cell
 		if bot.cell.x < 0:
 			# _find_starting_cell can legitimately fail; an inert bot would
 			# silently read as a no-bot baseline in the CSV.
 			push_warning("SimRunner: seed %d has no spawn cell — bot is inert"
 					% run_seed)
+
+	# The bot shops at each SEASON BOUNDARY. That used to be the PLANNING phase
+	# (removed 2026-08-09 — nothing in the game left it, so the run deadlocked
+	# there); seasons now roll straight over, and season_ended is the same
+	# instant. The handler only RAISES a flag: the shopping itself runs at the
+	# top of the loop below, once SeasonManager has finished transitioning, so
+	# the bot never mutates unlocks/occupants mid-signal. Connected per run and
+	# disconnected after — SeasonManager is an autoload shared by every run in
+	# the process, so a leaked connection would have run N bots on run N+1.
+	var boundary_pending: Array[bool] = [false]
+	var on_season_ended: Callable = func(_i: int, _p: SeasonProfile) -> void:
+		boundary_pending[0] = true
+	SeasonManager.season_ended.connect(on_season_ended)
 
 	# --- the run -------------------------------------------------------------
 	SeasonManager.start_run()
@@ -241,13 +278,10 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 	var max_ticks: int = (SeasonManager.days_per_year + 2) * ticks_per_day
 	while SeasonManager.phase != SeasonManager.Phase.RUN_OVER \
 			and ticks_total < max_ticks:
-		if SeasonManager.phase == SeasonManager.Phase.PLANNING:
-			# Clock is paused, like the game. The bot shops, then the run taps
-			# "next season".
+		if boundary_pending[0]:
+			boundary_pending[0] = false
 			if bot != null:
-				bot.on_planning(unlocks, TimeManager.day_count)
-			SeasonManager.begin_next_season()
-			continue
+				bot.on_season_boundary(unlocks, TimeManager.day_count)
 
 		TimeManager.advance(DT)
 		# Frame-order fidelity: autoloads process before scene nodes, so in
@@ -260,6 +294,9 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		climate.tick(DT)
 		regrowth.tick(DT)
 		visitors.tick(DT)
+		# After VisitorFlow, matching scene order: the flow banks the day's
+		# arrivals and emits, and the spawner lets them in from the same tick.
+		spawner.tick(DT)
 		var rain: float = host.get_rain_current_intensity()
 		if bot != null:
 			bot.tick(ticks_total * DT)
@@ -272,8 +309,9 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		dryness_sum += climate.dryness
 		var burning: int = FireManager.burning_count()
 		peak_fires = maxi(peak_fires, burning)
-		var charred: int = regrowth.charred_count()
-		var grass_frac: float = _grass_fraction(initial_grass, burning, charred)
+		var charred: int = regrowth.bare_count()
+		var grass_frac: float = _grass_fraction(
+				initial_grass, burning, regrowth.vegetation_deficit())
 		grass_frac_min = minf(grass_frac_min, grass_frac)
 
 		if TimeManager.day_count != last_day:
@@ -308,8 +346,10 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 			day_ignitions_prev = FireManager.stats_ignitions
 			day_burned_prev = _burned_out_count
 
+	SeasonManager.season_ended.disconnect(on_season_ended)
+
 	# --- run row -------------------------------------------------------------
-	var charred_end: int = regrowth.charred_count()
+	var charred_end: int = regrowth.bare_count()
 	var burning_end: int = FireManager.burning_count()
 	var run_row: Dictionary = {
 		"scenario": scenario_name,
@@ -328,7 +368,8 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		"peak_fires": peak_fires,
 		"charred_end": charred_end,
 		"charred_cell_days": charred_cell_days,
-		"grass_frac_end": _grass_fraction(initial_grass, burning_end, charred_end),
+		"grass_frac_end": _grass_fraction(
+				initial_grass, burning_end, regrowth.vegetation_deficit()),
 		"grass_frac_min": grass_frac_min,
 		"appeal_min": appeal_min,
 		"rain_frac": float(rain_ticks) / maxf(ticks_total, 1.0),
@@ -346,6 +387,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 				int(bot.placements.get(&"ladder", 0)) if bot != null else 0,
 		"placements_frailejon":
 				int(bot.placements.get(&"frailejon", 0)) if bot != null else 0,
+		"visitors_walked": spawner.stats_spawned,
 	}
 
 	# --- cleanup -------------------------------------------------------------
@@ -384,10 +426,15 @@ func _flush_dead_objects() -> void:
 
 
 # Grass is exact bookkeeping, no census needed: a burning cell was swapped to
-# dirt at ignition, a charred cell stays dirt until regrowth removes it from
-# the charred set (regrowth repaints the grass), and nothing else creates or
-# destroys grass.
-static func _grass_fraction(initial: int, burning: int, charred: int) -> float:
+# dirt at ignition, and every other way a cell loses grass goes through
+# RegrowthManager's ledger, whose deficit is grass-cells-worth missing.
+#
+# `deficit` is a FLOAT because vegetation is continuous now — a cell half worn
+# away counts half. In a sim run it is always whole numbers, since fire is the
+# only damage source here (visitor BODIES, the thing that tramples, are a scene
+# node the simulator never constructs) — but the column has to carry the
+# fraction for the game, where it does not stay whole.
+static func _grass_fraction(initial: int, burning: int, deficit: float) -> float:
 	if initial <= 0:
 		return 1.0
-	return float(initial - burning - charred) / float(initial)
+	return (float(initial - burning) - deficit) / float(initial)

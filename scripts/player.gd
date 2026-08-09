@@ -114,6 +114,7 @@ var _shadow_cutoff_target: float = 1000.0
 
 var _pathfinder: Pathfinder
 var _time_manager: Node # TimeManager autoload
+var _regrowth: Node # RegrowthManager, found lazily by group
 
 var current_cell: Vector2i = Vector2i.ZERO
 
@@ -350,6 +351,11 @@ func _begin_next_step() -> void:
 	if _footsteps != null:
 		_footsteps.step_started(_pathfinder, next_cell, kind)
 
+	# The player wears the ground too, at player_trample_fraction of a visitor's
+	# rate. Keyed on the DESTINATION cell, like the footstep above and like
+	# Visitor._on_step_started, so all traffic damages the same cell of a step.
+	_trample(next_cell)
+
 	# Commit the "logical" cell now: future pathfinds will plan from
 	# _step_to_cell, not from the cell we're leaving. This lets reclicks
 	# mid-step produce paths from the cell the player is committed to
@@ -359,6 +365,19 @@ func _begin_next_step() -> void:
 
 	_set_facing(dir)
 	_apply_step_interp(0.0)
+
+
+# Feet wear the grass, at a tenth of a visitor's rate (RegrowthManager owns the
+# ratio). Mirrors Visitor._trample, including the LITERAL group name: naming
+# RegrowthManager here would make regrowth_manager.gd a compile-time dependency
+# of player.gd, and it references three autoloads — which do not exist when a
+# `--script` tool loads a gameplay scene, silently unbinding this script.
+func _trample(cell: Vector2i) -> void:
+	if _regrowth == null or not is_instance_valid(_regrowth):
+		_regrowth = get_tree().get_first_node_in_group(&"regrowth")
+		if _regrowth == null:
+			return
+	_regrowth.call(&"trample_by_player", cell)
 
 
 func _finish_step() -> void:

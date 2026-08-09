@@ -105,10 +105,9 @@ func test_rate_reflects_the_weather() -> void:
 # --- phase gating -----------------------------------------------------------
 
 func test_no_accrual_outside_an_active_run() -> void:
-	# The gameplay scene is also up behind the title screen (IDLE) and during
-	# planning — neither may fill the reserve.
-	for phase: int in [SeasonManager.Phase.IDLE, SeasonManager.Phase.PLANNING,
-			SeasonManager.Phase.RUN_OVER]:
+	# The gameplay scene is also up behind the title screen (IDLE) and after the
+	# run ends — neither may fill the reserve.
+	for phase: int in [SeasonManager.Phase.IDLE, SeasonManager.Phase.RUN_OVER]:
 		SeasonManager.phase = phase
 		_cycle._process(1.0)
 		_cycle.flush()

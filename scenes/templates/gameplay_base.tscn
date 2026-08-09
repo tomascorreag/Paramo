@@ -41,6 +41,7 @@
 [ext_resource type="Script" path="res://scripts/systems/regrowth_manager.gd" id="39_regrowth"]
 [ext_resource type="Script" path="res://scripts/systems/visitor_flow.gd" id="40_visitors"]
 [ext_resource type="Script" path="res://scripts/systems/unlock_state.gd" id="41_unlocks"]
+[ext_resource type="Script" uid="uid://bt42lm88iefif" path="res://scripts/systems/visitor_spawner.gd" id="42_vspawn"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -239,6 +240,10 @@ script = ExtResource("40_visitors")
 
 [node name="UnlockState" type="Node" parent="." unique_id=480862936]
 script = ExtResource("41_unlocks")
+
+[node name="VisitorSpawner" type="Node" parent="." unique_id=480862937 node_paths=PackedStringArray("entity_parent")]
+script = ExtResource("42_vspawn")
+entity_parent = NodePath("../World")
 
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=156444878]
 layer = 100

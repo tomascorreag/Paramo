@@ -1,7 +1,7 @@
 # TODO
 
 - [x] add ladders
-- [ ] add fences
+- [x] add fences
 - [x] improve icon system code
 - [x] improve ground layering system
 
@@ -20,3 +20,4 @@
 - [ ] when creating `export_presets.cfg`, set Export Filter to exclude `addons/gut/*`, `tests/*`, `scripts/tools/*`, `*.md`, `design/*`
 - [ ] ensure web preset is Release (not Debug) and has no `--remote-debug` flag
 - [x] pick a web host that supports COOP/COEP headers (itch.io, Netlify, Cloudflare Pages) — GitHub Pages won't work because Godot 4 threaded builds need `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` for `SharedArrayBuffer`. Alternative: disable threads in the export.
+- [ ] Clean up: fix and optimize processes that might be hacky/unoptimized, not only in the game but for the repo in general. Make sure not to downgrade any functionality.

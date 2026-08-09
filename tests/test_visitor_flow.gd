@@ -93,9 +93,11 @@ func test_a_completed_day_banks_one_lump() -> void:
 	_rain.intensity = 0.0
 	_appeal.appeal = 1.0
 	_flow._on_day_completed(1)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 8.0,
-			"4 visitors x 2 tokens, in one deposit")
-	assert_eq(ResourceLedger.source_total(TOKENS, VisitorFlow.SOURCE), 8.0)
+	var perfect_day: float = _flow.base_visitors_per_day * _flow.tokens_per_visitor
+	assert_eq(ResourceLedger.get_amount(TOKENS), perfect_day,
+			"%d visitors x %d tokens, in ONE deposit" \
+					% [_flow.base_visitors_per_day, _flow.tokens_per_visitor])
+	assert_eq(ResourceLedger.source_total(TOKENS, VisitorFlow.SOURCE), perfect_day)
 
 
 func test_a_rained_out_day_banks_nothing() -> void:
@@ -105,8 +107,7 @@ func test_a_rained_out_day_banks_nothing() -> void:
 
 
 func test_no_income_outside_an_active_run() -> void:
-	for phase: int in [SeasonManager.Phase.IDLE, SeasonManager.Phase.PLANNING,
-			SeasonManager.Phase.RUN_OVER]:
+	for phase: int in [SeasonManager.Phase.IDLE, SeasonManager.Phase.RUN_OVER]:
 		SeasonManager.phase = phase
 		_flow._on_day_completed(1)
 		assert_eq(ResourceLedger.get_amount(TOKENS), 0.0,
@@ -119,7 +120,11 @@ func test_m_key_burst_banks_once_per_emission_without_error() -> void:
 	_rain.intensity = 0.0
 	for i in 6:
 		_flow._on_day_completed(i)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 48.0, "6 days x 8 tokens")
+	# Derived from the exports, not hardcoded: this test is about the BURST
+	# banking once per emission, so a retune of the daily count must not fail it.
+	var per_day: float = _flow.base_visitors_per_day * _flow.tokens_per_visitor
+	assert_eq(ResourceLedger.get_amount(TOKENS), 6.0 * per_day,
+			"6 perfect days x %d tokens" % per_day)
 
 
 func test_day_average_rain_comes_from_the_process_integral() -> void:
@@ -131,9 +136,11 @@ func test_day_average_rain_comes_from_the_process_integral() -> void:
 	_rain.intensity = 0.0
 	_flow._process(half_day)
 
-	# avg 0.5 -> 4 * 0.5 = 2 visitors even though it is bone dry RIGHT NOW.
+	# avg 0.5 -> HALF the base count even though it is bone dry RIGHT NOW.
 	_flow._on_day_completed(1)
-	assert_eq(ResourceLedger.get_amount(TOKENS), 4.0,
+	var half_day_pay: float = VisitorFlow.visitors_for(
+			0.5, 1.0, _flow.base_visitors_per_day) * _flow.tokens_per_visitor
+	assert_eq(ResourceLedger.get_amount(TOKENS), half_day_pay,
 			"the morning's storm must count against the evening's payout")
 
 

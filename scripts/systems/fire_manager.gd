@@ -241,6 +241,15 @@ func grid_cell_count() -> int:
 	return _grid.cell_count() if _grid != null else 0
 
 
+## The attached TileGrid, or null. Same reasoning as grid_cell_count: fire owns
+## the attach/detach lifecycle (pathfinder discovery, graph_changed, wipes), so
+## a system that needs to read a cell's layer borrows it here rather than
+## duplicating that lifecycle. Typed Object because TileGrid is resolved at
+## runtime, exactly as _grid is.
+func grid() -> Object:
+	return _grid
+
+
 ## Read-only view of the burning set (cell -> entry). Returned BY REFERENCE
 ## on purpose: the sim's bot polls this every decision and must not pay a
 ## copy. Callers must not mutate it or hold it across a tick.
@@ -516,9 +525,9 @@ func _ignite(cell: Vector2i) -> void:
 	# but swaps to a random walkable dirt variant of the same kind, so a
 	# patch of charred ground shows visual variety. Fall back to FLAT if the
 	# dirt source doesn't paint the cell's kind.
-	var dirt_coord: Vector2i = _pick_random_dirt_coord(layer.tile_set, cd.tile_kind)
+	var dirt_coord: Vector2i = pick_dirt_coord(layer.tile_set, cd.tile_kind)
 	if dirt_coord.x < 0:
-		dirt_coord = _pick_random_dirt_coord(layer.tile_set, &"FLAT")
+		dirt_coord = pick_dirt_coord(layer.tile_set, &"FLAT")
 
 	# Swap underlying tile to dirt immediately. The BurningCellVFX overlay
 	# holds the grass texture and dissolves it pixel-by-pixel — as alpha drops,
@@ -703,7 +712,16 @@ func _is_water_layer(layer: TileMapLayer, cell: Vector2i) -> bool:
 	return layer.get_cell_source_id(cell) == SOURCE_WATER
 
 
-func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
+## A random walkable dirt variant of `kind`, or (-1, -1) if the dirt source
+## doesn't paint that kind. Public because fire is no longer the only thing that
+## bares a cell — RegrowthManager's trampling wears grass down to dirt and must
+## produce the same shape-preserving variety, and the atlas scan is cached here.
+##
+## `stream` lets a caller draw from its OWN RNG. Fire's stream is replayed
+## byte-for-byte by the balance simulator, so a second system drawing from it
+## would silently make fire outcomes depend on how much walking happened.
+func pick_dirt_coord(tile_set: TileSet, kind: StringName,
+		stream: RandomNumberGenerator = null) -> Vector2i:
 	if tile_set == null or String(kind).is_empty():
 		return Vector2i(-1, -1)
 	var by_kind: Dictionary = _dirt_coords_by_tileset.get(tile_set, {})
@@ -713,7 +731,8 @@ func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
 	var coords: Array = by_kind.get(kind, [])
 	if coords.is_empty():
 		return Vector2i(-1, -1)
-	return coords[rng.randi() % coords.size()]
+	var draw: RandomNumberGenerator = stream if stream != null else rng
+	return coords[draw.randi() % coords.size()]
 
 
 # Returns { tile_kind: Array[Vector2i] } over the dirt source: every painted
