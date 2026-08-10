@@ -1,67 +1,85 @@
-[gd_resource type="Resource" script_class="VisitorPalette" format=3]
+[gd_resource type="Resource" script_class="VisitorPalette" format=3 uid="uid://ctkskjy0m6m7c"]
 
-[ext_resource type="Script" path="res://scripts/data/visitor_ramp.gd" id="1_lfbp6"]
-[ext_resource type="Script" path="res://scripts/data/visitor_palette.gd" id="2_dhuu1"]
+[ext_resource type="Script" uid="uid://bgabeehito4gt" path="res://scripts/data/visitor_ramp.gd" id="1_lfbp6"]
+[ext_resource type="Script" uid="uid://dur1phewmkoyv" path="res://scripts/data/visitor_palette.gd" id="2_dhuu1"]
 
 [sub_resource type="Resource" id="Resource_2sf25"]
 script = ExtResource("1_lfbp6")
 name = &"black"
 stops = PackedColorArray(0.23921569, 0.2, 0.2, 1, 0.25490198, 0.26666668, 0.27450982, 1)
+weight = 2.0
 
 [sub_resource type="Resource" id="Resource_4ycs3"]
 script = ExtResource("1_lfbp6")
 name = &"brown"
 stops = PackedColorArray(0.23921569, 0.2, 0.2, 1, 0.34901962, 0.24313726, 0.2784314, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.64705884, 0.47058824, 0.33333334, 1)
+weight = 1.5
 
 [sub_resource type="Resource" id="Resource_kvwq6"]
 script = ExtResource("1_lfbp6")
 name = &"auburn"
-stops = PackedColorArray(0.4509804, 0.29803923, 0.26666668, 1, 0.70980394, 0.34901962, 0.27058825, 1, 0.87058824, 0.62352943, 0.2784314, 1)
+stops = PackedColorArray(0.4509804, 0.29803923, 0.26666668, 1, 0.70980394, 0.34901962, 0.27058825, 1, 0.92156863, 0.5882353, 0.38039216, 1)
+weight = 0.5
 
 [sub_resource type="Resource" id="Resource_xgufm"]
 script = ExtResource("1_lfbp6")
 name = &"blond"
-stops = PackedColorArray(0.87058824, 0.62352943, 0.2784314, 1, 0.99215686, 0.81960785, 0.4745098, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+stops = PackedColorArray(0.64705884, 0.47058824, 0.33333334, 1, 0.87058824, 0.62352943, 0.2784314, 1, 0.99215686, 0.81960785, 0.4745098, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+weight = 0.3
 
 [sub_resource type="Resource" id="Resource_x0qny"]
 script = ExtResource("1_lfbp6")
 name = &"grey"
-stops = PackedColorArray(0.3882353, 0.4, 0.3882353, 1, 0.5294118, 0.52156866, 0.4862745, 1, 0.7372549, 0.6784314, 0.62352943, 1)
+stops = PackedColorArray(0.1882353, 0.21960784, 0.2627451, 1, 0.3882353, 0.4, 0.3882353, 1, 0.5294118, 0.52156866, 0.4862745, 1, 0.7372549, 0.6784314, 0.62352943, 1)
+weight = 0.75
+
+[sub_resource type="Resource" id="Resource_lfbp6"]
+script = ExtResource("1_lfbp6")
+name = &"blue"
+stops = PackedColorArray(0.078431375, 0.13725491, 0.22745098, 1, 0.1882353, 0.21960784, 0.2627451, 1, 0.2509804, 0.32156864, 0.4509804, 1, 0.42352942, 0.5058824, 0.6313726, 1)
+weight = 0.25
+metadata/_custom_type_script = "uid://bgabeehito4gt"
 
 [sub_resource type="Resource" id="Resource_xrnrb"]
 script = ExtResource("1_lfbp6")
 name = &"blue"
-stops = PackedColorArray(0.078431375, 0.13725491, 0.22745098, 1, 0.1882353, 0.21960784, 0.2627451, 1, 0.2509804, 0.32156864, 0.4509804, 1, 0.42352942, 0.5058824, 0.6313726, 1)
+stops = PackedColorArray(0.078431375, 0.13725491, 0.22745098, 1, 0.2509804, 0.32156864, 0.4509804, 1, 0.42352942, 0.5058824, 0.6313726, 1, 0.5882353, 0.6627451, 0.75686276, 1, 0.73333335, 0.7647059, 0.8156863, 1)
+weight = 2.0
 
 [sub_resource type="Resource" id="Resource_07v3q"]
 script = ExtResource("1_lfbp6")
 name = &"charcoal"
-stops = PackedColorArray(0.23921569, 0.2, 0.2, 1, 0.25490198, 0.26666668, 0.27450982, 1, 0.3882353, 0.4, 0.3882353, 1, 0.5294118, 0.52156866, 0.4862745, 1)
+stops = PackedColorArray(0.1882353, 0.21960784, 0.2627451, 1, 0.25490198, 0.26666668, 0.27450982, 1, 0.3882353, 0.4, 0.3882353, 1, 0.5294118, 0.52156866, 0.4862745, 1)
+weight = 1.5
 
 [sub_resource type="Resource" id="Resource_37ipp"]
 script = ExtResource("1_lfbp6")
 name = &"khaki"
 stops = PackedColorArray(0.3882353, 0.4, 0.3882353, 1, 0.7372549, 0.6784314, 0.62352943, 1, 0.83137256, 0.7764706, 0.57254905, 1)
+weight = 0.5
 
 [sub_resource type="Resource" id="Resource_8r3r2"]
 script = ExtResource("1_lfbp6")
 name = &"olive"
-stops = PackedColorArray(0.18431373, 0.3019608, 0.18431373, 1, 0.32941177, 0.40392157, 0.3372549, 1, 0.5058824, 0.5803922, 0.2784314, 1)
+stops = PackedColorArray(0.18431373, 0.3019608, 0.18431373, 1, 0.32941177, 0.40392157, 0.3372549, 1, 0.5372549, 0.6431373, 0.46666667, 1)
 
 [sub_resource type="Resource" id="Resource_quxoh"]
 script = ExtResource("1_lfbp6")
 name = &"shoe black"
 stops = PackedColorArray(0.23921569, 0.2, 0.2, 1, 0.25490198, 0.26666668, 0.27450982, 1, 0.3882353, 0.4, 0.3882353, 1)
+weight = 1.5
 
 [sub_resource type="Resource" id="Resource_81oyc"]
 script = ExtResource("1_lfbp6")
 name = &"shoe white"
-stops = PackedColorArray(0.73333335, 0.7647059, 0.8156863, 1, 0.8352941, 0.8392157, 0.85882354, 1, 0.94509804, 0.9647059, 0.9411765, 1)
+stops = PackedColorArray(0.5882353, 0.6627451, 0.75686276, 1, 0.8352941, 0.8392157, 0.85882354, 1, 0.94509804, 0.9647059, 0.9411765, 1)
+weight = 0.5
 
 [sub_resource type="Resource" id="Resource_vqexd"]
 script = ExtResource("1_lfbp6")
 name = &"skin warm"
-stops = PackedColorArray(0.34901962, 0.24313726, 0.2784314, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.64705884, 0.47058824, 0.33333334, 1, 0.92156863, 0.5882353, 0.38039216, 1, 0.9490196, 0.72156864, 0.53333336, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+stops = PackedColorArray(0.34901962, 0.24313726, 0.2784314, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.64705884, 0.47058824, 0.33333334, 1, 0.9490196, 0.72156864, 0.53333336, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+weight = 3.0
 
 [sub_resource type="Resource" id="Resource_4875t"]
 script = ExtResource("1_lfbp6")
@@ -77,36 +95,34 @@ stops = PackedColorArray(0.18431373, 0.3019608, 0.18431373, 1, 0.26666668, 0.439
 script = ExtResource("1_lfbp6")
 name = &"sage"
 stops = PackedColorArray(0.32941177, 0.40392157, 0.3372549, 1, 0.5372549, 0.6431373, 0.46666667, 1, 0.6431373, 0.77254903, 0.6862745, 1, 0.7921569, 0.9019608, 0.8509804, 1)
-
-[sub_resource type="Resource" id="Resource_rn6q8"]
-script = ExtResource("1_lfbp6")
-name = &"sky"
-stops = PackedColorArray(0.2509804, 0.32156864, 0.4509804, 1, 0.42352942, 0.5058824, 0.6313726, 1, 0.5882353, 0.6627451, 0.75686276, 1, 0.73333335, 0.7647059, 0.8156863, 1)
+weight = 0.5
 
 [sub_resource type="Resource" id="Resource_3viwu"]
 script = ExtResource("1_lfbp6")
 name = &"clay"
 stops = PackedColorArray(0.34901962, 0.24313726, 0.2784314, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.70980394, 0.34901962, 0.27058825, 1, 0.92156863, 0.5882353, 0.38039216, 1)
+weight = 1.5
 
 [sub_resource type="Resource" id="Resource_a8wkv"]
 script = ExtResource("1_lfbp6")
 name = &"ochre"
-stops = PackedColorArray(0.4509804, 0.29803923, 0.26666668, 1, 0.87058824, 0.62352943, 0.2784314, 1, 0.99215686, 0.81960785, 0.4745098, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+stops = PackedColorArray(0.87058824, 0.62352943, 0.2784314, 1, 0.99215686, 0.81960785, 0.4745098, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+weight = 0.25
 
 [sub_resource type="Resource" id="Resource_2il88"]
 script = ExtResource("1_lfbp6")
-name = &"cream"
-stops = PackedColorArray(0.7372549, 0.6784314, 0.62352943, 1, 0.83137256, 0.7764706, 0.57254905, 1, 0.99607843, 0.88235295, 0.72156864, 1)
+name = &"grey"
+stops = PackedColorArray(0.1882353, 0.21960784, 0.2627451, 1, 0.3882353, 0.4, 0.3882353, 1, 0.5294118, 0.52156866, 0.4862745, 1, 0.7372549, 0.6784314, 0.62352943, 1, 0.99607843, 0.88235295, 0.72156864, 1)
 
 [sub_resource type="Resource" id="Resource_d1nyp"]
 script = ExtResource("1_lfbp6")
-name = &"white"
-stops = PackedColorArray(0.5882353, 0.6627451, 0.75686276, 1, 0.73333335, 0.7647059, 0.8156863, 1, 0.8352941, 0.8392157, 0.85882354, 1, 0.94509804, 0.9647059, 0.9411765, 1)
+name = &"red"
+stops = PackedColorArray(0.23921569, 0.2, 0.2, 1, 0.34901962, 0.24313726, 0.2784314, 1, 0.4509804, 0.29803923, 0.26666668, 1, 0.70980394, 0.34901962, 0.27058825, 1)
 
 [resource]
 script = ExtResource("2_dhuu1")
-hair = Array[ExtResource("1_lfbp6")]([SubResource("Resource_2sf25"), SubResource("Resource_4ycs3"), SubResource("Resource_kvwq6"), SubResource("Resource_xgufm"), SubResource("Resource_x0qny")])
+hair = Array[ExtResource("1_lfbp6")]([SubResource("Resource_2sf25"), SubResource("Resource_4ycs3"), SubResource("Resource_kvwq6"), SubResource("Resource_xgufm"), SubResource("Resource_x0qny"), SubResource("Resource_lfbp6")])
 skin = Array[ExtResource("1_lfbp6")]([SubResource("Resource_vqexd"), SubResource("Resource_4875t")])
-torso = Array[ExtResource("1_lfbp6")]([SubResource("Resource_e8dj6"), SubResource("Resource_8s2fi"), SubResource("Resource_xrnrb"), SubResource("Resource_rn6q8"), SubResource("Resource_3viwu"), SubResource("Resource_a8wkv"), SubResource("Resource_2il88"), SubResource("Resource_d1nyp")])
+torso = Array[ExtResource("1_lfbp6")]([SubResource("Resource_e8dj6"), SubResource("Resource_8s2fi"), SubResource("Resource_xrnrb"), SubResource("Resource_3viwu"), SubResource("Resource_a8wkv"), SubResource("Resource_2il88"), SubResource("Resource_d1nyp")])
 legs = Array[ExtResource("1_lfbp6")]([SubResource("Resource_xrnrb"), SubResource("Resource_07v3q"), SubResource("Resource_37ipp"), SubResource("Resource_4ycs3"), SubResource("Resource_8r3r2")])
 shoes = Array[ExtResource("1_lfbp6")]([SubResource("Resource_quxoh"), SubResource("Resource_4ycs3"), SubResource("Resource_x0qny"), SubResource("Resource_81oyc")])

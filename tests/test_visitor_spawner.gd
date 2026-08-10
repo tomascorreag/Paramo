@@ -27,6 +27,9 @@ class FakePlayer extends Node2D:
 
 
 func before_each() -> void:
+	# VisitorStanding is static, so claims outlive the visitors that made them
+	# and would leak from one test into the next as permanently-taken ground.
+	VisitorStanding.clear()
 	pf = Pathfinder.new()
 	pf._grid = TileGrid.new()
 	add_child_autofree(pf)
@@ -144,6 +147,40 @@ func test_spawns_one_visitor_per_arrival() -> void:
 		spawner._process(0.016)
 	assert_eq(_visitors().size(), 3)
 	assert_eq(spawner.pending_count(), 0)
+
+
+func test_a_spawned_visitor_does_not_also_drive_itself() -> void:
+	# The spawner ticks its whole crowd (see its `tick`), so a visitor running
+	# its own _process as well advances TWICE a frame and walks at double the
+	# pace it was given — which is how visitors ended up outrunning the player
+	# they are clamped to stay behind. The spawner used to call
+	# set_process(false) BEFORE add_child, and entering the tree re-enabled it,
+	# so the guard has to be observed on a visitor that is already in the tree.
+	_inject_rect(Vector2i(0, 0), Vector2i(8, 8))
+	player.current_cell = Vector2i(4, 4)
+	spawner = _make_spawner()
+	spawner.request_visitors(2)
+	for _i in 2:
+		spawner._process(0.016)
+	var seen := _visitors()
+	assert_gt(seen.size(), 0, "nothing spawned — the rest of this test is vacuous")
+	for v in seen:
+		assert_true(v.driven_externally, "spawned visitor is not flagged as driven")
+		assert_false(v.is_processing(),
+				"spawned visitor still runs its own _process: it will tick twice a frame")
+
+
+func test_a_hand_built_visitor_drives_itself() -> void:
+	# The flag is opt-IN: a visitor a tool or a test builds by hand has no driver
+	# and must keep its own _process, or it stands still forever.
+	_inject_rect(Vector2i(0, 0), Vector2i(8, 8))
+	var v: Visitor = load("res://scenes/entities/visitor.tscn").instantiate()
+	v.entry_cell = Vector2i(4, 4)
+	v.goal_cell = Vector2i(6, 6)
+	parent.add_child(v)
+	assert_false(v.driven_externally)
+	assert_true(v.is_processing())
+	v.queue_free()
 
 
 func test_every_goal_is_reachable_from_the_entry() -> void:
@@ -433,14 +470,44 @@ func _make_visitor(goal: Vector2i, stream_seed: int, wander: float) -> Visitor:
 	return v
 
 
-func test_without_noise_everyone_walks_the_same_line() -> void:
-	# The baseline the noise exists to break: a shortest path is essentially
-	# unique, so a party sharing an entry and a goal walks it in single file.
+func test_the_shortest_path_is_unique_which_is_why_noise_exists() -> void:
+	# The baseline the noise exists to break, now stated against the PATHFINDER
+	# rather than against two visitors. It used to be asserted by walking two
+	# wander-free visitors to one goal and comparing their paths — which stopped
+	# being possible when standing cells became exclusive: they can no longer
+	# share a destination, so their routes differ for a reason that has nothing
+	# to do with the claim being made here.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var a := pf.find_path(Vector2i(1, 1), Vector2i(10, 10))
+	var b := pf.find_path(Vector2i(1, 1), Vector2i(10, 10))
+	assert_gt(a.size(), 0, "there must actually be a route")
+	assert_eq(a, b, "identical endpoints give identical routes")
+
+
+func test_two_visitors_never_stand_on_the_same_cell() -> void:
+	# Even with no route noise at all, and even aimed at one goal, two visitors
+	# must end up on different tiles.
 	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
 	var a := _make_visitor(Vector2i(10, 10), 1, 0.0)
 	var b := _make_visitor(Vector2i(10, 10), 999, 0.0)
 	assert_gt(a._path.size(), 0, "the visitor must actually have a route")
-	assert_eq(a._path, b._path)
+	assert_ne(a._goal_stand, b._goal_stand, "two visitors claimed one tile")
+	assert_lte(Visitor.dist2(a._goal_stand, Vector2i(10, 10)), 8,
+			"a standing cell must still be at the goal")
+	assert_lte(Visitor.dist2(b._goal_stand, Vector2i(10, 10)), 8,
+			"a standing cell must still be at the goal")
+
+
+func test_a_crowded_goal_pushes_visitors_outward() -> void:
+	# More visitors than the radius-1 disc holds: reserve_near must ring outward
+	# rather than give up and stack everyone on the anchor.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var seen: Dictionary = {}
+	for s in range(1, 13):
+		var v := _make_visitor(Vector2i(6, 6), s, 0.0)
+		assert_false(seen.has(v._goal_stand),
+				"visitor %d stacked on %s" % [s, v._goal_stand])
+		seen[v._goal_stand] = true
 
 
 func test_noise_gives_two_visitors_two_routes() -> void:
@@ -464,21 +531,279 @@ func test_a_noisy_route_is_still_a_legal_walk() -> void:
 					"seed %d: %s -> %s is not one step" % [s, prev, cell])
 			assert_true(pf.is_walkable(cell), "seed %d: %s is not walkable" % [s, cell])
 			prev = cell
-		assert_eq(prev, Vector2i(10, 10), "seed %d: the detour must still arrive" % s)
+		# Arrives at ITS OWN standing cell, which is near the goal rather than on
+		# it — the goal is shared, standing cells are not.
+		assert_eq(prev, v._goal_stand, "seed %d: the detour must still arrive" % s)
+		assert_lte(Visitor.dist2(v._goal_stand, Vector2i(10, 10)), 8,
+				"seed %d: it arrived somewhere other than the goal" % s)
 
 
 func test_a_noisy_route_is_a_detour_not_a_different_destination() -> void:
-	# A wandering route should be longer than the optimal one — that is what
-	# makes it read as wandering — but not so long the visitor is lost.
+	# A wandering route leaves the optimal line — that is what makes it read as
+	# wandering — but still arrives, and can never beat the optimum.
+	#
+	# The strong property is the SHAPE, not the length, and the distinction is
+	# not pedantic: this map is an open rectangle, so every monotone route from
+	# (1,1) to (10,10) is 18 steps and a waypoint only costs distance if it
+	# leaves the start/goal bounding box. MEASURED over 400 seeds: routes leave
+	# the direct line 100% of the time but come out LONGER only ~8% of it. An
+	# earlier version of this test asserted the length on 6 hand-picked seeds and
+	# passed on 2 of them by luck — it was measuring the geometry of the test
+	# fixture, not the noise. Hence: shape on every seed, length over a range
+	# wide enough for the real rate.
+	# The optimum is measured PER VISITOR, against the cell that visitor actually
+	# walks to: standing cells are exclusive, so each one has its own
+	# destination near the shared goal and a single shared baseline would be
+	# comparing routes to different places.
 	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
-	var direct: int = pf.find_path(Vector2i(1, 1), Vector2i(10, 10)).size() - 1
-	var longer: int = 0
+
 	for s in [1, 2, 3, 7, 11, 23]:
 		var v := _make_visitor(Vector2i(10, 10), s, 1.0)
-		assert_gte(v._path.size(), direct, "seed %d: no route beats the optimum" % s)
-		if v._path.size() > direct:
+		var optimal := pf.find_path(Vector2i(1, 1), v._goal_stand)
+		var on_line: Dictionary = {}
+		for cell: Vector2i in optimal:
+			on_line[cell] = true
+		assert_gte(v._path.size(), optimal.size() - 1,
+				"seed %d: no route beats the optimum" % s)
+		var strayed := false
+		for cell: Vector2i in v._path:
+			if not on_line.has(cell):
+				strayed = true
+				break
+		assert_true(strayed, "seed %d: a noisy route must leave the direct line" % s)
+
+	var longer: int = 0
+	for s in range(1, 61):
+		var w := _make_visitor(Vector2i(10, 10), s, 1.0)
+		if w._path.size() > pf.find_path(Vector2i(1, 1), w._goal_stand).size() - 1:
 			longer += 1
 	assert_gt(longer, 0, "at least some noisy routes must actually detour")
+
+
+# ---------------------------------------------------------------------------
+# A party shares its waypoints
+# ---------------------------------------------------------------------------
+
+func _make_party_member(goal: Vector2i, anchors: Array[Vector2i],
+		stream_seed: int) -> Visitor:
+	var v: Visitor = load("res://scenes/entities/visitor.tscn").instantiate()
+	v.entry_cell = Vector2i(1, 1)
+	v.goal_cell = goal
+	v.set_group_route(anchors)
+	v.rest_chance_per_step = 0.0
+	v.rng = RandomNumberGenerator.new()
+	v.rng.seed = stream_seed
+	parent.add_child(v)
+	return v
+
+
+func test_a_party_walks_near_its_shared_waypoints_not_identically() -> void:
+	# The whole point of the two scales: members converge on the party's
+	# waypoints and differ between them. Identical routes would be a column of
+	# sprites; unrelated routes would make the group draw meaningless.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6), Vector2i(7, 8)]
+	var routes: Array = []
+	for s in [1, 2, 3, 5, 8]:
+		routes.append(_make_party_member(Vector2i(10, 10), anchors, s)._path)
+
+	var distinct := 0
+	for i in routes.size():
+		var unique := true
+		for j in range(0, i):
+			if routes[i] == routes[j]:
+				unique = false
+		if unique:
+			distinct += 1
+	assert_gt(distinct, 1, "members must not all walk one identical line")
+
+	# ...but every member must pass within a member-scatter of each waypoint.
+	for i in routes.size():
+		for anchor: Vector2i in anchors:
+			var closest: int = 1 << 30
+			for cell: Vector2i in routes[i]:
+				closest = mini(closest, Visitor.dist2(cell, anchor))
+			assert_lte(closest, 8,
+					"member %d never came near the party's waypoint %s" % [i, anchor])
+
+
+func test_a_party_route_is_shared_by_reference_and_never_mutated() -> void:
+	# One array serves the whole group, and the way home reads it backwards —
+	# a reverse() in place would flip the trail out from under members still
+	# walking it forwards.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6), Vector2i(7, 8)]
+	var before := anchors.duplicate()
+	var v := _make_party_member(Vector2i(10, 10), anchors, 1)
+	# Drive the visitor home, which is the leg that reads the anchors reversed.
+	v._state = Visitor.State.LINGER
+	v._linger_left = 0.0
+	v.tick(0.1)
+	assert_eq(anchors, before, "the party's shared waypoints must not be mutated")
+
+
+func test_the_spawner_draws_one_route_for_the_whole_party() -> void:
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var s := _make_spawner()
+	s.group_size_min = 4
+	s.group_size_max = 4
+	s.wander_chance = 1.0
+	s.rng.seed = 7
+	s.request_visitors(4)
+	for _i in 8:
+		s.tick(0.1)
+
+	var crowd := _visitors()
+	assert_eq(crowd.size(), 4, "the party must actually have spawned")
+	var goal: Vector2i = crowd[0].goal_cell
+	for v in crowd:
+		assert_eq(v.goal_cell, goal, "a party shares one destination")
+		assert_eq(v.route_anchors, crowd[0].route_anchors,
+				"a party shares one set of waypoints")
+
+
+# ---------------------------------------------------------------------------
+# Waypoints are stops
+# ---------------------------------------------------------------------------
+
+func test_a_visitor_stands_still_on_each_waypoint() -> void:
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6)]
+	var v := _make_party_member(Vector2i(10, 10), anchors, 1)
+	v.member_wander_radius_cells = 0  # walk the party's waypoint exactly
+	v.waypoint_pause_min = 2.0
+	v.waypoint_pause_max = 2.0
+	# Re-route now that the scatter radius is set; _ready already picked one.
+	v._walk_to(v.goal_cell)
+	assert_eq(v._waypoints.size(), 1, "the waypoint must be registered as a stop")
+	assert_true(v._waypoints.has(Vector2i(4, 6)))
+
+	var paused_at: Vector2i = Pathfinder.NO_CELL
+	for _i in 400:
+		v.tick(0.05)
+		if v.is_paused():
+			paused_at = v.current_cell
+			break
+	assert_eq(paused_at, Vector2i(4, 6), "the visitor must stop ON the waypoint")
+
+
+func test_the_goal_is_not_a_waypoint_stop() -> void:
+	# The goal has its own linger; registering it as a waypoint too would make a
+	# visitor stand there for both.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6)]
+	var v := _make_party_member(Vector2i(10, 10), anchors, 1)
+	assert_false(v._waypoints.has(Vector2i(10, 10)))
+
+
+# ---------------------------------------------------------------------------
+# Regrouping
+# ---------------------------------------------------------------------------
+
+func test_a_party_barrier_opens_only_when_everyone_has_arrived() -> void:
+	var party := VisitorParty.new()
+	party.member_joined()
+	party.member_joined()
+	party.member_joined()
+	party.arrive(0)
+	assert_false(party.is_released(0), "one arrival must not open a barrier of 3")
+	party.arrive(0)
+	assert_false(party.is_released(0))
+	party.arrive(0)
+	assert_true(party.is_released(0), "the last arrival opens it")
+
+
+func test_a_departed_member_stops_being_waited_for() -> void:
+	# The tidy drop-out path: two of three arrive, the third leaves, the barrier
+	# opens rather than stranding the two who are already standing there.
+	var party := VisitorParty.new()
+	for _i in 3:
+		party.member_joined()
+	party.arrive(0)
+	party.arrive(0)
+	assert_false(party.is_released(0))
+	party.member_left()
+	assert_true(party.is_released(0), "a barrier must not wait on a departed member")
+
+
+func test_a_release_is_latched_for_a_straggler() -> void:
+	# A member that timed out at an earlier waypoint arrives here after the rest
+	# have gone. It must not block on a barrier the party already passed.
+	var party := VisitorParty.new()
+	party.member_joined()
+	party.arrive(0)
+	assert_true(party.is_released(0))
+	party.member_joined()
+	assert_true(party.is_released(0), "a passed barrier must stay open")
+
+
+func test_an_empty_party_never_traps_anyone() -> void:
+	var party := VisitorParty.new()
+	party.arrive(0)
+	assert_true(party.is_released(0), "nobody left to wait for")
+
+
+func test_a_member_waits_at_its_waypoint_for_its_party() -> void:
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6)]
+	var party := VisitorParty.new()
+	# A party of two, but only one of them actually exists here — so the barrier
+	# can never open and the walker must be held by the timeout, not by luck.
+	party.member_joined()
+	party.member_joined()
+
+	var v: Visitor = load("res://scenes/entities/visitor.tscn").instantiate()
+	v.entry_cell = Vector2i(1, 1)
+	v.goal_cell = Vector2i(10, 10)
+	v.set_group_route(anchors)
+	v._party = party  # already counted above
+	v.member_wander_radius_cells = 0
+	v.rest_chance_per_step = 0.0
+	v.waypoint_pause_min = 0.01
+	v.waypoint_pause_max = 0.01
+	v.regroup_timeout_seconds = 5.0
+	v.rng = RandomNumberGenerator.new()
+	v.rng.seed = 1
+	parent.add_child(v)
+
+	# NOT `not is_moving()`: a member held at a waypoint still has the rest of
+	# its route queued, so is_moving() stays true for the whole wait. The hold
+	# shows up as the barrier index being set and the walker being paused.
+	var held_at: Vector2i = Pathfinder.NO_CELL
+	for _i in 600:
+		v.tick(0.05)
+		if v._regroup_index >= 0:
+			held_at = v.current_cell
+			break
+	assert_eq(held_at, Vector2i(4, 6), "it must hold ON its waypoint")
+	assert_true(v.is_paused(), "a held member must be standing still")
+
+	# It is held well past the visible dwell...
+	for _i in 20:
+		v.tick(0.05)
+	assert_gte(v._regroup_index, 0, "it must still be waiting for its party")
+
+	# ...but the timeout releases it, which is the anti-deadlock guarantee.
+	for _i in 200:
+		v.tick(0.05)
+	assert_eq(v._regroup_index, -1, "the timeout must release a stranded member")
+
+
+func test_the_return_leg_uses_its_own_barriers() -> void:
+	# The way home walks the same waypoints reversed. Sharing barrier keys with
+	# the outbound leg would mean every one of them was already latched open.
+	_inject_rect(Vector2i(0, 0), Vector2i(12, 12))
+	var anchors: Array[Vector2i] = [Vector2i(4, 6)]
+	var v := _make_party_member(Vector2i(10, 10), anchors, 1)
+	var outbound: Array = v._waypoints.values()
+	assert_eq(outbound.size(), 1)
+	v._state = Visitor.State.LINGER
+	v._linger_left = 0.0
+	v.tick(0.1)
+	var homeward: Array = v._waypoints.values()
+	assert_eq(homeward.size(), 1, "the walk home must have its own waypoint")
+	assert_ne(homeward[0], outbound[0],
+			"the two legs must not share a barrier key")
 
 
 class TrampleSpy:

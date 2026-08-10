@@ -21,3 +21,5 @@
 - [ ] ensure web preset is Release (not Debug) and has no `--remote-debug` flag
 - [x] pick a web host that supports COOP/COEP headers (itch.io, Netlify, Cloudflare Pages) — GitHub Pages won't work because Godot 4 threaded builds need `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` for `SharedArrayBuffer`. Alternative: disable threads in the export.
 - [ ] Clean up: fix and optimize processes that might be hacky/unoptimized, not only in the game but for the repo in general. Make sure not to downgrade any functionality.
+- [ ] make the pause and journal views completely pause the world, including effects like rain , fire and visitors, both functionally and visually.
+- [ ] Make grass tile degradation more of a continuous thing, with grass growing longer over time or shorter with degradation until it's gone. The max grass length should be the one that is currently assigned randomly during terrian generation..

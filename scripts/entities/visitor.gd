@@ -35,11 +35,49 @@ extends GridWalker
 # Why the route is noisy
 # ----------------------------------------------------------------------------
 #
-# A pathfinder's shortest route between two cells is essentially unique, so a
-# group sharing an entry and a goal walks the same line in single file. The
+# Two visitors handed the same entry and goal get the same route back, so a
+# group walks it in single file. Note WHY, because it is not what this comment
+# used to say: the route is not geometrically unique, it is unique because
+# Pathfinder's A* breaks ties deterministically (a FIFO counter on equal f).
+# MEASURED on level1 terrain, 39 routes / 1051 steps: 24% of steps have a
+# neighbour of EQUAL cost, mean branching factor 1.24 — so the shortest-path
+# corridor is a few cells wide and a randomised tie-break would spread walkers
+# across it for free. See the note in CLAUDE.md; that is the cheap half of what
+# this feature does, and the waypoints below are the half that cannot come from
+# tie-breaking (a detour OFF the corridor, to somewhere worth looking at). The
 # noise is added as detour WAYPOINTS rather than as jitter on the path, so every
 # step remains a real find_path result and no visitor can wander through a fence
 # or across a gap. See _wandering_path.
+#
+# The noise is drawn at TWO scales, because a party and a stranger are different
+# questions:
+#   - PARTY scale: the spawner draws one set of waypoints per group
+#     (`route_anchors`, via draw_route_anchors) off the straight entry->goal
+#     line, at wander_radius_cells. That is what makes one party's trail differ
+#     from another's — and it is drawn ONCE, so the members of a group cost one
+#     route draw between them instead of one each.
+#   - MEMBER scale: each visitor re-scatters around its party's waypoints at the
+#     much smaller member_wander_radius_cells. Members converge at each shared
+#     waypoint and drift apart between them, which is a party walking together
+#     rather than a column on one line.
+# With no anchors assigned (a bare Visitor in a test, or a goal relocated
+# mid-walk) the visitor draws its own party-scale set and behaves as before.
+#
+# ----------------------------------------------------------------------------
+# Why waypoints are also STOPS
+# ----------------------------------------------------------------------------
+#
+# A visitor always stands a moment on each of its waypoints (waypoint_pause_*).
+# It reads as the reason the detour existed — someone walked over there to look
+# at something — where silently rounding a corner reads as bad pathfinding.
+#
+# It is also load-bearing for SEPARATION, and that is the part to keep in mind
+# before retuning it. A party's members now share a pace to within
+# group_pace_spread (small on purpose: they walk together) and near-identical
+# routes, so pace alone no longer pulls them apart the way it did when routes
+# were independent. What desynchronises them is that each stops at its OWN
+# scattered waypoint for its OWN rolled duration. Set the pause to zero and a
+# party collapses back into one stack of sprites.
 #
 # BOTH ShaderMaterials in visitor.tscn are resource_local_to_scene. A .tscn's
 # sub-resources are shared across instances otherwise, and both of these carry
@@ -53,6 +91,17 @@ extends GridWalker
 signal despawned(visitor: Visitor)
 
 enum State { TO_GOAL, LINGER, TO_EXIT, LEAVING }
+
+# Barrier keys for the walk home live above any outbound key, so the two legs
+# cannot share a latched release. Far above wander_waypoints_max, which is a
+# handful.
+const _RETURN_LEG_INDEX_BASE: int = 1000
+
+## Whoever set this drives `tick` themselves, so this visitor must not also run
+## its own _process. VisitorSpawner sets it on every visitor it spawns (see the
+## ordering note in _ready); a visitor built by hand in a test or a tool is
+## self-driving by default.
+var driven_externally: bool = false
 
 ## Seconds spent standing at the goal before heading back.
 @export var linger_seconds: float = 6.0
@@ -75,7 +124,36 @@ enum State { TO_GOAL, LINGER, TO_EXIT, LEAVING }
 ## visitor visibly doubles back; too small and the detour is invisible.
 ## (Was 5, which at a 5-cell scatter routed people around whole hillsides and
 ## read as them not knowing where they were going.)
+##
+## This is the PARTY-scale radius — it separates one group's trail from the next
+## group's. Within a group see member_wander_radius_cells.
 @export var wander_radius_cells: int = 2
+
+## How far a single member strays from its PARTY's shared waypoint, in cells.
+## Deliberately much smaller than wander_radius_cells: at 0 the whole party walks
+## one line, and at wander_radius_cells the group draw stops meaning anything
+## because members scatter as far as parties do. 1 gives a couple of cells of
+## width to a trail that is still recognisably one trail.
+@export var member_wander_radius_cells: int = 1
+
+## Seconds a visitor stands on each waypoint it reaches. Always — this is not a
+## roll (that is rest_chance_per_step, below). See the header on why the stop is
+## also what keeps a party's members from stacking.
+@export var waypoint_pause_min: float = 1.5
+@export var waypoint_pause_max: float = 4.0
+
+## Longest a member will hold a waypoint waiting for the rest of its party
+## (VisitorParty). This is the guarantee that a regroup can never deadlock: it
+## applies whatever the party thinks, so a drop-out route nobody anticipated
+## still resolves. Generous, because expiring it early defeats the regroup — it
+## is a safety net, not a tuning knob for how long people wait.
+@export var regroup_timeout_seconds: float = 20.0
+
+## After a party regroups, each member waits a further 0..this before setting
+## off. Without it the whole party leaves on one frame at near-identical pace
+## along near-identical routes, which is exactly the stack the regroup was
+## supposed to look better than.
+@export var regroup_release_spread: float = 1.2
 
 @export_group("Breathers")
 ## Chance, rolled when each step BEGINS, that the visitor stands still once that
@@ -87,6 +165,10 @@ enum State { TO_GOAL, LINGER, TO_EXIT, LEAVING }
 
 var entry_cell: Vector2i = Vector2i.ZERO
 var goal_cell: Vector2i = Vector2i.ZERO
+## The party's shared detour waypoints for the OUTBOUND leg, entry -> goal, in
+## order. Assign via set_group_route before add_child; the return leg walks them
+## reversed. Shared BY REFERENCE across a group, so nothing here may mutate it.
+var route_anchors: Array[Vector2i] = []
 ## Which indexed sheet this person is built from. Null keeps the scene's own.
 var sheet: Texture2D = null
 var colors: PackedColorArray = PackedColorArray()
@@ -96,6 +178,29 @@ var _state: int = State.TO_GOAL
 var _linger_left: float = 0.0
 var _fade: float = 0.0
 var _regrowth: Node = null
+# Distinguishes "the spawner gave this party no detours" from "nobody assigned a
+# route", which an empty route_anchors cannot: the first must NOT be re-rolled
+# per member (the party agreed to walk straight), the second must self-draw.
+var _has_group_route: bool = false
+# Cells of the CURRENT path the visitor should stand on when it gets there,
+# mapped to their index along the route (which is what a regroup barrier is
+# keyed on). Entries are erased as they are consumed, so a path that crosses one
+# waypoint twice still only stops once.
+var _waypoints: Dictionary[Vector2i, int] = {}
+# The party this visitor regroups with, and which barrier it is currently held
+# at (-1 = walking). Null party = nobody to wait for; the stops still happen.
+var _party: VisitorParty = null
+var _regroup_index: int = -1
+var _regroup_left: float = 0.0
+# This member's OWN cell near the party's shared goal. The party shares one
+# goal_cell, so without a per-member standing cell every member of a party would
+# linger on one tile — the most visible way two characters end up stacked.
+var _goal_stand: Vector2i = Pathfinder.NO_CELL
+# Set by the graph_changed handler, consumed at the top of tick(). A fence RUN
+# emits one signal PER TILE laid, all inside one frame, and re-pathing on each
+# would mean this visitor rebuilding its whole route twenty times to answer the
+# same question once.
+var _graph_dirty: bool = false
 
 # get_node_or_null, not $: a visitor is normally instanced from visitor.tscn,
 # but nothing here NEEDS a body — GridWalker walks fine without one — and a
@@ -110,6 +215,16 @@ func _process(delta: float) -> void:
 
 
 func _ready() -> void:
+	# Set BEFORE anything else and from _ready, not by the owner: entering the
+	# tree RE-ENABLES processing on a node whose script declares _process, so an
+	# owner calling set_process(false) before add_child has that silently undone
+	# and the visitor then ticks TWICE a frame — once here, once from the driver
+	# — walking at double pace. Measured: visitors covered a cell in 0.73 s
+	# against an authored 0.99, i.e. faster than the player they are supposed to
+	# trail. _ready runs inside add_child, after the re-enable, so this sticks
+	# wherever the owner sets the flag, and it survives a reparent.
+	set_process(not driven_externally)
+
 	var pf := get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
 	if pf == null:
 		push_error("Visitor: no Pathfinder in group '%s'." % Pathfinder.GROUP_NAME)
@@ -139,6 +254,11 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	free_shadow()
+	# Both are global-ish state this visitor is holding. VisitorStanding sweeps
+	# dead claimants lazily anyway, but a party waiting on a member that is being
+	# freed would otherwise hold its barrier until every waiter timed out.
+	VisitorStanding.release_all_for(self)
+	_drop_out_of_party()
 
 
 ## The frame body. Public and separate from _process because VisitorSpawner
@@ -146,6 +266,16 @@ func _exit_tree() -> void:
 ## the balance simulator, so there is one update path and one order rather than
 ## a headless special case.
 func tick(delta: float) -> void:
+	# BEFORE the movement tick, so a route invalidated by this frame's graph
+	# change is repaired before the walker tries to step into the new wall — and
+	# specifically before GridWalker drops the path itself, which this state
+	# machine would read as an arrival.
+	if _graph_dirty:
+		_graph_dirty = false
+		_revalidate_route()
+	# BEFORE the movement tick, so a member held at a barrier re-arms its pause
+	# in the same frame the walker consults it.
+	_tick_regroup(delta)
 	tick_movement(delta)
 
 	# Fade tracks the direction of travel through the lifecycle, so an early
@@ -198,6 +328,10 @@ func begin_leaving() -> void:
 	if _state == State.LEAVING:
 		return
 	_state = State.LEAVING
+	# It will never reach another waypoint, so it must stop being counted, and
+	# the ground it had spoken for goes back.
+	_drop_out_of_party()
+	VisitorStanding.release_all_for(self)
 	stop()
 
 
@@ -220,11 +354,31 @@ func _begin_linger() -> void:
 
 
 ## The graph changed under a walk — the player built a fence, or a bridge
-## opened a route. `new_reach` is the spawner's freshly computed reachable set
-## from the entry cell.
+## opened a route. Only flagged here: see _revalidate_route for why the work is
+## deferred to the next tick.
 func _on_graph_changed() -> void:
-	if _state == State.LEAVING:
+	_graph_dirty = true
+
+
+## Repair the route if — and only if — this graph change actually broke it.
+##
+## The overwhelmingly common case is that it did not: the player fenced a cell
+## on the far side of the mountain and every visitor's queued path is still
+## legal. Re-pathing regardless cost several A* runs per visitor per signal, and
+## it was not merely wasted work — it re-rolled the route noise, released and
+## re-reserved every standing cell, and could drop the visitor out of its party,
+## so a distant fence visibly reshuffled a crowd that should have ignored it.
+##
+## A LINGERING visitor is skipped outright: it is standing still, so no queued
+## step can be invalidated, and it re-paths from scratch when the linger ends.
+## (Before this it re-pathed toward the ENTRY while still in LINGER, which
+## started the walk home early on any unrelated graph change.)
+func _revalidate_route() -> void:
+	if _state == State.LEAVING or _state == State.LINGER:
 		return
+	if path_is_valid() and is_moving():
+		return
+
 	# The spawner recomputes `reach` on the same signal; ordering between the
 	# two handlers is not guaranteed, so re-path against the pathfinder itself
 	# and only consult `reach` to relocate an unreachable goal.
@@ -249,15 +403,44 @@ func _on_graph_changed() -> void:
 ## `from` right now. `reach` narrows the search to the connected landmass (it is
 ## the spawner's cached set — cheap to scan, no path per candidate); find_path
 ## does the expensive confirmation once, on the winner.
+##
+## Only the CANDIDATES nearest the target are considered, and that bound is the
+## point. The reachable set is thousands of cells; the old implementation
+## sort_custom'd all of them through a GDScript lambda — tens of thousands of
+## script-level comparator calls — and then, in the case that matters (a visitor
+## walled off from everywhere), ran an A* against every one of them in turn
+## before giving up. This makes one linear pass keeping the nearest
+## _NEAREST_CANDIDATES, then confirms them in order. The set is a connected
+## component, so all but a handful of its members are walkable and the first
+## candidate almost always wins; a genuinely cut-off visitor now gives up in
+## bounded time and fades out, which is what it did at the end of the long scan
+## anyway.
+const _NEAREST_CANDIDATES: int = 12
+
 static func nearest_reachable(reach_set: Dictionary, target: Vector2i,
 		from: Vector2i, pathfinder: Pathfinder) -> Vector2i:
 	if pathfinder == null:
 		return Pathfinder.NO_CELL
-	var ordered: Array = reach_set.keys()
-	ordered.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		return dist2(a, target) < dist2(b, target))
-	for cell: Vector2i in ordered:
-		if cell == from or not pathfinder.is_walkable(cell):
+	# Parallel arrays kept sorted by distance, at most _NEAREST_CANDIDATES long.
+	var best: Array[Vector2i] = []
+	var best_d: PackedInt32Array = PackedInt32Array()
+	for cell: Vector2i in reach_set:
+		if cell == from:
+			continue
+		var d := dist2(cell, target)
+		var n := best.size()
+		if n >= _NEAREST_CANDIDATES and d >= best_d[n - 1]:
+			continue
+		var at: int = n
+		while at > 0 and best_d[at - 1] > d:
+			at -= 1
+		best.insert(at, cell)
+		best_d.insert(at, d)
+		if best.size() > _NEAREST_CANDIDATES:
+			best.resize(_NEAREST_CANDIDATES)
+			best_d.resize(_NEAREST_CANDIDATES)
+	for cell: Vector2i in best:
+		if not pathfinder.is_walkable(cell):
 			continue
 		if pathfinder.find_path(from, cell).size() >= 2:
 			return cell
@@ -269,19 +452,56 @@ static func dist2(a: Vector2i, b: Vector2i) -> int:
 	return d.x * d.x + d.y * d.y
 
 
-## Route to `cell`, usually via a couple of detour waypoints (see the "noise"
-## note in the header). Falls back to the direct path whenever the detour cannot
-## be built — a wandering visitor that fails to route is worse than a tidy one.
+## Route toward the party-level target `cell` (the shared goal, the entry, or a
+## relocated goal), usually via a couple of detour waypoints — see the "noise"
+## note in the header. Falls back to the direct path whenever the detour cannot
+## be built: a wandering visitor that fails to route is worse than a tidy one.
+##
+## `cell` is where the PARTY is headed; where THIS member ends up is resolved
+## here, because the goal is shared and a party lingering on one tile is the most
+## visible way two characters stack.
 func _walk_to(cell: Vector2i) -> bool:
-	if _pathfinder == null or cell == current_cell:
+	if _pathfinder == null:
 		return false
-	var path := _wandering_path(cell)
+	# Cleared up front, not in the failure branches: _wandering_path can abandon a
+	# route half-built (a leg that no longer connects), and a stale waypoint left
+	# behind would stop the visitor on a cell the new path merely passes through.
+	_waypoints.clear()
+	_leave_regroup()
+	# The cells this visitor had spoken for are not where it is going any more.
+	# Released BEFORE the new reservations so a re-route can re-take its own
+	# spots rather than being crowded out by itself.
+	VisitorStanding.release_all_for(self)
+
+	var dest: Vector2i = cell
+	if cell == goal_cell:
+		# Its own patch of ground near the party's goal. The way HOME is not
+		# reserved: everyone converges on the entry cell and fades, and a
+		# reservation there would only push the last arrivals off the trailhead.
+		_goal_stand = _reserve_near(goal_cell)
+		dest = _goal_stand
+	if dest == current_cell:
+		return false
+
+	var path := _wandering_path(cell, dest)
 	if path.is_empty():
-		path = _direct_path(cell)
+		# Not walking the party's line any more, so it must stop being counted:
+		# a member that never reaches a waypoint would otherwise hold every
+		# barrier open until each waiting member's own timeout expired.
+		_drop_out_of_party()
+		path = _direct_path(dest)
 	if path.is_empty():
 		return false
 	follow_path(path)
 	return true
+
+
+## A reserved standing cell near `anchor`, falling back to the anchor itself
+## when the neighbourhood is full — overlapping beats not walking.
+func _reserve_near(anchor: Vector2i) -> Vector2i:
+	var cell := VisitorStanding.reserve_near(anchor, member_wander_radius_cells,
+			_pathfinder, _rng(), self)
+	return anchor if cell == Pathfinder.NO_CELL else cell
 
 
 ## find_path includes the start cell; follow_path takes NEXT destinations only.
@@ -293,30 +513,126 @@ func _direct_path(cell: Vector2i) -> Array[Vector2i]:
 	return path
 
 
-# The straight line, cut at even fractions, each cut nudged somewhere random
-# nearby, then re-joined by the pathfinder. Perturbing WAYPOINTS rather than the
-# path itself keeps every step legal by construction: each leg is still a real
-# find_path result, so no wandering visitor can walk through a fence or off a
-# cliff, and terrain still shapes the route between the detours.
-func _wandering_path(target: Vector2i) -> Array[Vector2i]:
-	if wander_chance <= 0.0 or wander_waypoints_max <= 0:
-		return [] as Array[Vector2i]
-	if _rng().randf() >= wander_chance:
+## Hold this visitor at its waypoint until the rest of the party reaches the
+## same one. Implemented by RE-ARMING the ordinary pause every frame rather than
+## by touching the path: GridWalker only steps when its pause has run out, so a
+## pause kept topped up is a hold, and it inherits the step-boundary guarantee
+## for free (nobody freezes mid-stride).
+##
+## The timeout is the reason a regroup cannot deadlock, and it is checked here —
+## on the WAITING member — rather than in VisitorParty, so it holds even for a
+## drop-out path the party never learned about.
+func _tick_regroup(delta: float) -> void:
+	if _regroup_index < 0:
+		return
+	_regroup_left -= delta
+	var released: bool = _party == null or _party.is_released(_regroup_index)
+	if released or _regroup_left <= 0.0:
+		_regroup_index = -1
+		# Leave one at a time. Without this the party departs on a single frame
+		# at near-identical pace along near-identical routes, which is the stack
+		# the regroup was supposed to look better than.
+		pause_movement(_rng().randf_range(0.0, maxf(regroup_release_spread, 0.0)))
+		return
+	# Top up rather than set: whatever remains of the visible dwell is longer
+	# early on, and pause_movement keeps the longer of the two.
+	pause_movement(delta * 2.0)
+
+
+## Stop waiting, without departing tidily — used when the route is being rebuilt
+## under this visitor.
+func _leave_regroup() -> void:
+	_regroup_index = -1
+	_regroup_left = 0.0
+
+
+## Stop being counted by the party's barriers. Idempotent: a visitor that has
+## already dropped out has no party to tell.
+func _drop_out_of_party() -> void:
+	if _party == null:
+		return
+	_party.member_left()
+	_party = null
+	_leave_regroup()
+
+
+## Join `party`, whose barriers this visitor will wait at. Call before add_child,
+## alongside set_group_route.
+func set_party(party: VisitorParty) -> void:
+	_party = party
+	if party != null:
+		party.member_joined()
+
+
+## Hand this visitor its party's shared waypoints. `anchors` is kept BY
+## REFERENCE and never mutated here, so one array serves the whole group; an
+## empty array is a valid answer meaning "this party walks straight", which is
+## why the flag exists separately. Call before add_child.
+func set_group_route(anchors: Array[Vector2i]) -> void:
+	route_anchors = anchors
+	_has_group_route = true
+
+
+# The party's waypoints for the leg about to be walked. Outbound is the shared
+# array as drawn; the way home is the same trail read backwards, which is what a
+# party that came up one way does. Anything else — a goal relocated by
+# nearest_reachable after a fence went up — has no shared line to follow, so the
+# visitor draws its own.
+func _anchors_for(target: Vector2i, dest: Vector2i) -> Array[Vector2i]:
+	if _has_group_route:
+		if target == goal_cell:
+			return route_anchors
+		if target == entry_cell:
+			# duplicate() first: reversing in place would flip the array the rest
+			# of the party is still walking forwards along.
+			var back := route_anchors.duplicate()
+			back.reverse()
+			return back
+	return draw_route_anchors(current_cell, dest, wander_chance,
+			wander_waypoints_max, wander_radius_cells, _pathfinder, _rng())
+
+
+# The party's waypoints, each nudged a cell or so for THIS member, then re-joined
+# by the pathfinder. Perturbing WAYPOINTS rather than the path itself keeps every
+# step legal by construction: each leg is still a real find_path result, so no
+# wandering visitor can walk through a fence or off a cliff, and terrain still
+# shapes the route between the detours.
+func _wandering_path(target: Vector2i, dest: Vector2i) -> Array[Vector2i]:
+	# Only a route built from the PARTY's anchors can be regrouped on: barrier
+	# index i has to mean the same place to every member. A member routing
+	# somewhere of its own — a goal relocated by nearest_reachable after the
+	# player fenced the route — is no longer on the shared line, so it leaves the
+	# party rather than holding barriers its mates will never reach.
+	var shared: bool = _has_group_route and (target == goal_cell or target == entry_cell)
+	if not shared:
+		_drop_out_of_party()
+	# The way home walks the same anchors reversed, so without a separate index
+	# space its barriers would collide with the outbound ones — which latch when
+	# released, so every return barrier would open on arrival.
+	var index_base: int = _RETURN_LEG_INDEX_BASE if target == entry_cell else 0
+
+	var anchors := _anchors_for(target, dest)
+	if anchors.is_empty():
 		return [] as Array[Vector2i]
 
-	var count: int = _rng().randi_range(1, wander_waypoints_max)
 	var stops: Array[Vector2i] = []
-	for i in count:
-		var t: float = float(i + 1) / float(count + 1)
-		var on_line := Vector2(current_cell).lerp(Vector2(target), t)
-		var cell := _scatter_near(Vector2i(on_line.round()))
-		if cell != Pathfinder.NO_CELL:
-			stops.append(cell)
-	stops.append(target)
+	for anchor: Vector2i in anchors:
+		# RESERVE rather than merely scatter: this is both the per-member spread
+		# around the party's waypoint AND the guarantee that no two visitors
+		# stand on one tile. A failed reservation falls back to the party's own
+		# anchor rather than dropping the stop — the anchor is walkable by
+		# construction, and dropping it would put this member on a shorter route
+		# than the rest of the party. Overlapping is the lesser fault.
+		var cell := VisitorStanding.reserve_near(anchor, member_wander_radius_cells,
+				_pathfinder, _rng(), self)
+		stops.append(anchor if cell == Pathfinder.NO_CELL else cell)
+	stops.append(dest)
 
 	var out: Array[Vector2i] = []
+	var pending: Dictionary[Vector2i, int] = {}
 	var from := current_cell
-	for stop: Vector2i in stops:
+	for i in stops.size():
+		var stop: Vector2i = stops[i]
 		if stop == from:
 			continue
 		var leg := _pathfinder.find_path(from, stop)
@@ -325,19 +641,53 @@ func _wandering_path(target: Vector2i) -> Array[Vector2i]:
 		leg.remove_at(0)
 		out.append_array(leg)
 		from = stop
+		# The last stop IS the target — the goal has its own linger and the entry
+		# ends the visit, so neither is a waypoint to pause on. `i` is also the
+		# barrier key: every member of a party walks the same number of
+		# waypoints in the same order, so index i means the same place to all of
+		# them even though each stands on its own cell.
+		if i < stops.size() - 1:
+			pending[stop] = index_base + i
+	_waypoints = pending
 	return out
 
 
-# A walkable cell within wander_radius_cells of `around`. Sampled rather than
-# searched: the radius is small and most of a landmass is walkable, so a handful
-# of draws beats scanning the disc, and giving up costs only a straighter route.
-func _scatter_near(around: Vector2i) -> Vector2i:
+## Detour waypoints along the straight line `from` -> `to`: the line cut at even
+## fractions, each cut nudged somewhere walkable nearby. Static because the
+## SPAWNER draws these once per party (see the header) and a Visitor draws its
+## own only as a fallback — both need the same line, and neither should own it.
+## Returns empty when this route rolls no detour at all.
+static func draw_route_anchors(from: Vector2i, to: Vector2i, chance: float,
+		waypoints_max: int, radius: int, pathfinder: Pathfinder,
+		stream: RandomNumberGenerator) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if pathfinder == null or chance <= 0.0 or waypoints_max <= 0:
+		return out
+	if stream.randf() >= chance:
+		return out
+	var count: int = stream.randi_range(1, waypoints_max)
+	for i in count:
+		var t: float = float(i + 1) / float(count + 1)
+		var on_line := Vector2(from).lerp(Vector2(to), t)
+		var cell := scatter_near(Vector2i(on_line.round()), radius, pathfinder, stream)
+		if cell != Pathfinder.NO_CELL:
+			out.append(cell)
+	return out
+
+
+# A walkable cell within `radius` of `around`. Sampled rather than searched: the
+# radius is small and most of a landmass is walkable, so a handful of draws beats
+# scanning the disc, and giving up costs only a straighter route.
+static func scatter_near(around: Vector2i, radius: int, pathfinder: Pathfinder,
+		stream: RandomNumberGenerator) -> Vector2i:
+	if radius <= 0:
+		return around if pathfinder.is_walkable(around) else Pathfinder.NO_CELL
 	for _attempt in 8:
 		var offset := Vector2i(
-				_rng().randi_range(-wander_radius_cells, wander_radius_cells),
-				_rng().randi_range(-wander_radius_cells, wander_radius_cells))
+				stream.randi_range(-radius, radius),
+				stream.randi_range(-radius, radius))
 		var cell := around + offset
-		if _pathfinder.is_walkable(cell):
+		if pathfinder.is_walkable(cell):
 			return cell
 	return Pathfinder.NO_CELL
 
@@ -347,6 +697,30 @@ func _scatter_near(around: Vector2i) -> Vector2i:
 # odds are per cell walked, which is what makes them independent of pace.
 func _on_step_started(cell: Vector2i, _kind: int) -> void:
 	_trample(cell)
+	# A waypoint is an unconditional stop, so it takes precedence over the
+	# breather roll — the two would only stack into one longer pause anyway
+	# (pause_movement keeps the longer wait). Erasing as it fires makes the stop
+	# one-shot: a route that crosses its own waypoint on the way back does not
+	# stop there twice.
+	if _waypoints.has(cell):
+		var index: int = _waypoints[cell]
+		_waypoints.erase(cell)
+		pause_movement(_rng().randf_range(waypoint_pause_min, waypoint_pause_max))
+		# The pause above is the visible dwell; the barrier below may extend it.
+		# pause_movement takes the LONGER wait, so the two compose without either
+		# needing to know about the other.
+		#
+		# Arrival is registered at step START, so it runs up to one step early.
+		# That is deliberate and harmless: every member reports on the same
+		# footing, the pause holds each at its own step boundary anyway, and the
+		# alternative (a hook on step completion) would exist only to make the
+		# barrier open one step later than it does now.
+		if _party != null:
+			_party.arrive(index)
+			if not _party.is_released(index):
+				_regroup_index = index
+				_regroup_left = regroup_timeout_seconds
+		return
 	# No LEAVING guard is needed: begin_leaving() clears the path, so a departing
 	# visitor takes no further steps to roll against.
 	if rest_chance_per_step <= 0.0:

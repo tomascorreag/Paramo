@@ -37,7 +37,16 @@ const UNIFORM: StringName = &"slot_colors"
 const SHEETS: PackedStringArray = [
 	"res://assets/sprites/characters/Visitor_1_general.png",
 	"res://assets/sprites/characters/Visitor_2_general.png",
+	"res://assets/sprites/characters/Visitor_3_general.png",
 ]
+
+
+## The loaded sheets, resolved once on first use. `load` is a path hash plus a
+## resource-cache lookup even on a hit, and this runs per spawned visitor; the
+## textures are immutable and shared by every visitor anyway. Lazy rather than a
+## preload const so a tool that never spawns anyone does not pay for them, and so
+## the paths stay declared in one place above.
+static var _sheets: Array[Texture2D] = []
 
 
 ## Pick one sheet for one visitor. Uniform: the sheets are alternatives, not
@@ -45,7 +54,11 @@ const SHEETS: PackedStringArray = [
 static func roll_sheet(rng: RandomNumberGenerator) -> Texture2D:
 	if SHEETS.is_empty():
 		return null
-	return load(SHEETS[rng.randi_range(0, SHEETS.size() - 1)]) as Texture2D
+	if _sheets.size() != SHEETS.size():
+		_sheets.clear()
+		for path in SHEETS:
+			_sheets.append(load(path) as Texture2D)
+	return _sheets[rng.randi_range(0, _sheets.size() - 1)]
 
 ## Stand-in for an unauthored slot. Not a palette2 entry, deliberately — it can
 ## only appear if VisitorPalette is missing a ramp, and it should be impossible
@@ -61,10 +74,13 @@ static func roll(palette: VisitorPalette, rng: RandomNumberGenerator) -> Array:
 	var choices: Array = []
 	for slot in VisitorSlots.SLOT_COUNT:
 		var ramps := palette.slot_ramps(slot)
-		if ramps.is_empty():
+		# Weighted by VisitorRamp.weight — see VisitorPalette.pick_ramp. The roll
+		# stays here rather than in the palette so the (ramp, top) pair is decided
+		# in one place; the palette only answers "which ramp".
+		var ramp_idx := palette.pick_ramp(slot, rng)
+		if ramp_idx < 0:
 			choices.append([-1, 0])
 			continue
-		var ramp_idx := rng.randi_range(0, ramps.size() - 1)
 		var ramp: VisitorRamp = ramps[ramp_idx]
 		var lo := mini(palette.min_top_index, ramp.max_top())
 		choices.append([ramp_idx, rng.randi_range(lo, ramp.max_top())])

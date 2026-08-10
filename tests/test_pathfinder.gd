@@ -176,23 +176,34 @@ func test_find_path_symmetric_on_flat_grid() -> void:
 
 
 # ===========================================================================
-# find_path — turn-penalty tiebreak
+# find_path — turn count
 # ===========================================================================
 #
-# Among all shortest paths, find_path() prefers the one with the fewest
-# direction changes (_TURN_EPSILON cost per turn). On an open 3x3 grid
-# (0,0) -> (2,2) has three 5-cell paths: RRDD, DDRR (1 turn each) and zig-zag
-# variants (3 turns). The result must be a 1-turn path.
+# STRAIGHTNESS IS NO LONGER GUARANTEED. find_path used to key its search on
+# (cell, incoming_direction) so it could charge a 1e-4 penalty per direction
+# change and return the straightest of the equally-short routes; that was
+# dropped (2026-08-10) because the 5x state space it needed cost 3.4x the
+# search time. Ties now fall to the heap's FIFO counter, so on open ground the
+# route may staircase.
+#
+# The tests below therefore assert LENGTH, which is still a contract, and note
+# separately where the shape happens to come out straight — those are records of
+# current behaviour, not requirements, and the cause is the order of
+# Pathfinder._NEIGHBOR_DIRS rather than any preference in the search.
 
-func test_find_path_prefers_straight_over_zigzag() -> void:
+func test_find_path_open_diagonal_is_shortest() -> void:
+	# Open 3x3, (0,0) -> (2,2): every 5-cell route is optimal, from RRDD (1 turn)
+	# to the full zig-zag (3 turns). Only the length is promised.
 	_inject_rect(Vector2i(0, 0), Vector2i(3, 3))
 	var path := pf.find_path(Vector2i(0, 0), Vector2i(2, 2))
 	assert_eq(path.size(), 5, "expected shortest 5-cell path")
-	assert_eq(_count_turns(path), 1,
-		"expected 1 turn, got %d (path=%s)" % [_count_turns(path), path])
+	assert_true(_count_turns(path) <= 3,
+		"a 5-cell route cannot turn more than 3 times (path=%s)" % [path])
 
 
 func test_find_path_straight_line_has_zero_turns() -> void:
+	# A 1-wide corridor: the straight route is the ONLY route, so this holds
+	# without any turn preference.
 	_inject_rect(Vector2i(0, 0), Vector2i(6, 1))
 	var path := pf.find_path(Vector2i(0, 0), Vector2i(5, 0))
 	assert_eq(_count_turns(path), 0)
@@ -200,7 +211,7 @@ func test_find_path_straight_line_has_zero_turns() -> void:
 
 func test_find_path_forced_corner_has_one_turn() -> void:
 	# Long L-shape: only one 90-degree corner is reachable. Any shortest path
-	# must turn exactly once.
+	# must turn exactly once — geometry, not tie-breaking.
 	_inject_rect(Vector2i(0, 0), Vector2i(5, 1))  # horizontal arm
 	_inject_rect(Vector2i(4, 0), Vector2i(1, 5))  # vertical arm
 	var path := pf.find_path(Vector2i(0, 0), Vector2i(4, 4))
@@ -388,6 +399,89 @@ func test_cell_penalty_api_roundtrip() -> void:
 	pf.set_cell_penalty(cell, 0.0)
 	assert_eq(pf.get_cell_penalty(cell), 0.0)
 	assert_false(pf._cell_penalties.has(cell))
+
+
+# ===========================================================================
+# Resolved-edge cache — staleness
+# ===========================================================================
+#
+# find_path resolves each cell's legal exits and their costs ONCE and reuses
+# them until the graph changes (see Pathfinder._edges_for — it took a spawn leg
+# from 27.8 ms to 5.3 ms). Every test below therefore searches FIRST, so the
+# cache is warm, then mutates, then searches again. A test that only searches
+# after the mutation passes against a cache that is never invalidated at all,
+# which is the whole failure mode: a visitor walking through a fence that was
+# built after it last routed.
+
+
+class _Blocker extends Node2D:
+	func blocks_movement() -> bool:
+		return true
+
+
+func test_edges_refresh_when_an_occupant_blocks_a_cell() -> void:
+	_inject_rect(Vector2i(0, 0), Vector2i(3, 3))
+	var before := pf.find_path(Vector2i(0, 1), Vector2i(2, 1))
+	assert_true(before.has(Vector2i(1, 1)), "straight route expected before blocking")
+
+	var blocker := _Blocker.new()
+	autofree(blocker)
+	pf._grid.set_occupant(Vector2i(1, 1), blocker)
+
+	var after := pf.find_path(Vector2i(0, 1), Vector2i(2, 1))
+	assert_false(after.has(Vector2i(1, 1)), "blocked cell must not survive in a fresh route")
+	assert_true(after.size() >= 4, "expected a detour around the blocked cell")
+
+
+func test_edges_refresh_when_an_occupant_is_removed() -> void:
+	_inject_rect(Vector2i(0, 0), Vector2i(3, 3))
+	var blocker := _Blocker.new()
+	autofree(blocker)
+	pf._grid.set_occupant(Vector2i(1, 1), blocker)
+	assert_false(pf.find_path(Vector2i(0, 1), Vector2i(2, 1)).has(Vector2i(1, 1)))
+
+	pf._grid.clear_occupant(Vector2i(1, 1))
+	assert_true(pf.find_path(Vector2i(0, 1), Vector2i(2, 1)).has(Vector2i(1, 1)),
+			"the cell is walkable again; the cached detour must not persist")
+
+
+func test_edges_refresh_when_a_penalty_is_registered() -> void:
+	# set_cell_penalty deliberately emits no signal, so this is the mutation the
+	# cache is most likely to miss.
+	_inject_rect(Vector2i(0, 0), Vector2i(3, 3))
+	assert_true(pf.find_path(Vector2i(0, 1), Vector2i(2, 1)).has(Vector2i(1, 1)))
+
+	pf.set_cell_penalty(Vector2i(1, 1), 10.0)
+	assert_false(pf.find_path(Vector2i(0, 1), Vector2i(2, 1)).has(Vector2i(1, 1)),
+			"a penalty registered after the first search must still push the route away")
+
+	pf.clear_cell_penalty(Vector2i(1, 1))
+	assert_true(pf.find_path(Vector2i(0, 1), Vector2i(2, 1)).has(Vector2i(1, 1)),
+			"clearing the penalty must bring the direct route back")
+
+
+func test_edges_refresh_when_a_traversal_edge_is_added() -> void:
+	_inject_walkable(Vector2i(0, 0))
+	pf._grid._test_put(Vector2i(1, 0),
+			CellData.make_walkable(null, &"FLAT", Vector2i.ZERO, 4, 0))
+	assert_eq(pf.find_path(Vector2i(0, 0), Vector2i(1, 0)), [] as Array[Vector2i],
+			"a 4-half-step wall is not climbable without a ladder")
+
+	pf.add_traversal_edge(Vector2i(0, 0), Vector2i(1, 0))
+	assert_eq(pf.find_path(Vector2i(0, 0), Vector2i(1, 0)).size(), 2,
+			"the ladder must be usable by the very next search")
+
+
+func test_edges_refresh_when_the_reachable_set_is_recomputed() -> void:
+	# compute_reachable_set reads the same table, so it inherits the same risk.
+	_inject_rect(Vector2i(0, 0), Vector2i(3, 1))
+	assert_eq(pf.compute_reachable_set(Vector2i(0, 0)).size(), 3)
+
+	var blocker := _Blocker.new()
+	autofree(blocker)
+	pf._grid.set_occupant(Vector2i(1, 0), blocker)
+	assert_eq(pf.compute_reachable_set(Vector2i(0, 0)).size(), 1,
+			"blocking the middle cell cuts the row; a stale table would still cross it")
 
 
 # ===========================================================================

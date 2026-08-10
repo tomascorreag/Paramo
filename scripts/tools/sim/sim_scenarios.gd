@@ -54,6 +54,20 @@ const SCENARIOS: Dictionary = {
 	"no_visitors": {
 		"balance": {"VisitorSpawner": {"enabled": false}},
 	},
+	# Visitors walk the pathfinder's optimal line instead of detouring through
+	# waypoints. The A/B that prices the ROUTE NOISE: it is the most expensive
+	# visitor feature per body (every waypoint is another A*, on spawn and again
+	# on every re-route) and its payoff is entirely visual, so the wall-clock
+	# delta against "defaults" is the number to weigh it against. It also removes
+	# the waypoint stops, hence every regroup barrier.
+	"no_wander": {
+		"balance": {"VisitorSpawner": {"wander_chance": 0.0}},
+	},
+	# Parties still detour, but members no longer wait for each other at the
+	# waypoints. Isolates the regrouping barrier from the noise it rides on.
+	"no_regroup": {
+		"balance": {"VisitorSpawner": {"regroup_at_waypoints": false}},
+	},
 	# Faster regrowth: does halving the char recovery time restore tourism
 	# quickly enough to matter?
 	"fast_regrowth": {

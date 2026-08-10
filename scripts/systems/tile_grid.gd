@@ -177,6 +177,18 @@ var _cell_count: int = 0
 # query downstream.
 var _custom_layer_ids: Dictionary[TileSet, Dictionary] = {}
 
+## Bumped by every mutation that can change the answer to "where can a walker
+## step, and what does it cost" — a rebuild, an occupant claimed or released, a
+## traversal edge added or dropped.
+##
+## Pathfinder caches each cell's resolved exits and validates that cache against
+## this counter. A SIGNAL would not do: several occupant call sites (Rock,
+## Frailejon, TraversalBase) mutate the grid without anyone emitting
+## graph_changed, and they got away with it only because every query used to be
+## live. A counter cannot be forgotten at a call site the way a signal can — the
+## mutators are all in this file.
+var structure_version: int = 0
+
 
 # ----------------------------------------------------------------------------
 # Build
@@ -259,6 +271,8 @@ func build(layers: Array[TileMapLayer], clip_rect: Rect2i = Rect2i()) -> void:
 		for data: CellData in row:
 			if data != null:
 				_cell_count += 1
+
+	structure_version += 1
 
 
 func _compute_bounds_union(layers: Array[TileMapLayer]) -> Rect2i:
@@ -768,15 +782,18 @@ var _traversal_edges: Dictionary = {}  # Vector2i -> Dictionary[Vector2i, bool]
 func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_add_edge_one_way(a, b)
 	_add_edge_one_way(b, a)
+	structure_version += 1
 
 
 func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_remove_edge_one_way(a, b)
 	_remove_edge_one_way(b, a)
+	structure_version += 1
 
 
 func clear_traversal_edges() -> void:
 	_traversal_edges.clear()
+	structure_version += 1
 
 
 func _add_edge_one_way(a: Vector2i, b: Vector2i) -> void:
@@ -872,6 +889,7 @@ func set_occupant(cell: Vector2i, node: Node2D) -> bool:
 	if kind != &"":
 		var by_cell: Dictionary = _occupants_by_kind.get_or_add(kind, {})
 		by_cell[cell] = node
+	structure_version += 1
 	return true
 
 
@@ -891,6 +909,7 @@ func clear_occupant(cell: Vector2i, node: Node2D = null) -> void:
 		by_cell.erase(cell)
 		if by_cell.is_empty():
 			_occupants_by_kind.erase(kind)
+	structure_version += 1
 
 
 func occupant_at(cell: Vector2i) -> Node2D:
@@ -926,6 +945,9 @@ func _test_put(cell: Vector2i, data: CellData) -> void:
 	elif not _bounds.has_point(cell):
 		_expand_bounds_to_include(cell)
 	_put_raw(cell, data)
+	# Same reason build() bumps it: a test that paints a cell between two
+	# queries must not be served Pathfinder's edges from before the paint.
+	structure_version += 1
 
 
 func _expand_bounds_to_include(cell: Vector2i) -> void:

@@ -22,6 +22,11 @@ extends Resource
 #
 # Ramps are shared: one "brown" serves hair and shoes. Reference the same
 # sub-resource from both arrays in visitor_palette.tres rather than copying it.
+# NOTE that `weight` travels with the sub-resource, so a shared ramp is equally
+# common in every slot it appears in. If one slot ever needs a different rarity
+# for the same colour, split it into its own sub-resource — a per-slot override
+# table would have to stay aligned with the arrays by hand, which is the failure
+# mode this design is avoiding.
 #
 # ============================================================================
 
@@ -34,6 +39,18 @@ extends Resource
 ## The gradient, DARKEST first. At least 2 stops for the art's two shading
 ## rungs; longer ramps just give the roll more variants to pick from.
 @export var stops: PackedColorArray = PackedColorArray()
+
+## How often this ramp comes up, RELATIVE to the others in the same slot. 1.0 is
+## the neutral value, so an unweighted wardrobe rolls uniformly and adding a ramp
+## needs no arithmetic anywhere else; 3.0 means "three times as likely as a 1.0
+## ramp in this slot". The numbers are normalised by their sum at roll time, so
+## they are ratios, not percentages — doubling every weight in a slot changes
+## nothing, and you never have to make a column add up to 100.
+##
+## 0 removes the ramp from circulation without deleting it (useful for parking a
+## colour you may want back). If EVERY ramp in a slot is 0 the roll falls back to
+## uniform rather than rendering magenta — see VisitorPalette.pick_ramp.
+@export_range(0.0, 20.0, 0.05, "or_greater") var weight: float = 1.0
 
 
 ## Colour for shading rung `step` (0 = darkest rung the art paints) when the

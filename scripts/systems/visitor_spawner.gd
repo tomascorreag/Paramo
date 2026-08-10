@@ -49,7 +49,8 @@ extends Node
 # When they come, and in what shape
 # ----------------------------------------------------------------------------
 #
-# Arrivals are let in in GROUPS of 1..5 sharing a pace, during opening hours
+# Arrivals are let in in GROUPS of 1..5 sharing a pace, a destination and the
+# detour waypoints between the two (see _draw_group_route), during opening hours
 # only. Both exist because the raw signal is a COUNT for a whole day, banked by
 # VisitorFlow at the midnight boundary: released one at a time on a fixed timer
 # that is a metronome, and released when it arrives that is a crowd appearing at
@@ -143,11 +144,17 @@ const MAX_PACE_FRACTION: float = 0.9
 @export_range(0.1, 1.0, 0.01) var pace_fraction_max: float = 0.75
 
 ## Fraction by which each member's speed varies around its group's. Small on
-## purpose — the brief is "the same, or very similar". It is also what stops a
-## party that shares the opening stretch of route walking in lockstep: measured
-## before any jitter existed, six visitors spawned in one frame stayed stacked on
-## a single cell for the whole climb and read as one sprite with a rendering bug.
-@export var group_pace_spread: float = 0.06
+## purpose — the brief is "the same, or very similar".
+##
+## It USED to carry a second job: keeping a party that shared the opening stretch
+## of route from walking in lockstep (measured before any jitter existed, six
+## visitors spawned in one frame stayed stacked on a single cell for the whole
+## climb and read as one sprite with a rendering bug). It no longer does, which
+## is what allows the value to be this tight. Members now share their party's
+## waypoints and stop dead on each of them for their own rolled duration
+## (Visitor.waypoint_pause_*), and that is what desynchronises a party. Do not
+## take this back toward zero without checking a party still separates.
+@export var group_pace_spread: float = 0.02
 
 ## Frame-hold chance at pace_fraction_min, scaled down linearly toward 0 at the
 ## player's own speed. The walk cycle otherwise ticks at a fixed WALK_FPS
@@ -175,10 +182,23 @@ const MAX_PACE_FRACTION: float = 0.9
 @export var send_home_at_closing: bool = true
 
 @export_group("Wandering")
-## Forwarded to each Visitor — see visitor.gd for what they do.
+## Forwarded to each Visitor — see visitor.gd for what they do. The first three
+## are drawn ONCE PER GROUP here (_draw_group_route) rather than per member: the
+## waypoints are the party's trail, and a member only scatters around them by
+## member_wander_radius_cells.
 @export_range(0.0, 1.0, 0.05) var wander_chance: float = 0.75
 @export var wander_waypoints_max: int = 2
 @export var wander_radius_cells: int = 2
+@export var member_wander_radius_cells: int = 1
+@export var waypoint_pause_min: float = 1.5
+@export var waypoint_pause_max: float = 4.0
+
+## Members wait at each waypoint for the rest of their party (VisitorParty).
+## Off, they still stop — they just don't wait for each other, which leaves the
+## spawn stagger permanently strung out along the trail.
+@export var regroup_at_waypoints: bool = true
+@export var regroup_timeout_seconds: float = 20.0
+@export var regroup_release_spread: float = 1.2
 @export_range(0.0, 1.0, 0.01) var rest_chance_per_step: float = 0.04
 @export var rest_seconds_min: float = 1.2
 @export var rest_seconds_max: float = 3.5
@@ -204,10 +224,30 @@ var _pending: int = 0
 var _cooldown: float = 0.0
 var _entry: Vector2i = Pathfinder.NO_CELL
 var _reach: Dictionary = {}
-## Members still owed for the group being let in, and the speed fraction of the
-## player's they share.
+## _reach's keys, kept alongside it. _pick_goal samples the set uniformly and
+## Dictionary has no indexed access, so it used to call .keys() per spawn —
+## allocating an Array of every reachable cell (thousands) for one draw. Always
+## assigned through _set_reach so the two cannot drift.
+var _reach_cells: Array = []
+## Set by graph_changed, consumed in tick(). A fence RUN emits one signal per
+## tile laid, all in one frame, and the response is a full flood fill — so
+## twenty tiles meant twenty flood fills for one answer.
+var _reach_dirty: bool = false
+## Members still owed for the group being let in, and what they share: a speed
+## fraction of the player's, a destination, and the detour waypoints between the
+## two. The route is drawn ONCE for the party — that is what a party IS here, and
+## it is also why a group of five costs one route draw rather than five.
+## _group_anchors is handed to every member BY REFERENCE (Visitor never mutates
+## it), so the array exists once however large the party.
 var _group_left: int = 0
 var _group_pace: float = 0.0
+var _group_goal: Vector2i = Pathfinder.NO_CELL
+var _group_anchors: Array[Vector2i] = []
+## The party's regrouping barrier, shared by its members. Its size is grown per
+## member as each ACTUALLY spawns (Visitor.set_party -> member_joined) rather
+## than being declared from the group size: a member that fails to spawn would
+## otherwise be waited for at every waypoint until each waiter timed out.
+var _group_party: VisitorParty = null
 ## Edge-detects closing time; the sweep home must fire once, not every frame.
 var _was_open: bool = true
 ## Instance id, not the TileGrid itself — a reference here would keep the whole
@@ -258,6 +298,13 @@ func despawn_all() -> void:
 			v.free_shadow(true)
 			v.free()
 	_live.clear()
+	# free() (not queue_free) skips _exit_tree in a simulator run, so the
+	# standing claims would otherwise survive this spawner and be inherited by
+	# the NEXT run's crowd as permanently taken ground. The registry is static
+	# for good reasons (see VisitorStanding); this is the price.
+	VisitorStanding.clear()
+	_group_party = null
+	_group_left = 0
 
 
 ## Seed the stream explicitly (tools, tests, a future per-run seed). Call before
@@ -281,7 +328,7 @@ func entry_cell() -> Vector2i:
 		return _entry
 	if entry_cell_override != Pathfinder.NO_CELL:
 		_entry = entry_cell_override
-		_reach = _pathfinder.compute_reachable_set(_entry)
+		_set_reach(_pathfinder.compute_reachable_set(_entry))
 		return _entry
 
 	var anchor := _player_cell()
@@ -303,8 +350,14 @@ func entry_cell() -> Vector2i:
 			best_key = key
 			best = cell
 	_entry = best
-	_reach = reach
+	_set_reach(reach)
 	return _entry
+
+
+## The one place `_reach` is written, so its key array can never go stale.
+func _set_reach(reach: Dictionary) -> void:
+	_reach = reach
+	_reach_cells = reach.keys()
 
 
 func _player_cell() -> Vector2i:
@@ -360,6 +413,11 @@ func tick(delta: float) -> void:
 	if not enabled:
 		return
 
+	# Before the crowd ticks: a visitor whose route this frame's graph change
+	# broke relocates its goal out of `reach`, and it must be the new one.
+	if _reach_dirty:
+		_refresh_reach()
+
 	# Reverse, so a visitor that despawns mid-tick (removing itself from _live)
 	# cannot make the loop skip its neighbour.
 	for i in range(_live.size() - 1, -1, -1):
@@ -399,6 +457,11 @@ func tick(delta: float) -> void:
 		_group_pace = rng.randf_range(
 				minf(pace_fraction_min, pace_fraction_max),
 				maxf(pace_fraction_min, pace_fraction_max))
+		if not _draw_group_route():
+			# No goal to be had (empty reachable set, no entry). Drop the party
+			# rather than half-form it; the next tick tries again.
+			_group_left = 0
+			return
 
 	if _spawn_one(_group_pace):
 		_pending -= 1
@@ -433,17 +496,41 @@ func _frame_hold_for_fraction(fraction: float) -> float:
 	return slowness * max_frame_hold_chance
 
 
+## Where this party is going and how it gets there, drawn once for the whole
+## group. False when there is nowhere to send them, which the caller treats as
+## "no party this tick".
+func _draw_group_route() -> bool:
+	var entry := entry_cell()
+	if entry == Pathfinder.NO_CELL:
+		return false
+	_group_goal = _pick_goal(entry)
+	if _group_goal == Pathfinder.NO_CELL:
+		return false
+	_group_anchors = Visitor.draw_route_anchors(entry, _group_goal, wander_chance,
+			wander_waypoints_max, wander_radius_cells, _pathfinder, rng)
+	_group_party = VisitorParty.new() if regroup_at_waypoints else null
+	return true
+
+
 func _spawn_one(group_pace: float) -> bool:
 	var entry := entry_cell()
 	if entry == Pathfinder.NO_CELL or entity_parent == null:
 		return false
-	var goal := _pick_goal(entry)
-	if goal == Pathfinder.NO_CELL:
-		return false
+	# Members arrive group_member_stagger_seconds apart, so the graph can change
+	# between the party's route draw and its last member walking in. Re-drawing
+	# the whole route keeps the party together on one trail; keeping a goal that
+	# is no longer walkable would leave the straggler falling back to a direct
+	# path or to no path at all.
+	if _group_goal == Pathfinder.NO_CELL or not _pathfinder.is_walkable(_group_goal):
+		if not _draw_group_route():
+			return false
 
 	var v: Visitor = visitor_scene.instantiate()
+	v.driven_externally = true
 	v.entry_cell = entry
-	v.goal_cell = goal
+	v.goal_cell = _group_goal
+	v.set_group_route(_group_anchors)
+	v.set_party(_group_party)
 	v.reach = _reach
 	v.linger_seconds = linger_seconds
 	var fraction: float = _member_pace_fraction(group_pace)
@@ -452,6 +539,11 @@ func _spawn_one(group_pace: float) -> bool:
 	v.wander_chance = wander_chance
 	v.wander_waypoints_max = wander_waypoints_max
 	v.wander_radius_cells = wander_radius_cells
+	v.member_wander_radius_cells = member_wander_radius_cells
+	v.waypoint_pause_min = waypoint_pause_min
+	v.waypoint_pause_max = waypoint_pause_max
+	v.regroup_timeout_seconds = regroup_timeout_seconds
+	v.regroup_release_spread = regroup_release_spread
 	v.rest_chance_per_step = rest_chance_per_step
 	v.rest_seconds_min = rest_seconds_min
 	v.rest_seconds_max = rest_seconds_max
@@ -465,8 +557,11 @@ func _spawn_one(group_pace: float) -> bool:
 	v.colors = VisitorAppearance.roll_colors(palette, rng)
 	v.despawned.connect(_on_visitor_despawned)
 	# This node drives the crowd (see `tick`), so a visitor must not also drive
-	# itself — it would advance twice per frame and walk at double pace.
-	v.set_process(false)
+	# itself — it would advance twice per frame and walk at double pace. A FLAG,
+	# not set_process(false) here: entering the tree re-enables processing on a
+	# script that declares _process, so the call was undone by the add_child
+	# below and every visitor in the game walked at double pace until this was
+	# measured. Visitor._ready acts on the flag, which is after the re-enable.
 	# Parent BEFORE anything reads a world transform — same ordering
 	# ObjectPainter relies on; Visitor._ready does its own placement.
 	entity_parent.add_child(v)
@@ -480,9 +575,9 @@ func _spawn_one(group_pace: float) -> bool:
 ## thousands of cells and all but a small disc around the entry qualify, so a
 ## handful of draws beats building a filtered copy per spawn.
 func _pick_goal(entry: Vector2i) -> Vector2i:
-	if _reach.is_empty():
+	if _reach_cells.is_empty():
 		return Pathfinder.NO_CELL
-	var cells: Array = _reach.keys()
+	var cells: Array = _reach_cells
 	var min_d2: int = min_goal_distance * min_goal_distance
 	for _attempt in 24:
 		var cell: Vector2i = cells[rng.randi_range(0, cells.size() - 1)]
@@ -513,16 +608,36 @@ func _on_graph_changed() -> void:
 
 	if rebuilt:
 		_entry = Pathfinder.NO_CELL
-		_reach = {}
+		_set_reach({})
+		_reach_dirty = false
 		_pending = 0
 		_group_left = 0
+		# Cells from the old world. Cleared rather than left for _spawn_one's
+		# walkability check to catch: a cell index that happens to be walkable in
+		# the NEW world too would pass that check while meaning nothing.
+		_group_goal = Pathfinder.NO_CELL
+		_group_anchors = []
+		_group_party = null
+		VisitorStanding.clear()
 		for v in _live:
 			if is_instance_valid(v):
 				v.begin_leaving()
 		return
 
-	if _entry != Pathfinder.NO_CELL:
-		_reach = _pathfinder.compute_reachable_set(_entry)
+	# Deferred to tick(): the flood fill is O(grid) and a fence run fires this
+	# signal once per tile. Each Visitor defers its own response the same way, so
+	# a 20-tile run costs one refresh instead of twenty.
+	_reach_dirty = true
+
+
+## Rebuild the cached reachable set and hand it to the crowd. Called from tick,
+## BEFORE the visitors are ticked, so a visitor repairing its route this frame
+## sees the fresh set rather than the previous one.
+func _refresh_reach() -> void:
+	_reach_dirty = false
+	if _pathfinder == null or _entry == Pathfinder.NO_CELL:
+		return
+	_set_reach(_pathfinder.compute_reachable_set(_entry))
 	for v in _live:
 		if is_instance_valid(v):
 			v.reach = _reach

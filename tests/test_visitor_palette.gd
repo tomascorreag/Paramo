@@ -207,6 +207,30 @@ func test_every_shipped_sheet_shares_the_rig() -> void:
 		assert_eq(img.get_height(), 32, "%s is not 32px tall" % path)
 
 
+func test_no_facing_block_repeats_another() -> void:
+	# Visitor_2 shipped with its NW block a straight COPY of its NE block for 5
+	# of 6 frames (only the last was mirrored), so a visitor walking NW faced NE
+	# for most of the cycle and snapped round once per loop. Nothing in the rig
+	# checks — it is 24 frames of the right size either way. Comparing each frame
+	# against the same index in every OTHER facing catches a duplicated block
+	# without asserting HOW the art is authored (the sheets mirror NE->NW, but
+	# baseWalker has one hand-touched frame, so "must be a mirror" would be a
+	# false constraint).
+	for path: String in VisitorAppearance.SHEETS:
+		var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+		if img == null:
+			continue
+		var frames: int = GridWalker.WALK_FRAMES_PER_DIR
+		for f in frames:
+			for a in 4:
+				for b in range(a + 1, 4):
+					var ra := Rect2i((a * frames + f) * 32, 0, 32, 32)
+					var rb := Rect2i((b * frames + f) * 32, 0, 32, 32)
+					assert_false(img.get_region(ra).get_data()
+									== img.get_region(rb).get_data(),
+							"%s: facing %d and %d share frame %d" % [path, a, b, f])
+
+
 func test_a_build_is_rolled_per_visitor() -> void:
 	# Two sheets means two BUILDS, not two colourways — recolouring alone gives
 	# a crowd one silhouette in different outfits.
@@ -266,6 +290,109 @@ func test_roll_respects_min_top_index() -> void:
 			var ramp: VisitorRamp = ramps[pick[0]]
 			assert_between(pick[1], mini(palette.min_top_index, ramp.max_top()), ramp.max_top(),
 					"%s roll picked a top outside its ramp" % VisitorSlots.slot_name(slot))
+
+
+# ---------------------------------------------------------------------------
+# VisitorPalette.pick_ramp — rarity
+# ---------------------------------------------------------------------------
+
+static func _ramp(n: String, w: float) -> VisitorRamp:
+	var r := VisitorRamp.new()
+	r.name = StringName(n)
+	r.stops = PackedColorArray([Palette.P08, Palette.P06])
+	r.weight = w
+	return r
+
+
+static func _palette_of(ramps: Array[VisitorRamp]) -> VisitorPalette:
+	var p := VisitorPalette.new()
+	p.hair = ramps
+	return p
+
+
+func _tally(p: VisitorPalette, draws: int, seed_value: int) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var counts: Dictionary = {}
+	for _i in draws:
+		var i := p.pick_ramp(VisitorSlots.Slot.HAIR, rng)
+		counts[i] = counts.get(i, 0) + 1
+	return counts
+
+
+func test_a_heavier_ramp_comes_up_more_often() -> void:
+	# The headline behaviour: 3 vs 1 is three-to-one, not "somewhat more".
+	var p := _palette_of([_ramp("common", 3.0), _ramp("rare", 1.0)] as Array[VisitorRamp])
+	var counts := _tally(p, 8000, 1234)
+	var ratio := float(counts.get(0, 0)) / float(maxi(counts.get(1, 0), 1))
+	assert_almost_eq(ratio, 3.0, 0.25, "weight 3 beside weight 1 should land near 3:1")
+
+
+func test_weights_are_ratios_not_percentages() -> void:
+	# Scaling a whole slot must change nothing — that is what lets a ramp be
+	# added without re-normalising every other number in the array.
+	var a := _tally(_palette_of([_ramp("x", 1.0), _ramp("y", 2.0)] as Array[VisitorRamp]), 4000, 77)
+	var b := _tally(_palette_of([_ramp("x", 5.0), _ramp("y", 10.0)] as Array[VisitorRamp]), 4000, 77)
+	assert_eq(a, b, "weights are normalised by their sum, so 1:2 and 5:10 are the same wardrobe")
+
+
+func test_the_default_weight_rolls_uniformly() -> void:
+	# An unweighted palette must behave exactly as it did before weights existed,
+	# so adding the field cannot silently reshape a crowd.
+	var p := _palette_of([_ramp("a", 1.0), _ramp("b", 1.0), _ramp("c", 1.0)] as Array[VisitorRamp])
+	var counts := _tally(p, 6000, 4321)
+	for i in 3:
+		assert_almost_eq(float(counts.get(i, 0)), 2000.0, 250.0)
+
+
+func test_a_fresh_ramp_defaults_to_the_neutral_weight() -> void:
+	assert_eq(VisitorRamp.new().weight, 1.0,
+			"a ramp added in the Inspector must join the roll without touching the others")
+
+
+func test_a_zero_weight_ramp_never_appears() -> void:
+	# The "park a colour without deleting it" case.
+	var p := _palette_of([_ramp("live", 1.0), _ramp("parked", 0.0)] as Array[VisitorRamp])
+	assert_false(_tally(p, 3000, 5).has(1), "a 0-weight ramp must be out of circulation")
+
+
+func test_a_parked_ramp_last_in_the_array_is_still_never_picked() -> void:
+	# Guards the float-rounding fallback: landing on "the last ramp" rather than
+	# "the last ramp with weight" would hand out the parked one on that path.
+	var p := _palette_of([_ramp("live", 2.0), _ramp("parked", 0.0)] as Array[VisitorRamp])
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	for _i in 2000:
+		assert_eq(p.pick_ramp(VisitorSlots.Slot.HAIR, rng), 0)
+
+
+func test_an_all_zero_slot_falls_back_to_uniform() -> void:
+	# A mis-authored slot should look wrong, not render magenta — magenta reads
+	# as a shader fault and sends you to the wrong file.
+	var p := _palette_of([_ramp("a", 0.0), _ramp("b", 0.0)] as Array[VisitorRamp])
+	var counts := _tally(p, 2000, 9)
+	assert_eq(counts.size(), 2, "with nothing weighted, every ramp is back in play")
+	assert_false(counts.has(-1))
+
+
+func test_a_negative_weight_is_treated_as_parked() -> void:
+	var p := _palette_of([_ramp("live", 1.0), _ramp("typo", -5.0)] as Array[VisitorRamp])
+	assert_false(_tally(p, 1000, 3).has(1))
+
+
+func test_pick_ramp_reports_an_unauthored_slot() -> void:
+	var rng := RandomNumberGenerator.new()
+	assert_eq(VisitorPalette.new().pick_ramp(VisitorSlots.Slot.HAIR, rng), -1)
+
+
+func test_every_shipped_ramp_is_reachable() -> void:
+	# Nothing in the wardrobe should be accidentally parked: a ramp authored,
+	# palette-checked and then never rolled is invisible dead data.
+	for entry in _all_ramps():
+		var ramp: VisitorRamp = entry[1]
+		assert_gt(ramp.weight, 0.0,
+				"%s ramp '%s' has weight %s — it is authored but can never appear"
+				% [entry[0], ramp.name, ramp.weight])
 
 
 func test_apply_writes_the_shader_uniform() -> void:

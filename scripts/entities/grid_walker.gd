@@ -9,14 +9,17 @@ extends Node2D
 # 4-facing x 6-frame walk cycle, and the Y-sort/altitude bookkeeping that makes
 # a character interleave correctly with the tile stack.
 #
-# This is the movement half of scripts/player.gd with everything
-# player-specific left behind (camera, opening pan, lantern, shadow cutoff,
-# footsteps, the ProceduralWorld placement handshake). Player is NOT built on
-# it yet — the step math currently exists in both files. Migrating Player is a
-# separate change: that class also owns four other systems with no visual test
-# coverage, and doing both at once would mean a regression there could not be
-# told apart from a bug here. Until then, a fix to the interpolation belongs in
-# BOTH files.
+# BOTH characters in the game are built on this: Visitor and Player. The step
+# math used to be duplicated in scripts/player.gd, and the duplication was
+# already costing — the per-step world-position caching added for the crowd did
+# nothing for the player until Player was migrated onto this class. A fix to the
+# interpolation now lands once.
+#
+# What is player-specific stayed in player.gd (camera and its opening pan,
+# lantern, shadow altitude cutoff, footsteps, trampling, the ProceduralWorld
+# placement handshake), reaching in through the hooks below. Anything a SECOND
+# character would also want belongs here; anything only one of them wants
+# belongs in the subclass, behind a hook.
 #
 # ----------------------------------------------------------------------------
 # Contract
@@ -30,8 +33,12 @@ extends Node2D
 #   stop() / is_moving() / current_altitude()
 #   pause_movement(seconds)            stand still at the next step boundary
 #   frame_hold_chance                  repeat walk frames (slow walkers)
+#   path_is_valid()                    is the queued path still legal?
+#   anim_frame()                       monotonic walk-cycle index
 #
-# Subclasses override `_on_arrived()` (path exhausted) and `_on_step_started()`.
+# Subclass hooks: `_on_arrived` (path exhausted), `_on_step_started`,
+# `_on_path_blocked` (the path ran into a wall), `_on_visual_lift` (anything
+# that must ride the character's feet rather than its sort position).
 #
 # Driven from _process, not _physics_process — same reason as Player: the
 # camera smooths on the render clock, so a character stepped on the 60 Hz
@@ -45,6 +52,9 @@ const FACING_SE: int = 1
 const FACING_NE: int = 2
 const FACING_NW: int = 3
 
+## The rig every character currently ships with: 4 facings x 6 frames on one
+## row, played at 8 fps. Kept as constants because they are the DEFAULTS and
+## several tests assert against them — the live values are the exports below.
 const WALK_FRAMES_PER_DIR: int = 6
 const WALK_FPS: float = 8.0
 
@@ -68,6 +78,17 @@ const CLIMB_VERTICAL_FRAC: float = 0.65
 @export var step_duration: float = 0.45
 @export var climb_duration_multiplier: float = 2.0
 @export var scramble_duration_multiplier: float = 4.0
+
+@export_group("Rig")
+## Frames per facing on the sheet, and the cadence they play at. Per-INSTANCE
+## rather than baked in, because a sheet's frame count is a property of the ART,
+## not of walking: a two-frame bird or a twelve-frame quadruped is the same
+## locomotion with a different rig, and a constant here would have forced it to
+## be a different class. The FACING count stays fixed at 4 — that is not art, it
+## is the grid: movement is 4-connected, so there are exactly four directions to
+## draw (and the shadow sheet is indexed by facing too).
+@export var walk_frames_per_dir: int = WALK_FRAMES_PER_DIR
+@export var walk_fps: float = WALK_FPS
 
 ## Chance, rolled once per animation tick, that the walk cycle REPEATS its
 ## current frame instead of advancing. The cycle otherwise runs at a fixed
@@ -112,6 +133,22 @@ var _step_from_alt: float = 0.0
 var _step_to_alt: float = 0.0
 var _step_is_climb: bool = false
 var _step_climb_turned: bool = false
+# The two cells' world positions and the Y they snap to, resolved ONCE at step
+# start. They cannot change mid-step (the step is aborted if the graph does), and
+# cell_to_world is not free — it walks to the reference TileMapLayer and does two
+# transform conversions. Recomputing both every frame cost the balance simulator
+# two of those per walking visitor per tick.
+var _step_from_world: Vector2 = Vector2.ZERO
+var _step_to_world: Vector2 = Vector2.ZERO
+var _step_snap_y: float = 0.0
+
+# Cached so the per-frame lift write does not re-run the `as ShaderMaterial`
+# cast; the shadow's material never changes after bind.
+var _shadow_material: ShaderMaterial = null
+# Last frame index actually written to the sprite. Writing a Sprite2D property is
+# a setter call through the bindings even when the value is unchanged, and the
+# frame only changes ~8 times a second while this runs every frame.
+var _sprite_frame_written: int = -1
 
 
 # ----------------------------------------------------------------------------
@@ -126,17 +163,30 @@ func bind(pathfinder: Pathfinder, sprite: Sprite2D, shadow: Sprite2D = null) -> 
 	_pathfinder = pathfinder
 	_sprite = sprite
 	_shadow = shadow
+	_sprite_frame_written = -1
 	if _sprite != null:
 		_base_sprite_offset_y = _sprite.offset.y
 	if _shadow != null:
-		var mat := _shadow.material as ShaderMaterial
-		if mat != null:
-			var v: Variant = mat.get_shader_parameter(&"visual_y_offset")
+		_shadow_material = _shadow.material as ShaderMaterial
+		if _shadow_material != null:
+			var v: Variant = _shadow_material.get_shader_parameter(&"visual_y_offset")
 			if v != null:
 				_base_visual_y_offset = float(v)
 		if _shadow.get_parent() == self:
 			remove_child(_shadow)
-			get_parent().add_child(_shadow)
+			# Deferred only when the new parent is still setting its own children
+			# up. A walker instanced at RUNTIME (every Visitor) binds against a
+			# parent that is long since ready, and there the reparent must be
+			# SYNCHRONOUS: a balance-simulator run is a single frame, so a deferred
+			# call never lands and the shadow is still a child when the visitor is
+			# freed. A walker in an AUTHORED scene (Player) binds from its own
+			# _ready, which runs bottom-up — the parent is mid-setup and Godot
+			# rejects an add_child there.
+			var host := get_parent()
+			if host.is_node_ready():
+				host.add_child(_shadow)
+			else:
+				host.add_child.call_deferred(_shadow)
 		_shadow.add_to_group(&"shadow")
 		_shadow.set_meta(&"shadow_scale", 1.0)
 
@@ -154,6 +204,7 @@ func free_shadow(immediate: bool = false) -> void:
 		else:
 			_shadow.queue_free()
 	_shadow = null
+	_shadow_material = null
 
 
 # ----------------------------------------------------------------------------
@@ -199,6 +250,35 @@ func is_moving() -> bool:
 	return _stepping or not _path.is_empty()
 
 
+## True when every remaining queued step is still legal on the CURRENT graph.
+##
+## The point is to let an owner answer "did that graph change affect me?" without
+## re-pathing. A re-path is several A* runs; this is a dict lookup per queued
+## cell, and the answer is yes for almost every walker almost every time — a
+## fence goes up on one side of the mountain and nobody else's route touches it.
+## Cheap enough to run on every graph change; a fence RUN emits one per tile.
+##
+## Walks from `current_cell` because that is the cell already committed to (see
+## _begin_next_step), which is where _path[0] leads on from.
+func path_is_valid() -> bool:
+	if _pathfinder == null:
+		return false
+	if _path.is_empty():
+		return true
+	var grid := _pathfinder.grid()
+	if grid == null:
+		return false
+	var from: Vector2i = current_cell
+	for cell: Vector2i in _path:
+		# can_transition, not is_walkable: it checks BOTH cells and the edge
+		# between them, and the edge is the part a cell check misses — removing a
+		# ladder leaves its two cells walkable and the link between them gone.
+		if not grid.can_transition(from, cell):
+			return false
+		from = cell
+	return true
+
+
 ## Altitude in half-steps, interpolated continuously across a step.
 func current_altitude() -> float:
 	return _altitude
@@ -206,6 +286,18 @@ func current_altitude() -> float:
 
 func facing() -> int:
 	return _facing
+
+
+## The walk cycle's frame count since the walker last went idle — MONOTONIC, not
+## wrapped to WALK_FRAMES_PER_DIR. Player counts foot contacts off this
+## (see its _tick_footfalls): a running total means a frame hitch that skips
+## past a contact still produces exactly one footfall, never zero and never a
+## burst, which an "is the current frame a contact frame?" test cannot promise.
+##
+## This is also why the cycle is COUNTED rather than derived from elapsed time:
+## a frame_hold_chance repeat has to hold the footfall too.
+func anim_frame() -> int:
+	return _anim_index
 
 
 # ----------------------------------------------------------------------------
@@ -219,6 +311,22 @@ func _on_arrived() -> void:
 
 ## A step onto `cell` began, classified as TileGrid.StepKind `kind`.
 func _on_step_started(_cell: Vector2i, _kind: int) -> void:
+	pass
+
+
+## The queued path led into a cell that is no longer walkable, and has been
+## dropped. Silent by default: for a visitor this is routine (the player fenced
+## the route) and the owner re-paths on Pathfinder.graph_changed. Player
+## overrides it to warn, because a click-to-move path into a wall is a bug.
+func _on_path_blocked(_cell: Vector2i) -> void:
+	pass
+
+
+## The visual lift for this frame has been applied to the sprite and shadow.
+## `lift` is the pixel offset that undoes altitude and SORT_OFFSET — anything
+## else that must sit at the character's FEET rather than at its sort position
+## (Player's camera and lantern) hangs off this.
+func _on_visual_lift(_lift: float) -> void:
 	pass
 
 
@@ -273,7 +381,7 @@ func tick_movement(delta: float) -> void:
 # the cycle or repeats the frame. Accumulating rather than sampling elapsed time
 # is what lets a hold stick.
 func _advance_anim(delta: float) -> void:
-	var tick: float = 1.0 / WALK_FPS
+	var tick: float = 1.0 / maxf(walk_fps, 0.001)
 	_anim_accum += delta
 	while _anim_accum >= tick:
 		_anim_accum -= tick
@@ -284,8 +392,7 @@ func _advance_anim(delta: float) -> void:
 func _rewind_anim() -> void:
 	_anim_index = 0
 	_anim_accum = 0.0
-	if _sprite != null:
-		_sprite.frame = _facing * WALK_FRAMES_PER_DIR
+	_write_sprite_frame(_facing * walk_frames_per_dir)
 
 
 func _anim_rng() -> RandomNumberGenerator:
@@ -308,12 +415,16 @@ func _begin_next_step() -> void:
 		# The graph changed under the path (a fence went up mid-walk). Drop it;
 		# the owner re-paths on Pathfinder.graph_changed.
 		_path.clear()
+		_on_path_blocked(next_cell)
 		return
 
 	_step_from_cell = current_cell
 	_step_to_cell = next_cell
 	_step_from_alt = _altitude
 	_step_to_alt = _pathfinder.altitude_center(next_cell)
+	_step_from_world = _pathfinder.cell_to_world(current_cell)
+	_step_to_world = _pathfinder.cell_to_world(next_cell)
+	_step_snap_y = maxf(_step_from_world.y, _step_to_world.y)
 	_step_t = 0.0
 	_stepping = true
 
@@ -346,8 +457,9 @@ func _finish_step() -> void:
 
 func _apply_step_interp(t: float) -> void:
 	var clamped := clampf(t, 0.0, 1.0)
-	var from_world := _pathfinder.cell_to_world(_step_from_cell)
-	var to_world := _pathfinder.cell_to_world(_step_to_cell)
+	# Resolved at step start — see _begin_next_step.
+	var from_world := _step_from_world
+	var to_world := _step_to_world
 	var pos: Vector2
 	var alt: float
 	if _step_is_climb:
@@ -384,16 +496,15 @@ func _apply_step_interp(t: float) -> void:
 	_altitude = alt
 	# Sort Y snaps to the southernmost of the two cells, so the walker stays in
 	# front of BOTH for the whole step instead of popping halfway across.
-	var snap_y := maxf(from_world.y, to_world.y)
+	var snap_y := _step_snap_y
 	global_position = Vector2(pos.x, snap_y) + Pathfinder.VISUAL_SURFACE_OFFSET \
 			+ Vector2(0.0, SORT_OFFSET)
 	_apply_visual_lift(alt, pos.y - snap_y)
 	# The walk cycle ticks at WALK_FPS regardless of how long a step takes, so a
 	# slow climb does not play in slow motion; frame_hold_chance is the one thing
 	# that slows it, and only for the walker that carries it.
-	if _sprite != null:
-		_sprite.frame = _facing * WALK_FRAMES_PER_DIR \
-				+ (_anim_index % WALK_FRAMES_PER_DIR)
+	_write_sprite_frame(_facing * walk_frames_per_dir
+			+ (_anim_index % maxi(walk_frames_per_dir, 1)))
 
 
 func _apply_position(cell: Vector2i, alt: float) -> void:
@@ -412,22 +523,34 @@ func _apply_visual_lift(alt: float, y_visual_diff: float) -> void:
 	var lift := -alt * Pathfinder.HALF_STEP_PX - SORT_OFFSET + y_visual_diff
 	if _sprite != null:
 		_sprite.offset.y = _base_sprite_offset_y + lift
-	if not is_instance_valid(_shadow):
+	if is_instance_valid(_shadow):
+		# The shadow sorts 1px north (always behind the character); its own visual
+		# offset is pushed into the shader so its sort Y stays decoupled.
+		_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
+		# The shadow's frame IS the facing, and facing only changes on _set_facing
+		# — which writes it there. Rewriting it every frame was pure overhead.
+		if _shadow_material != null:
+			_shadow_material.set_shader_parameter(&"visual_y_offset",
+					_base_visual_y_offset + lift + 1.0)
+	# AFTER the shadow but OUTSIDE its validity guard: Player hangs its camera and
+	# lantern off this, and neither has anything to do with whether a shadow
+	# exists. Skipping the hook with the shadow would freeze the camera.
+	_on_visual_lift(lift)
+
+
+# The sprite's frame is written from the movement loop every frame but only
+# CHANGES at WALK_FPS, so guard the property set.
+func _write_sprite_frame(frame: int) -> void:
+	if _sprite == null or frame == _sprite_frame_written:
 		return
-	# The shadow sorts 1px north (always behind the character); its own visual
-	# offset is pushed into the shader so its sort Y stays decoupled.
-	_shadow.global_position = Vector2(global_position.x, global_position.y - 1.0)
-	_shadow.frame = _facing
-	var mat := _shadow.material as ShaderMaterial
-	if mat != null:
-		mat.set_shader_parameter(&"visual_y_offset", _base_visual_y_offset + lift + 1.0)
+	_sprite_frame_written = frame
+	_sprite.frame = frame
 
 
 func _set_facing(dir: Vector2i) -> void:
 	if not DIR_TO_FACING.has(dir):
 		return
 	_facing = DIR_TO_FACING[dir]
-	if _sprite != null:
-		_sprite.frame = _facing * WALK_FRAMES_PER_DIR
+	_write_sprite_frame(_facing * walk_frames_per_dir)
 	if is_instance_valid(_shadow):
 		_shadow.frame = _facing
