@@ -110,3 +110,31 @@ Related trap: a settled pathfinder graph does **not** mean the map is painted.
 to stop changing can sample a world whose `CellData` points at layers with no
 tile under them — which reads as "there is no grass on this map" (fire refusing
 to ignite, trample doing nothing). Wait for `ProceduralWorld.generation_finished`.
+
+## Dump a scene's painted tiles — `scripts/tools/dump_scene_tiles.gd`
+
+Instantiates a scene without running it and lists every painted tile on every
+`TileMapLayer`, grouped by layer, with the tile's `tile_kind` custom data. The
+counterpart to `dump_cells_around.gd`: that one shows what the **generator**
+decided, this one shows what actually landed on the **layers**, which is the
+only way to tell a generation bug from a painting bug.
+
+```bash
+... --headless --script res://scripts/tools/dump_scene_tiles.gd -- res://scenes/tools/tileset_test.tscn
+```
+
+## Dump the routing graph — `scripts/tools/dump_pathfinder.gd`
+
+Builds the `Pathfinder` graph over a scene and prints reachability for key cells
+plus every edge around the Ground1→Ground2 ramp row (`exit`/`enter` altitudes
+and `can_transition`), then a handful of concrete paths. Use it when a cell is
+unreachable and you need to see **which edge** refused, rather than that a route
+failed.
+
+```bash
+... --headless --script res://scripts/tools/dump_pathfinder.gd -- res://scenes/tools/tileset_test.tscn
+```
+
+Defaults to `tileset_test.tscn` when given no argument. The ramp-row cells it
+reports are hardcoded to that scene's geometry, so on another map read the
+reachability and path sections and ignore the edge table.

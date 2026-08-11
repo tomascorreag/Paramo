@@ -262,3 +262,20 @@ marked, **not** chosen).
 - When adding a state, **place the cursor explicitly**. The viewport remembers
   where the previous state left it, so "don't move the mouse" silently renders
   the next state hovered.
+
+## Rendered-pixel palette audit — `scripts/tools/verify_journal_palette.gd`
+
+Renders both journal pages and checks **every rendered pixel** against the
+journal's reduced ink palette, exiting non-zero on anything else.
+
+```bash
+... --script res://scripts/tools/verify_journal_palette.gd
+```
+
+Why this exists rather than a unit test: `tests/test_journal_pages.gd` can only
+check colours somebody **authored**, not what they become once composited. The
+calendar's rules were authored as P06 at alpha 0.7 — a legal palette entry —
+and every rule pixel rendered as `9D7967`, a colour nobody authored and no RGB
+check could catch. The fix made the rules an opaque lighter entry (P10), and the
+test now also forbids alpha < 1 on journal ink: stricter than the project-wide
+"alpha is free" rule, for exactly this reason.

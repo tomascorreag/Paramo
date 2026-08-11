@@ -394,9 +394,15 @@ both found the hard way:
   pixels — and 2064 on a repeat. A real sorting change is identical every run; a
   number that moves is animation.
 - **`Engine.time_scale = 0`.** Pausing `TimeManager` does **not** stop the tile
-  shaders — wind and water flow animate off `TIME`, which Godot scales by
-  `Engine.time_scale`. Without it the control alone read 5352 px (seed 7) and
-  1784 px (seed 99). With it, every control is 0.
+  shaders. When this was measured, wind and water animated off `TIME`; they now
+  animate off the `world_time` global uniform, which `WorldClock` accumulates
+  from its own `_process` delta — and Godot scales that delta by
+  `Engine.time_scale` too, so the same line still freezes them and the tool is
+  unchanged. What no longer works is reaching for `get_tree().paused`: that
+  stops `WorldClock` but not `TIME`, so a verifier written against the pause
+  flag would freeze some shaders and not others. Without `time_scale = 0` the
+  control alone read 5352 px (seed 7) and 1784 px (seed 99). With it, every
+  control is 0.
 
 **The "unreachable edge tiles never need sorting" idea has a ~1-2% ceiling** on
 this map, measured: only 35 of 3073 tiles (83 of 4544 on another seed) sit more

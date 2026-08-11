@@ -13,13 +13,12 @@
 
 ## Performance (flagged by super-review 2026-04-24)
 
-- [ ] `scripts/systems/pathfinder.gd:163-172` — A* open set is a linear scan (O(n) per pop). Fine at the vertical-slice scale (~200-300 tiles). Replace with a binary heap (or switch to `AStarGrid2D`) if the map grows past ~500 walkable cells or if pathfinding shows up in profiling.
 
 ## Web export hardening (from 2026-04-22 security review)
 
-- [ ] when creating `export_presets.cfg`, set Export Filter to exclude `addons/gut/*`, `tests/*`, `scripts/tools/*`, `*.md`, `design/*`
-- [ ] ensure web preset is Release (not Debug) and has no `--remote-debug` flag
+- [x] when creating `export_presets.cfg`, set Export Filter to exclude `addons/gut/*`, `tests/*`, `scripts/tools/*`, `*.md`, `design/*` — done except `scripts/tools/*`, which must stay in: `gameplay_base.tscn` / `procedural_base.tscn` / `frailejon.tscn` load runtime scripts from there. `*.md` and `design/*` never shipped (`export_filter=all_resources` takes resources only). Verified against the export's own `Storing File:` log, not a `strings` dump of the pck — see CLAUDE.md.
+- [x] ensure web preset is Release (not Debug) and has no `--remote-debug` flag — CI runs `--export-release`, preset carries no debug template or debug flag
 - [x] pick a web host that supports COOP/COEP headers (itch.io, Netlify, Cloudflare Pages) — GitHub Pages won't work because Godot 4 threaded builds need `Cross-Origin-Opener-Policy: same-origin` + `Cross-Origin-Embedder-Policy: require-corp` for `SharedArrayBuffer`. Alternative: disable threads in the export.
-- [ ] Clean up: fix and optimize processes that might be hacky/unoptimized, not only in the game but for the repo in general. Make sure not to downgrade any functionality.
-- [ ] make the pause and journal views completely pause the world, including effects like rain , fire and visitors, both functionally and visually.
-- [ ] Make grass tile degradation more of a continuous thing, with grass growing longer over time or shorter with degradation until it's gone. The max grass length should be the one that is currently assigned randomly during terrian generation..
+- [x] Clean up: fix and optimize processes that might be hacky/unoptimized, not only in the game but for the repo in general. Make sure not to downgrade any functionality. — 2026-08-11: `TileKindIndex` warning spam 262 → 2 per run (the "declared but unpainted" check asked a question one source cannot answer; replaced by a union test over the shipped tileset); export stopped bundling its own output (`docs/*`, `preview_out/*`, `sim_out/*`) — pck −8.3%; GUT now runs in CI on every branch/PR and gates the deploy; two orphan `.uid` files removed; the two root `code-review-*.md` deleted (superseded by `dev-notes/`); three undocumented tools documented; `CLAUDE.md` un-ignored and published. 775 tests green before and after.
+- [x] make the pause and journal views completely pause the world, including effects like rain , fire and visitors, both functionally and visually.
+- [x] Make grass tile degradation more of a continuous thing, with grass growing longer over time or shorter with degradation until it's gone. The max grass length should be the one that is currently assigned randomly during terrian generation, and the grass type should be maintained throughout (i.e. there are two tones of grass atm, which should be maintained).
