@@ -8,21 +8,18 @@
 [node name="ProceduralBase" instance=ExtResource("1_base")]
 
 [node name="CliffN8" type="TileMapLayer" parent="World"]
-y_sort_enabled = true
 position = Vector2(0, 64)
 tile_set = ExtResource("2_tileset")
 y_sort_origin = -64
 metadata/altitude = -8
 
 [node name="CliffN6" type="TileMapLayer" parent="World"]
-y_sort_enabled = true
 position = Vector2(0, 48)
 tile_set = ExtResource("2_tileset")
 y_sort_origin = -48
 metadata/altitude = -6
 
 [node name="CliffN4" type="TileMapLayer" parent="World"]
-y_sort_enabled = true
 position = Vector2(0, 32)
 tile_set = ExtResource("2_tileset")
 y_sort_origin = -32

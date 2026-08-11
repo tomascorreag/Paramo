@@ -38,6 +38,10 @@ const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.01
 const K_IGNITION_SAMPLES: int = 4 # per ignition tick
 const IGNITION_TICK_SECONDS: float = 0.25
 
+## How often a burning cell rolls to spread. Matched to IGNITION_TICK_SECONDS,
+## and to sim_runner's DT — see sim_tick for why those must agree.
+const SPREAD_TICK_SECONDS: float = 0.25
+
 # Burn progression, intensity, spread chance, and fuel consumption all live in
 # FireDynamics now (the testable sim math). What remains here is ignition
 # rolling, terrain gating, and the grass↔dirt swaps. A fire GROWS on its own
@@ -56,7 +60,16 @@ const WATER_SEARCH_R: int = 6 # max bounded BFS radius (cells)
 const ALTITUDE_FALLOFF_SCALE: float = 4.0 # exp(-alt / scale)
 const DAY_SIGMA: float = 0.18 # day-curve gaussian width
 
-const MAX_CONCURRENT_BURNING: int = 80 # safety cap
+# Ceiling on simultaneously burning cells — but read the next paragraph before
+# treating it as one.
+#
+# IT ONLY GATES RANDOM IGNITION. `_roll_spread` calls `_ignite` directly rather
+# than through `can_ignite`, so a fire front walks straight past this number.
+# MEASURED at the previous value of 80, 12 seeds: peak_fires averaged 95 and hit
+# 145. So it bounds how many fires the world STARTS, not how many burn, and the
+# per-frame cost it is supposed to bound (FireManager._advance_burns, ~6 us per
+# burning cell) scales with the number it does not control.
+const MAX_CONCURRENT_BURNING: int = 64 # ignition cap — see above, NOT a ceiling
 
 # --- Rain coupling ---
 # Spread chance hits zero at this rain intensity. Linear ramp from 0 (no rain
@@ -144,6 +157,12 @@ var _water_dist_cache: Dictionary[Vector2i, int] = {}
 var _dirt_coords_by_tileset: Dictionary = {}
 
 var _ignition_accum: float = 0.0
+## Time banked toward the next spread roll. Separate from _ignition_accum even
+## though both tick at 0.25 s: ignitions consume theirs in a `while` (so a long
+## frame fires several rolls), while spread hands the WHOLE accumulated interval
+## to one roll — the probability is linear in dt, so that is equivalent and
+## cheaper.
+var _spread_accum: float = 0.0
 
 
 func _ready() -> void:
@@ -385,7 +404,26 @@ func sim_tick(delta: float, rain: float) -> void:
 	if _time_manager != null and bool(_time_manager.get(&"paused")):
 		return
 
-	_advance_burns(delta, rain)
+	# Spread rolls on the SAME cadence as ignitions rather than every frame. The
+	# probability is linear in dt (FireDynamics.spread_probability), so one roll
+	# at 0.25 s carries the same expected spread as fifteen at 1/60 s — while
+	# doing a fifteenth of the work. That work is not trivial: each roll walks
+	# four neighbours, and each neighbour is a TileMapLayer query plus a level
+	# check, for every burning cell, every frame.
+	#
+	# It also removes a GAME/SIM divergence nobody had noticed: sim_runner drives
+	# this with DT = 0.25 exactly, so the balance model has ALWAYS measured
+	# quarter-second spread rolls while the game rolled fifteen times as often at
+	# a fifteenth the chance. Those are not identical — fifteen independent small
+	# rolls spread ~4% less per unit time than one coarse roll, because they can
+	# waste draws on the same neighbour. The game now matches what was balanced.
+	var spread_dt: float = 0.0
+	_spread_accum += delta
+	if _spread_accum >= SPREAD_TICK_SECONDS:
+		spread_dt = _spread_accum
+		_spread_accum = 0.0
+
+	_advance_burns(delta, rain, spread_dt)
 
 	_ignition_accum += delta
 	while _ignition_accum >= IGNITION_TICK_SECONDS:
@@ -393,7 +431,9 @@ func sim_tick(delta: float, rain: float) -> void:
 		_roll_ignitions()
 
 
-func _advance_burns(delta: float, rain: float) -> void:
+## `spread_dt` is 0 on the frames between spread rolls, and the accumulated
+## interval on the frames one is due — see sim_tick.
+func _advance_burns(delta: float, rain: float, spread_dt: float = 0.0) -> void:
 	if _burning.is_empty():
 		return
 	# Cache rain-derived multipliers once per tick rather than per cell.
@@ -408,6 +448,14 @@ func _advance_burns(delta: float, rain: float) -> void:
 	var completed: Array[Vector2i] = []
 	var extinguished: Array[Vector2i] = []
 	# Snapshot keys so we can mutate _burning during spread.
+	#
+	# Skipping the snapshot on non-spread frames (iterating the dictionary
+	# directly, since extinguish and burnout are both deferred to the arrays
+	# above) was tried and REVERTED: it measured 402-459 us against 341 before,
+	# i.e. nothing outside this measurement's ~20% run-to-run spread. The
+	# untyped iteration it forced may well have cost more than the allocation it
+	# saved. Don't re-derive it without a benchmark that can resolve the
+	# difference.
 	var cells: Array = _burning.keys()
 	for cell: Vector2i in cells:
 		var entry: Dictionary = _burning[cell]
@@ -419,14 +467,19 @@ func _advance_burns(delta: float, rain: float) -> void:
 		# Age drives the intensity ramp; fuel drives the dissolve + burnout. The
 		# fire grows on its own (no neighbour term) and eats the tile's fuel at a
 		# rate set by how hot it is.
+		#
+		# `.get` with a default rather than `entry[...]` on every read: the burn
+		# entry's shape is a contract with the tests, several of which inject an
+		# entry carrying only the fields they care about. Indexing directly would
+		# be marginally faster and would turn those into crashes.
 		var age: float = float(entry.get("age", 0.0)) + delta
 		entry["age"] = age
 		var fuel: float = float(entry.get("fuel", FUEL_DEFAULT))
-		var fuel_max: float = float(entry.get("fuel_max", FUEL_DEFAULT))
-		var fuel_frac: float = clampf(fuel / maxf(fuel_max, 0.0001), 0.0, 1.0)
+		var fuel_frac: float = clampf(
+				fuel / maxf(float(entry.get("fuel_max", FUEL_DEFAULT)), 0.0001), 0.0, 1.0)
 
-		var max_i: float = float(entry.get("max_intensity", 1.0))
-		var intensity: float = FireDynamics.intensity(age, fuel_frac, max_i)
+		var intensity: float = FireDynamics.intensity(
+				age, fuel_frac, float(entry.get("max_intensity", 1.0)))
 		fuel -= FireDynamics.fuel_consumed(intensity, delta)
 		entry["fuel"] = fuel
 
@@ -439,8 +492,8 @@ func _advance_burns(delta: float, rain: float) -> void:
 			# Char the plant as its tile's fuel is consumed (reaches 1 at burnout).
 			frj.call(&"set_burn_amount", 1.0 - fuel_frac)
 
-		if intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
-			_roll_spread(cell, intensity, delta, spread_mult)
+		if spread_dt > 0.0 and intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
+			_roll_spread(cell, intensity, spread_dt, spread_mult)
 
 		if fuel <= 0.0:
 			completed.append(cell)

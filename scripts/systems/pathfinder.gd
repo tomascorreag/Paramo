@@ -149,6 +149,35 @@ var _edge_grid_version: int = -1
 var _edge_penalty_version: int = 0
 var _penalty_version: int = 0
 
+# ----------------------------------------------------------------------------
+# Connected components
+# ----------------------------------------------------------------------------
+#
+# Which cells can reach which. Learned LAZILY and only as a by-product of work
+# that was happening anyway — never computed on spec:
+#   - compute_reachable_set floods a component by definition, so it registers
+#     what it found;
+#   - a FAILED find_path has already expanded every cell it could reach, so its
+#     settled set IS the component of `from`.
+#
+# It buys two things. A search whose target is in another component returns []
+# in O(1) instead of expanding the whole component to discover the obvious
+# (measured: 3.1 ms, DEARER than a successful 40-step route at 2.0 ms — with no
+# goal to stop at, A* runs to exhaustion). And compute_reachable_set becomes
+# free for any anchor already seen, which is what UXOverlay asks for on every
+# step the player takes.
+#
+# CORRECTNESS REQUIREMENT: the traversable graph must be UNDIRECTED, since one
+# cell's reachable set is reused as every other member's. Verified exhaustively
+# rather than assumed — profile_systems.gd walks every walkable cell and reports
+# the asymmetric-edge count (0 on level1, 1233 cells). TileGrid.can_transition
+# intersects the same two edge-altitude sets whichever way it is asked, ladder
+# edges are registered both ways, and occupant blocking is per-cell. If a
+# ONE-WAY traversal is ever added (a drop you can fall down but not climb), this
+# cache is the thing it breaks.
+var _component_of: Dictionary = {}          # cell -> index into _components
+var _components: Array[Dictionary] = []     # index -> the whole cell set
+
 
 func _enter_tree() -> void:
 	# Join the group in _enter_tree (runs top-down before sibling _readys) so
@@ -218,6 +247,11 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	if from == to:
 		var same: Array[Vector2i] = [from]
 		return same
+	# Known to be in different components: no route exists, and finding that out
+	# by search means expanding every cell `from` can reach.
+	var known: int = _component_of.get(from, -1)
+	if known >= 0 and not _components[known].has(to):
+		return []
 
 	var g_score: Dictionary[Vector2i, float] = { from: 0.0 }
 	var came_from: Dictionary[Vector2i, Vector2i] = {}
@@ -254,6 +288,10 @@ func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 			counter += 1
 			_heap_push(open, [tentative_g + _heuristic(nb, to), counter, nb])
 
+	# The heap emptied without reaching `to`, so everything `from` can reach was
+	# pushed and popped: g_score's keys ARE its component. Bank it so the next
+	# hopeless query is answered without repeating the scan.
+	_register_component(g_score)
 	return []
 
 
@@ -314,6 +352,36 @@ func _validate_edge_cache() -> void:
 	_edge_grid_version = grid_version
 	_edge_penalty_version = _penalty_version
 	_edge_cache.clear()
+	# Components depend on the TOPOLOGY only, so a penalty change need not drop
+	# them — but penalty changes are rare and one invalidation path is easier to
+	# reason about than two.
+	_component_of.clear()
+	_components.clear()
+
+
+## Record `cells` (any dictionary keyed by cell) as one complete connected
+## component. The caller must have a CLOSED set — a full flood fill or an
+## exhausted search — never a partial one, or the O(1) "no route" answer above
+## starts lying.
+func _register_component(cells: Dictionary) -> void:
+	if cells.is_empty():
+		return
+	var set: Dictionary[Vector2i, bool] = {}
+	for c: Vector2i in cells:
+		set[c] = true
+	_register_component_set(set)
+
+
+## As above, for a caller that already holds the set in its final form — it is
+## stored BY REFERENCE, so compute_reachable_set hands out the very dictionary
+## it cached rather than a copy of it.
+func _register_component_set(set: Dictionary[Vector2i, bool]) -> void:
+	if set.is_empty():
+		return
+	var idx: int = _components.size()
+	for c: Vector2i in set:
+		_component_of[c] = idx
+	_components.append(set)
 
 
 # ----------------------------------------------------------------------------
@@ -387,14 +455,23 @@ func is_terrain_walkable(cell: Vector2i) -> bool:
 
 # Flood-fill reachable set from `from` using the same traversal model as
 # find_path (4-neighbor + can_transition + traversal edges, ramp/penalty
-# rules ignored — reachability, not cost). O(N) once; callers should cache
-# and only recompute when their anchor cell moves. Used by UI that needs to
-# answer "is this cell reachable?" cheaply per hover (UXOverlay).
+# rules ignored — reachability, not cost). Used by UI that needs to answer "is
+# this cell reachable?" cheaply per hover (UXOverlay).
+#
+# A component already learned is returned DIRECTLY — the same shared dictionary,
+# read-only by contract, exactly as reachable_from has always behaved. That is
+# what makes this free for the caller that asks once per player step: the whole
+# landmass is one component, so the player walking around inside it never
+# invalidates the answer. A fill only happens on the first anchor in an unseen
+# component, or after the graph changes.
 func compute_reachable_set(from: Vector2i) -> Dictionary[Vector2i, bool]:
 	var reachable: Dictionary[Vector2i, bool] = {}
 	if _grid == null or not _grid.is_walkable(from):
 		return reachable
 	_validate_edge_cache()
+	var known: int = _component_of.get(from, -1)
+	if known >= 0:
+		return _components[known]
 	reachable[from] = true
 	var queue: Array[Vector2i] = [from]
 	var head: int = 0

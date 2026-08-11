@@ -147,6 +147,22 @@ func _update_screen_params() -> void:
 	_mat.set_shader_parameter(&"texel", Vector2(scale_n, scale_n) / _vp)
 
 
+## Seconds between strip rebuilds. The whole update — bearing bake, smoothing,
+## 96 set_pixel calls and a texture upload — used to run every frame and
+## measured 164 us at the 80-fire cap, the second largest per-frame script cost
+## in the game and all of it in ONE node.
+##
+## 20 Hz because of what this draws: a soft, heavily smoothed edge glow whose
+## own SMOOTH_TAU already lags it far more than 50 ms. The one thing that could
+## show is bearing lag while the camera pans fast, and at 50 ms that is a
+## fraction of a texel on a 96-bin strip.
+##
+## The smoothing stays frame-rate independent for free — it is exp(-dt/TAU), so
+## handing it the accumulated delta at 20 Hz traces the same curve it traced at
+## 60.
+const UPDATE_INTERVAL: float = 1.0 / 20.0
+
+
 func _process(delta: float) -> void:
 	if _fires_dirty:
 		_fires_dirty = false
@@ -155,9 +171,16 @@ func _process(delta: float) -> void:
 	# Fully idle path: nothing in the group and the glow already decayed below
 	# HIDE_BELOW (visible only goes false after that decay completes), so the
 	# target is zero and the smoothed strip is ~zero — nothing to rebuild,
-	# smooth, or upload.
+	# smooth, or upload. Checked EVERY frame, unlike the work below: it is two
+	# comparisons, and it is what makes a map with no fire on it free.
 	if _fires.is_empty() and not visible:
 		return
+
+	_since_update += delta
+	if _since_update < UPDATE_INTERVAL:
+		return
+	delta = _since_update
+	_since_update = 0.0
 
 	_build_target()
 
@@ -184,6 +207,9 @@ func _process(delta: float) -> void:
 
 # Rebuild _target from the current off-screen fires. Leaves _target zeroed when
 # nothing qualifies, so the smoothing above fades any lingering glow out.
+var _since_update: float = 0.0
+
+
 func _build_target() -> void:
 	for b: int in BINS:
 		_target[b] = 0.0

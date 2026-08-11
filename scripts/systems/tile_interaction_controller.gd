@@ -486,12 +486,18 @@ func remove_rock(cell: Vector2i) -> void:
 	var node := grid.occupant_at(cell) as Rock
 	if node == null:
 		return
-	# Rock clears its occupant claim in _exit_tree. queue_free defers to end
-	# of frame — rebuild() now would still see the stale occupant. Clear the
-	# claim eagerly so the rebuild reads the post-removal world.
+	# Rock clears its occupant claim in _exit_tree, and queue_free defers that to
+	# the end of the frame — so clear it eagerly, or every query until then still
+	# sees the rock.
 	grid.clear_occupant(cell, node)
 	node.queue_free()
-	pathfinder.rebuild()
+	# ANNOUNCE, don't rebuild. A rock blocks purely through blocks_movement() on
+	# its occupant claim; it paints no terrain, so there is nothing for a rebuild
+	# to re-ingest and it would spend 18.7 ms reconstructing an identical grid.
+	# clear_occupant already bumped TileGrid.structure_version, so the
+	# pathfinder's resolved-edge cache drops itself; the emit is what refreshes
+	# the reachability the action menu and UXOverlay read.
+	pathfinder.notify_graph_changed()
 
 
 func begin_traversal(origin: Vector2i, kind: StringName) -> void:

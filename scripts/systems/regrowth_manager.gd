@@ -56,12 +56,26 @@ extends Node
 ## Recovery
 ## ---------------------------------------------------------------------------
 ##
-## Recovery is a RATE per completed day, scaled by the day's AVERAGE rain
-## (integrated here in _process — each per-day consumer keeps its own integral
-## so there is no ordering coupling between day_completed listeners). A
-## wet-season burn heals in a few days; a drought burn lingers most of a season.
-## That asymmetry is the point: fire during the profitable dry season costs
-## visitor-days exactly when they are worth the most.
+## Recovery is a RATE PER DAY, scaled by rain: a wet-season burn heals in a few
+## days, a drought burn lingers most of a season. That asymmetry is the point —
+## fire during the profitable dry season costs visitor-days exactly when they
+## are worth the most.
+##
+## It is APPLIED CONTINUOUSLY, not at the day boundary. It used to run as one
+## pass per completed day, which meant grass came back in a single step 240 real
+## seconds wide: a scar sat unchanged all day and then jumped. Recovery is a
+## continuous process and now looks like one.
+##
+## What makes the cadence free to change is that no cell recovers "a day's
+## worth" — each integrates its own elapsed time against two MONOTONIC clocks
+## (`_days`, `_rain_days`), so the authored per-day rate is exact whether a cell
+## is visited every frame, once a second, or late because the ledger grew. The
+## sweep therefore only has to promise that every cell is visited within
+## `sweep_seconds`; it makes no promise about when or in what order, which is
+## what lets it bound its per-frame cost by walking a slice.
+##
+## Rain is integrated the same way rather than averaged per day, so a downpour
+## heals the mountain WHILE IT RAINS instead of retroactively at midnight.
 ##
 ## Each cell also carries its own recovery MULTIPLIER, drawn once when it is
 ## first damaged. That is what keeps a burn scar healing patchily now that
@@ -101,6 +115,20 @@ const SOURCE_GRASS: int = 0
 ## the only traffic on the map that costs nothing, which reads as the mechanic
 ## being about tourists rather than about feet.
 @export_range(0.0, 1.0, 0.05) var player_trample_fraction: float = 0.1
+## Real seconds in which the whole damaged-cell ledger is swept once.
+##
+## Recovery USED to be applied in one pass at each midnight, which made grass
+## return in a single step 240 real seconds wide — a scar sat unchanged all day
+## and then jumped. It is a continuous process, so it now runs continuously; a
+## second is far below the eye's threshold for "the mountain is healing" and far
+## above the cost of a sweep.
+##
+## It is NOT a rate. Recovery per day is authored by base_recovery_per_day and
+## rain_recovery_bonus, and each cell integrates against a monotonic clock, so
+## changing this changes only how smoothly and how often the value moves — never
+## how much grass a day returns. That is exactly why it is safe to expose.
+@export var sweep_seconds: float = 4.0
+
 ## Vegetation at or below which a cell is painted dirt...
 @export var bare_threshold: float = 0.15
 ## ...and at or above which it is painted grass again. Must exceed
@@ -108,8 +136,20 @@ const SOURCE_GRASS: int = 0
 @export var regrow_threshold: float = 0.55
 
 # cell -> {"coord": Vector2i, "layer": TileMapLayer, "kind": StringName,
-#          "veg": float, "rate": float, "bare": bool}
+#          "veg": float, "rate": float, "bare": bool,
+#          "d": float, "i": float}
+# "d"/"i" are the clock and rain-integral readings when this cell last recovered
+# — see _recover_cell.
 var _veg: Dictionary = {}
+# The same cells in a stable order, so the sweep below can walk a SLICE of the
+# ledger per frame by index. Dictionary has no indexed access and .keys() would
+# allocate an array of every damaged cell every frame. Maintained by
+# _begin_tracking and _erase, the only two places _veg gains or loses a key.
+var _order: Array[Vector2i] = []
+# Where the next slice starts. Wraps; survives ledger growth because a cell's
+# recovery is integrated from its OWN last-visit stamp, so an uneven walk is
+# still exact.
+var _cursor: int = 0
 # Running totals over _veg, maintained on every write instead of summed on
 # demand. The balance simulator samples BOTH once per tick — ~23k times a run
 # against a ledger that reaches several hundred cells — and summing there
@@ -118,9 +158,15 @@ var _veg: Dictionary = {}
 # recounts from scratch and compares.
 var _deficit: float = 0.0
 var _bare: int = 0
-# Day-average rain: integral of intensity over in-game days, plus elapsed.
-var _rain_integral: float = 0.0
-var _rain_elapsed: float = 0.0
+# MONOTONIC clocks, never reset: game-days elapsed, and the integral of rain
+# intensity over those days. A cell's recovery is the difference between the
+# readings now and at its last visit, which is what lets the sweep run at any
+# cadence — or unevenly — and still restore exactly the authored amount per day.
+#
+# They replace the old per-day accumulator pair, which had to be zeroed at every
+# midnight and therefore only worked if recovery ran exactly at midnight too.
+var _days: float = 0.0
+var _rain_days: float = 0.0
 
 var _day_night: Node = null
 var _world_hooked: bool = false
@@ -133,7 +179,6 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready() -> void:
 	add_to_group(GROUP)
 	FireManager.tile_burned.connect(_on_tile_burned)
-	TimeManager.day_completed.connect(_on_day_completed)
 
 
 ## Pure recovery model, static for tree-free tests. Returns the fraction of a
@@ -192,6 +237,13 @@ func _erase(cell: Vector2i) -> void:
 	if bool(rec["bare"]):
 		_bare -= 1
 	_veg.erase(cell)
+	# Swap-remove: order carries no meaning (the sweep only needs to visit every
+	# cell, not visit them in sequence), and erase-by-value on a several-hundred
+	# entry array would be O(n) per healed cell.
+	var at: int = _order.find(cell)
+	if at >= 0:
+		_order[at] = _order[_order.size() - 1]
+		_order.resize(_order.size() - 1)
 
 
 ## 0 (bare) .. 1 (untouched grass). Untracked cells are undamaged by
@@ -274,8 +326,84 @@ func tick(delta: float) -> void:
 		return
 	var game_day_delta: float = \
 			delta * TimeManager.time_scale / TimeManager.seconds_per_game_day
-	_rain_integral += rain_intensity() * game_day_delta
-	_rain_elapsed += game_day_delta
+	_days += game_day_delta
+	_rain_days += rain_intensity() * game_day_delta
+	_sweep(delta)
+
+
+## Recover a SLICE of the ledger, sized so the whole of it is covered every
+## `sweep_seconds`.
+##
+## Why a slice rather than the whole ledger: the cost of a full pass is
+## proportional to the scar, and the scar reaches several hundred cells in a bad
+## run (measured 0.4-0.7 ms at 170 cells). Running that every frame would put a
+## system that changes almost nothing on any given frame among the most
+## expensive in the game. A slice bounds the per-frame cost instead, and because
+## each cell integrates from its OWN last-visit stamp, being visited unevenly —
+## or late, or twice in quick succession after the ledger grows — changes
+## nothing about how much grass it regains per day.
+func _sweep(delta: float) -> void:
+	var n: int = _order.size()
+	if n == 0:
+		return
+	var seconds: float = maxf(sweep_seconds, 0.001)
+	# Ceil, so a small ledger still finishes inside the window and a large one
+	# never stalls.
+	var slice: int = int(ceil(float(n) * minf(delta / seconds, 1.0)))
+	for i in mini(slice, n):
+		if _cursor >= _order.size():
+			_cursor = 0
+		# _recover_cell can erase the cell (fully healed, or its layer died),
+		# which swap-removes another cell INTO this slot — so only step forward
+		# when it survived, or that cell is skipped this round.
+		if _recover_cell(_order[_cursor]):
+			_cursor += 1
+
+
+## Bring one cell up to date. Returns false if the record was erased.
+##
+## The recovery is INTEGRATED between this cell's last visit and now, from the
+## two monotonic clocks:
+##
+##     regained = (base + bonus * mean rain over the interval)
+##                * days elapsed * this cell's own multiplier
+##
+## and since the mean rain over an interval is exactly the rain-integral delta
+## divided by the day delta, the bonus term collapses to `bonus * rain_delta` —
+## no per-cell rain history is needed. That is what keeps the authored rate "per
+## day" while the sweep runs whenever it likes.
+func _recover_cell(cell: Vector2i) -> bool:
+	var rec: Dictionary = _veg.get(cell, {})
+	if rec.is_empty():
+		return false
+	var layer: TileMapLayer = rec["layer"] as TileMapLayer
+	if layer == null or not is_instance_valid(layer):
+		_erase(cell)
+		return false
+
+	var d_delta: float = _days - float(rec["d"])
+	var i_delta: float = _rain_days - float(rec["i"])
+	# Stamped even when nothing is applied below, so a cell that spent the
+	# interval on fire cannot bank it and heal retroactively once it goes out.
+	rec["d"] = _days
+	rec["i"] = _rain_days
+	if d_delta <= 0.0:
+		return true
+	# Still alight: it is still losing grass, not regaining it.
+	if FireManager.is_burning(cell):
+		return true
+
+	var avg_rain: float = clampf(i_delta / d_delta, 0.0, 1.0)
+	var rate: float = recovery_per_day(
+			avg_rain, base_recovery_per_day, rain_recovery_bonus)
+	_set_veg(rec, float(rec["veg"]) + rate * d_delta * float(rec["rate"]))
+	_refresh_paint(cell, rec)
+	# Fully recovered and repainted: stop tracking, so the ledger stays
+	# proportional to the damage rather than growing all run.
+	if float(rec["veg"]) >= 1.0 and not bool(rec["bare"]):
+		_erase(cell)
+		return false
+	return true
 
 
 # --- Damage -----------------------------------------------------------------
@@ -308,8 +436,13 @@ func _begin_tracking(cell: Vector2i, layer: TileMapLayer = null,
 		# Drawn once, never re-rolled — see the header.
 		"rate": rng.randf_range(1.0 - recovery_rate_spread, 1.0 + recovery_rate_spread),
 		"bare": false,
+		# Recovery is integrated from HERE, so a cell damaged mid-interval is not
+		# credited for the part of it that happened before the damage.
+		"d": _days,
+		"i": _rain_days,
 	}
 	_veg[cell] = rec
+	_order.append(cell)
 	return rec
 
 
@@ -355,40 +488,6 @@ func _refresh_paint(cell: Vector2i, rec: Dictionary) -> void:
 		_set_bare(rec, false)
 
 
-# --- Recovery ---------------------------------------------------------------
-
-func _on_day_completed(_day_count: int) -> void:
-	if SeasonManager.phase != SeasonManager.Phase.ACTIVE:
-		return
-	# Day-average rain from our own integral. The M-key debug path emits
-	# day_completed in a synchronous loop with no _process in between, so
-	# elapsed can be ~0 — fall back to the instantaneous intensity rather than
-	# dividing by it.
-	var avg_rain: float = rain_intensity()
-	if _rain_elapsed > 0.001:
-		avg_rain = _rain_integral / _rain_elapsed
-	_rain_integral = 0.0
-	_rain_elapsed = 0.0
-
-	var rate: float = recovery_per_day(
-			avg_rain, base_recovery_per_day, rain_recovery_bonus)
-	for cell: Vector2i in _veg.keys():
-		var rec: Dictionary = _veg[cell]
-		var layer: TileMapLayer = rec["layer"] as TileMapLayer
-		if layer == null or not is_instance_valid(layer):
-			_erase(cell)
-			continue
-		# Still alight: it is still losing grass, not regaining it.
-		if FireManager.is_burning(cell):
-			continue
-		_set_veg(rec, float(rec["veg"]) + rate * float(rec["rate"]))
-		_refresh_paint(cell, rec)
-		# Fully recovered and repainted: stop tracking, so the ledger stays
-		# proportional to the damage rather than growing all run.
-		if float(rec["veg"]) >= 1.0 and not bool(rec["bare"]):
-			_erase(cell)
-
-
 # A regeneration repaints the same TileMapLayer nodes with a new world, so stale
 # records would corrupt fresh terrain. Mirror FireManager's wipe trigger. Lazy:
 # ProceduralWorld joins its group in its own _ready, order unknown at ours.
@@ -405,7 +504,11 @@ func _hook_world_once() -> void:
 
 func _wipe() -> void:
 	_veg.clear()
+	_order.clear()
+	_cursor = 0
 	_deficit = 0.0
 	_bare = 0
-	_rain_integral = 0.0
-	_rain_elapsed = 0.0
+	# The clocks are NOT reset: they are monotonic, and every record that could
+	# reference an old reading has just been cleared. Zeroing them would be
+	# harmless today and a retroactive-healing bug the day something survives a
+	# wipe.

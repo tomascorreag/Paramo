@@ -352,6 +352,15 @@ static func find_candidates(
 	return out
 
 
+## LADDER_NE/LADDER_NW are in TileGrid._DECORATIVE: the ladder sprite hangs on
+## the lower floor's cell and that floor must stay walkable. The climb is a
+## Pathfinder traversal EDGE, which is live on the current grid the moment it is
+## registered (and removed the moment it is dropped) — neither needs the grid
+## rebuilt from the layers.
+func changes_terrain() -> bool:
+	return false
+
+
 static func result_name(r: int) -> String:
 	match r:
 		Result.OK: return "OK"

@@ -173,6 +173,15 @@ func despawn(placer: StructurePlacer) -> void:
 		pf.notify_graph_changed()
 
 
+## FENCE_NE/FENCE_NW are in TileGrid._DECORATIVE — the floor under a fence stays
+## walkable TERRAIN, and the barrier is entirely blocks_movement() below. So the
+## painted tile changes nothing the grid ingests, and building or removing one
+## needs the graph ANNOUNCED, not re-ingested. Build already worked this way;
+## this is what makes removal match it instead of costing 18.7 ms.
+func changes_terrain() -> bool:
+	return false
+
+
 ## Identifies the fence in the unified occupant registry. Other systems query
 ## `tile_grid.occupants_of_kind(&"fence")` to find every fenced cell.
 func occupant_kind() -> StringName:

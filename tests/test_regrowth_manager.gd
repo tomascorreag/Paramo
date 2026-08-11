@@ -97,6 +97,33 @@ func after_each() -> void:
 	FireManager._grid = _grid_before
 
 
+# Advance the clock by `days` and let recovery catch up.
+#
+# Recovery is no longer a day-boundary event, so there is no handler to call:
+# it is integrated inside tick() against a monotonic clock. Driving the real
+# entry point is also the more honest test — it exercises the gates (paused, run
+# phase) that the old direct call skipped.
+#
+# seconds_per_game_day is pinned to 1 so `days` reads as days, and sweep_seconds
+# is dropped below the step so a single tick visits the WHOLE ledger. Cadence
+# cannot change the amount recovered — that is the property the design rests on
+# — so a test is free to choose the cadence that makes it deterministic.
+func _advance_days(days: float = 1.0) -> void:
+	var was_paused: bool = TimeManager.paused
+	var per_day: float = TimeManager.seconds_per_game_day
+	var scale: float = TimeManager.time_scale
+	var sweep: float = _regrowth.sweep_seconds
+	TimeManager.paused = false
+	TimeManager.seconds_per_game_day = 1.0
+	TimeManager.time_scale = 1.0
+	_regrowth.sweep_seconds = 0.0001
+	_regrowth.tick(days)
+	_regrowth.sweep_seconds = sweep
+	TimeManager.paused = was_paused
+	TimeManager.seconds_per_game_day = per_day
+	TimeManager.time_scale = scale
+
+
 # Paint `cell` as grass and make it visible to the manager through FireManager's
 # grid, which is how trampling discovers what a cell is.
 func _put_grass(cell: Vector2i) -> void:
@@ -194,7 +221,7 @@ func test_certain_recovery_repaints_the_original_grass() -> void:
 	_regrowth.base_recovery_per_day = 1.0
 	_regrowth.rain_recovery_bonus = 0.0
 
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	assert_eq(_regrowth.bare_count(), 0)
 	assert_eq(_layer.get_cell_source_id(cell), RegrowthManager.SOURCE_GRASS,
@@ -209,7 +236,7 @@ func test_a_fully_recovered_cell_stops_being_tracked() -> void:
 	# day forever.
 	_burn_out(Vector2i(7, 2))
 	_regrowth.base_recovery_per_day = 1.0
-	_regrowth._on_day_completed(1)
+	_advance_days()
 	assert_eq(_regrowth._veg.size(), 0)
 
 
@@ -219,7 +246,7 @@ func test_a_zero_rate_never_recovers() -> void:
 	_regrowth.rain_recovery_bonus = 0.0
 	_rain.intensity = 0.0
 
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	assert_eq(_regrowth.bare_count(), 1, "a drought day heals nothing at rate 0")
 
@@ -232,12 +259,12 @@ func test_recovery_is_gradual_not_all_at_once() -> void:
 	_regrowth.base_recovery_per_day = 0.25
 	_regrowth.rain_recovery_bonus = 0.0
 
-	_regrowth._on_day_completed(1)
+	_advance_days()
 	assert_almost_eq(_regrowth.vegetation_at(cell), 0.25, 0.0001)
 	assert_true(_regrowth.is_bare(cell), "a quarter grown back still reads bare")
 
-	_regrowth._on_day_completed(2)
-	_regrowth._on_day_completed(3)
+	_advance_days()
+	_advance_days()
 	assert_almost_eq(_regrowth.vegetation_at(cell), 0.75, 0.0001)
 	assert_false(_regrowth.is_bare(cell), "past regrow_threshold it is grass again")
 
@@ -251,7 +278,7 @@ func test_scars_heal_patchily() -> void:
 	_regrowth.rain_recovery_bonus = 0.0
 	for i in 12:
 		_burn_out(Vector2i(i, 9))
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	var seen: Dictionary = {}
 	for i in 12:
@@ -259,17 +286,17 @@ func test_scars_heal_patchily() -> void:
 	assert_gt(seen.size(), 1, "every cell healed by exactly the same amount")
 
 
-func test_rain_fallback_drives_recovery_on_burst_days() -> void:
-	# The M-key debug path fires day_completed with no _process in between, so
-	# the day-average integral is empty. The fallback must read the CURRENT
-	# rain — base 0 + bonus 1 at full rain = certain recovery, so this test
-	# only passes if the fallback branch runs.
+func test_rain_drives_recovery_within_a_single_step() -> void:
+	# There is no day-average fallback any more, and nothing to fall back FROM:
+	# rain is integrated continuously and consumed by whatever interval a cell
+	# happens to be visited over, so a burst of rain heals a cell inside one
+	# step. base 0 + bonus 1 at full rain = certain recovery.
 	_burn_out(Vector2i(7, 2))
 	_regrowth.base_recovery_per_day = 0.0
 	_regrowth.rain_recovery_bonus = 1.0
 	_rain.intensity = 1.0
 
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	assert_eq(_regrowth.bare_count(), 0)
 
@@ -279,7 +306,7 @@ func test_no_recovery_outside_an_active_run() -> void:
 	_regrowth.base_recovery_per_day = 1.0
 	SeasonManager.phase = SeasonManager.Phase.IDLE
 
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	assert_eq(_regrowth.bare_count(), 1)
 	assert_eq(_layer.get_cell_source_id(Vector2i(7, 2)), -1,
@@ -300,9 +327,10 @@ func test_day_average_rain_comes_from_the_process_integral() -> void:
 	_regrowth._process(half_day)
 
 	# avg = 0.5 -> rate 0.5. Assert the INTEGRAL rather than the outcome, so
-	# this stays a test of the integration and not of the recovery model.
-	assert_almost_eq(_regrowth._rain_integral / _regrowth._rain_elapsed,
-			0.5, 0.0001)
+	# this stays a test of the integration and not of the recovery model. The
+	# clocks are MONOTONIC now (never zeroed at midnight), which is what lets a
+	# cell integrate its own interval whenever the sweep reaches it.
+	assert_almost_eq(_regrowth._rain_days / _regrowth._days, 0.5, 0.0001)
 
 
 # --- trampling ---------------------------------------------------------------
@@ -439,7 +467,7 @@ func test_worn_ground_grows_back() -> void:
 	assert_true(_regrowth.is_bare(cell))
 
 	_regrowth.base_recovery_per_day = 1.0
-	_regrowth._on_day_completed(1)
+	_advance_days()
 
 	assert_false(_regrowth.is_bare(cell))
 	assert_eq(_layer.get_cell_atlas_coords(cell), _grass_coord,
@@ -456,8 +484,8 @@ func test_paint_does_not_flip_back_and_forth_at_one_threshold() -> void:
 
 	_regrowth.base_recovery_per_day = 0.2
 	_regrowth.rain_recovery_bonus = 0.0
-	_regrowth._on_day_completed(1)
-	_regrowth._on_day_completed(2)
+	_advance_days()
+	_advance_days()
 
 	assert_almost_eq(_regrowth.vegetation_at(cell), 0.4, 0.0001)
 	assert_true(_regrowth.is_bare(cell),
@@ -494,8 +522,8 @@ func test_the_running_totals_never_drift_from_the_ledger() -> void:
 			_regrowth.trample(Vector2i(i, 1))
 	_burn_out(Vector2i(2, 7))
 	_burn_out(Vector2i(3, 7))
-	_regrowth._on_day_completed(1)
-	_regrowth._on_day_completed(2)
+	_advance_days()
+	_advance_days()
 
 	var want_deficit: float = 0.0
 	var want_bare: int = 0
@@ -527,3 +555,62 @@ func test_a_regenerated_world_forgets_every_scar() -> void:
 
 	assert_eq(_regrowth._veg.size(), 0,
 			"stale records would repaint grass onto a brand new mountain")
+
+
+# --- continuous recovery -----------------------------------------------------
+#
+# Recovery moved off the day boundary (2026-08-10). It used to be one pass at
+# midnight, so grass returned in a single step 240 real seconds wide: a scar sat
+# unchanged all day and then jumped. The three tests below pin the properties
+# that replaced it — a cell heals DURING the day, the cadence cannot change how
+# much it heals, and time spent on fire is never banked.
+
+func test_grass_returns_during_the_day_not_only_at_midnight() -> void:
+	_burn_out(Vector2i(7, 2))
+	_regrowth.base_recovery_per_day = 0.4
+	_regrowth.rain_recovery_bonus = 0.0
+
+	_advance_days(0.25)
+
+	assert_almost_eq(_regrowth.vegetation_at(Vector2i(7, 2)), 0.1, 0.0001,
+			"a quarter day should return a quarter of a day's growth")
+
+
+func test_recovery_is_independent_of_the_sweep_cadence() -> void:
+	# The property the whole design rests on: a cell integrates its OWN elapsed
+	# time, so it does not matter whether the sweep reaches it once or forty
+	# times over the same day. If this ever fails, sweep_seconds has silently
+	# become a balance knob.
+	_regrowth.base_recovery_per_day = 0.3
+	_regrowth.rain_recovery_bonus = 0.0
+	_burn_out(Vector2i(1, 1))
+	_advance_days(1.0)
+	var in_one_step: float = _regrowth.vegetation_at(Vector2i(1, 1))
+
+	_burn_out(Vector2i(2, 1))
+	for i in 40:
+		_advance_days(1.0 / 40.0)
+	var in_forty_steps: float = _regrowth.vegetation_at(Vector2i(2, 1))
+
+	assert_almost_eq(in_forty_steps, in_one_step, 0.0001,
+			"cadence changed the amount recovered")
+
+
+func test_time_spent_burning_is_not_banked_and_paid_out_later() -> void:
+	# The old pass skipped a burning cell for a whole day. With a monotonic
+	# clock, skipping without STAMPING the cell would let it heal retroactively
+	# for the time it spent alight the moment the fire went out — worse than the
+	# behaviour it replaced, and invisible except as fires that leave no scar.
+	var cell := Vector2i(4, 4)
+	_burn_out(cell)
+	_regrowth.base_recovery_per_day = 0.5
+	_regrowth.rain_recovery_bonus = 0.0
+	FireManager._burning[cell] = {"vfx": null, "age": 1.0, "fuel": 1.0, "fuel_max": 1.0}
+
+	_advance_days(1.0)
+	assert_eq(_regrowth.vegetation_at(cell), 0.0, "a burning cell must not recover")
+
+	FireManager._burning.erase(cell)
+	_advance_days(0.1)
+	assert_almost_eq(_regrowth.vegetation_at(cell), 0.05, 0.0001,
+			"only the time since the fire went out counts")

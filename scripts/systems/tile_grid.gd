@@ -693,14 +693,8 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	if has_traversal_edge(from, to):
 		return true
 
-	var exit_alts := _edge_altitudes(from, dir)
-	if exit_alts.is_empty():
-		return false
-	var enter_alts := _edge_altitudes(to, -dir)
-	if not enter_alts.is_empty():
-		for a in exit_alts:
-			if a in enter_alts:
-				return true
+	if _edges_share_altitude(from, dir, to):
+		return true
 
 	# Scramble: foot-climb a small ledge between two flats, no ladder needed.
 	# Allowed when both endpoints are flats and the gap is 0 < |Δalt| <=
@@ -713,6 +707,51 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 		if delta > 0 and delta <= _SCRAMBLE_MAX_DELTA:
 			return true
 
+	return false
+
+
+# Do the `dir`-facing edge of `from` and the facing edge of `to` meet at a
+# common altitude?
+#
+# The same question _edge_altitudes answers, without building the two Arrays to
+# answer it. Each edge exposes at most TWO altitudes (a flat exposes one; a ramp
+# exposes low and high on its perpendicular edges), so the whole intersection is
+# four integer comparisons — against two typed-Array allocations per call, which
+# measured can_transition at 5.2 us, four times is_walkable's 1.2 us.
+#
+# _edge_altitudes stays: it is the readable form of this rule, it is what
+# dump_pathfinder.gd prints when a transition needs explaining, and both are
+# covered by the same tests.
+func _edges_share_altitude(from: Vector2i, dir: Vector2i, to: Vector2i) -> bool:
+	var tf := _get_raw(from)
+	if tf == null or not tf.walkable:
+		return false
+	var tt := _get_raw(to)
+	if tt == null or not tt.walkable:
+		return false
+
+	# -1 in the `hi` slot means "this edge exposes one altitude only".
+	var f_lo: int = tf.altitude_low
+	var f_hi: int = -9999
+	if tf.rise_dir != Vector2i.ZERO:
+		if dir == tf.rise_dir:
+			f_lo = tf.altitude_high
+		elif dir != -tf.rise_dir:
+			f_hi = tf.altitude_high  # perpendicular: both ends exposed
+
+	var enter_dir := -dir
+	var t_lo: int = tt.altitude_low
+	var t_hi: int = -9999
+	if tt.rise_dir != Vector2i.ZERO:
+		if enter_dir == tt.rise_dir:
+			t_lo = tt.altitude_high
+		elif enter_dir != -tt.rise_dir:
+			t_hi = tt.altitude_high
+
+	if f_lo == t_lo or (t_hi != -9999 and f_lo == t_hi):
+		return true
+	if f_hi != -9999 and (f_hi == t_lo or (t_hi != -9999 and f_hi == t_hi)):
+		return true
 	return false
 
 

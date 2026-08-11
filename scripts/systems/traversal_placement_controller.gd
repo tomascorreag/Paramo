@@ -684,16 +684,28 @@ func find_traversal_at(cell: Vector2i) -> Traversal:
 	return null
 
 
-## Erase a traversal's tiles, free its node, and rebuild pathfinding.
+## Erase a traversal's tiles, free its node, and tell pathfinding.
 ## Traversal.despawn clears its own occupant claims before freeing.
+##
+## Only a traversal whose tiles are real TERRAIN needs the grid re-ingested (see
+## Traversal.changes_terrain). A fence or a ladder paints into
+## TileGrid._DECORATIVE and does its work through an occupant claim or a
+## traversal edge, both already applied to the live grid — so removing one now
+## costs an announcement instead of an 18.7 ms rebuild, which is what building
+## one always cost. The asymmetry was the bug: identical state changes, two
+## orders of magnitude apart.
 func remove_traversal(t: Traversal) -> void:
 	if t == null or not is_instance_valid(t):
 		return
 	if _placer == null:
 		_placer = StructurePlacer.new(structure_layer_manager)
+	var was_terrain: bool = t.changes_terrain()
 	t.despawn(_placer)
 	if pathfinder:
-		pathfinder.rebuild()
+		if was_terrain:
+			pathfinder.rebuild()
+		else:
+			pathfinder.notify_graph_changed()
 
 
 # ----------------------------------------------------------------------------

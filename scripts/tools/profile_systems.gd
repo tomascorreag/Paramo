@@ -154,6 +154,63 @@ func _light_fires() -> void:
 		fire.call(&"ignite", cells[rng.randi_range(0, cells.size() - 1)])
 
 
+## Every node the engine is actually calling _process on, grouped by script and
+## SUMMED ACROSS INSTANCES.
+##
+## The hand-picked table above times the four systems someone thought to look
+## at. This one asks the tree instead, which is the only way to catch the costs
+## that live in a hundred small nodes rather than in one big system — and there
+## is no reason to expect the biggest per-frame script cost to be a singleton.
+##
+## Two things it deliberately does:
+##   - `is_processing()` filters the list, so a node whose _process the game
+##     switched off is not counted. Every Visitor is in that state (the spawner
+##     drives its crowd itself), and counting them would invent work the game
+##     does not do.
+##   - it calls _process directly, which ADVANCES that node's state — ages
+##     fires, ticks timers. Fine for a measurement run that quits afterwards;
+##     it does mean the numbers come from a map that has been driven a few
+##     hundred extra frames by the end of the census.
+##
+## Read a cheap row with suspicion rather than relief: a system whose _process
+## early-outs on a state flag (paused clock, hidden overlay, no hover) is cheap
+## RIGHT NOW, not cheap in general. The instance count is the other half of the
+## story — 1 x 300 us and 300 x 1 us want completely different fixes.
+func _census() -> void:
+	var by_script: Dictionary = {}
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			stack.append(c)
+		if n.get_script() == null or not n.is_processing():
+			continue
+		if not n.has_method(&"_process"):
+			continue
+		var path: String = (n.get_script() as Script).resource_path
+		if not by_script.has(path):
+			by_script[path] = []
+		(by_script[path] as Array).append(n)
+
+	print("\n--- every processing node, by script, summed over instances ---")
+	_rows.clear()
+	var total: float = 0.0
+	for path: String in by_script:
+		var nodes: Array = by_script[path]
+		var reps: int = 60
+		var t := Time.get_ticks_usec()
+		for r in reps:
+			for n: Node in nodes:
+				if is_instance_valid(n):
+					n.call(&"_process", DT)
+		var us: float = float(Time.get_ticks_usec() - t) / float(reps)
+		total += us
+		_row(path.get_file().get_basename(), us, "x%d" % nodes.size())
+	_print_rows()
+	print("  %-32s %10.1f us   %.1f%% of a 60 fps frame"
+			% ["TOTAL script _process", total, total / 16700.0 * 100.0])
+
+
 func _start_cell() -> Vector2i:
 	if _spawner != null:
 		var c: Vector2i = _spawner.call(&"entry_cell")
@@ -194,6 +251,19 @@ func _report() -> void:
 			% [grid.walkable_cells().size(), burning, crowd,
 			int(regrowth.call(&"bare_count")) if regrowth != null else 0])
 
+	# Is the traversable graph UNDIRECTED? Anything that caches "the set
+	# reachable from X" and then reuses it for every OTHER cell in that set is
+	# only correct if it is. benchmark_visitors.gd's cost-field code asserts the
+	# opposite ("ladder/ramp transitions are not symmetric"), so it is settled
+	# here by exhaustive check rather than by reading either comment.
+	var asym: int = 0
+	var probe_dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(0, 1)]
+	for c: Vector2i in grid.walkable_cells():
+		for d in probe_dirs:
+			if grid.can_transition(c, c + d) != grid.can_transition(c + d, c):
+				asym += 1
+	print("\ncan_transition asymmetric edges: %d (0 means the graph is undirected)" % asym)
+
 	print("\n--- per frame, at that load (a frame is 16700 us) ---")
 	if fire != null:
 		_bench("FireManager.sim_tick", 300,
@@ -207,6 +277,8 @@ func _report() -> void:
 	if flow != null:
 		_bench("VisitorFlow.tick", 300, func() -> void: flow.call(&"tick", DT))
 	_print_rows()
+
+	_census()
 
 	_rows.clear()
 	print("\n--- inside FireManager.sim_tick, %d fires ---" % burning)
@@ -234,23 +306,86 @@ func _report() -> void:
 	_bench("compute_reachable_set", 10,
 			func() -> void: _pathfinder.compute_reachable_set(anchor),
 			"per player step (UXOverlay), per graph change (spawner)")
-	if regrowth != null:
-		var t := Time.get_ticks_usec()
-		regrowth.call(&"_on_day_completed", 1)
-		_row("RegrowthManager day pass", float(Time.get_ticks_usec() - t),
-				"walks the damaged-cell ledger")
+	# RegrowthManager USED to appear here: one pass over the whole damaged-cell
+	# ledger at every midnight, 0.4-0.7 ms at 170 cells and scaling with the
+	# scar. Recovery is continuous now (a slice of the ledger per frame, each
+	# cell integrating its own elapsed time), so there is no day-boundary spike
+	# left to measure — the cost moved into the per-frame table above, at a few
+	# microseconds a frame.
 	_print_rows()
 
 	_rows.clear()
 	print("\n--- the primitives those are built out of ---")
+	# Inlined rather than run through _bench: a Callable invocation costs about a
+	# microsecond in GDScript, which is most of what these calls cost. Timed
+	# through fn.call() they all collapse toward the same number — an earlier run
+	# of this tool reported can_transition unchanged at 5.0 us AFTER its two array
+	# allocations had been removed, because it was measuring the harness.
 	var cells: Array = grid.walkable_cells()
 	var probe: Vector2i = cells[cells.size() / 2]
-	_bench("TileGrid.can_transition", 20000,
-			func() -> void: grid.can_transition(probe, probe + Vector2i(1, 0)),
-			"allocates 2 Array[int] per call (_edge_altitudes)")
-	_bench("TileGrid.is_walkable", 20000, func() -> void: grid.is_walkable(probe))
-	_bench("TileGrid.classify_step", 20000,
-			func() -> void: grid.classify_step(probe, probe + Vector2i(1, 0)))
+	var east := Vector2i(1, 0)
+	var reps: int = 200000
+
+	var t0 := Time.get_ticks_usec()
+	for i in reps:
+		grid.is_walkable(probe)
+	_row("TileGrid.is_walkable", float(Time.get_ticks_usec() - t0) / float(reps))
+
+	var t1 := Time.get_ticks_usec()
+	for i in reps:
+		grid.can_transition(probe, probe + east)
+	_row("TileGrid.can_transition", float(Time.get_ticks_usec() - t1) / float(reps),
+			"was two Array[int] allocations per call")
+
+	var t2 := Time.get_ticks_usec()
+	for i in reps:
+		grid.classify_step(probe, probe + east)
+	_row("TileGrid.classify_step", float(Time.get_ticks_usec() - t2) / float(reps))
+
+	# What Player._tick_shadow_cutoff USED to do every frame, and the reason the
+	# Player node measured ~170 us against a Visitor's 4.4 us for the same
+	# GridWalker movement core. It is now recomputed only when current_cell or
+	# the shadow direction changes (and on graph_changed), which took the Player
+	# row to ~3.5 us. Kept here because the call itself is still this expensive —
+	# anything that starts running it per frame again will show up as the same
+	# 170 us.
+	var t5 := Time.get_ticks_usec()
+	for i in reps:
+		_pathfinder.shadow_altitude_deltas(probe, 1)
+	_row("  Pathfinder.shadow_altitude_deltas",
+			float(Time.get_ticks_usec() - t5) / float(reps),
+			"per frame, but its inputs change per STEP")
+
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/shaders/burn_dissolve.gdshader")
+	var t6 := Time.get_ticks_usec()
+	for i in reps:
+		mat.get_shader_parameter(&"burn_amount")
+	_row("  ShaderMaterial.get_shader_parameter",
+			float(Time.get_ticks_usec() - t6) / float(reps),
+			"a READ-BACK, polled per frame for a pushed value")
+
+	# The edge-match rule, both ways, isolated from everything else
+	# can_transition does. can_transition itself barely moved when the array
+	# version was replaced, and "barely moved" is a claim that needs the two
+	# forms timed side by side rather than inferred from a whole-function delta.
+	var t3 := Time.get_ticks_usec()
+	for i in reps:
+		grid._edges_share_altitude(probe, east, probe + east)
+	_row("  edge match: integer form",
+			float(Time.get_ticks_usec() - t3) / float(reps))
+
+	var t4 := Time.get_ticks_usec()
+	for i in reps:
+		var ex: Array[int] = grid._edge_altitudes(probe, east)
+		var en: Array[int] = grid._edge_altitudes(probe + east, -east)
+		var hit: bool = false
+		for a in ex:
+			if a in en:
+				hit = true
+				break
+	_row("  edge match: two-Array form",
+			float(Time.get_ticks_usec() - t4) / float(reps), "what it replaced")
 	# Two legs, because the interesting one is the FAILURE: A* with no route to
 	# find has no goal to stop at, so it expands the entire connected component
 	# before returning []. Visitors hit this whenever a goal is cut off.

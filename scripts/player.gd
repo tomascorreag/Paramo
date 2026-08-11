@@ -85,6 +85,11 @@ const _SHADOW_CUTOFF_HALF_W: float = 16.0
 # no real altitude difference.
 var _shadow_cutoff_current: float = 1000.0
 var _shadow_cutoff_target: float = 1000.0
+# The inputs the target above was computed from — see _tick_shadow_cutoff.
+# NO_CELL rather than Vector2i.ZERO so the first tick always recomputes: (0, 0)
+# is a real cell a map could start the player on.
+var _shadow_cutoff_cell: Vector2i = Pathfinder.NO_CELL
+var _shadow_cutoff_sign: int = 0
 
 var _time_manager: Node # TimeManager autoload
 var _regrowth: Node # RegrowthManager, found lazily by group
@@ -149,6 +154,15 @@ func _ready() -> void:
 	_facing = FACING_SE
 
 	_pathfinder = get_tree().get_first_node_in_group(Pathfinder.GROUP_NAME) as Pathfinder
+	if _pathfinder != null:
+		# The shadow's altitude cutoff is derived from the CELLS AROUND the
+		# player, so it goes stale when the world changes rather than when the
+		# player does — a bridge or a ladder landing next to someone standing
+		# still. Cheap to close, and without it the recompute-on-change rule in
+		# _tick_shadow_cutoff would be right about its own inputs and wrong about
+		# the world they describe.
+		_pathfinder.graph_changed.connect(func() -> void:
+			_shadow_cutoff_cell = Pathfinder.NO_CELL)
 
 	# Bound even when there is no pathfinder: bind is what reparents the shadow
 	# out of this node (so it y-sorts against tiles on its own) and reads the
@@ -386,15 +400,29 @@ func _shadow_no_clip() -> float:
 func _tick_shadow_cutoff(delta: float) -> void:
 	if _shadow_material == null:
 		return
-	# Recompute the target every tick: shadow_length is animated by
-	# DayNightController, so both the direction (sign) and the no-clip
-	# extent change continuously. A one-shot push at step boundaries would
-	# leave the target stale.
+	# The TARGET is recomputed only when one of its two inputs actually moves.
+	#
+	# It used to be recomputed every frame, justified by shadow_length being
+	# animated by DayNightController — but only the SIGN of shadow_length is
+	# read here, and that flips twice a day. The other input is current_cell,
+	# which changes once per step (~0.6 s). So a value that can change about
+	# twice a second was being rebuilt sixty times a second, and it is not
+	# cheap: shadow_altitude_deltas scans all 17 TileMapLayers for the topmost
+	# painted tile at up to 4 cells along the shadow direction — ~68 layer
+	# queries. MEASURED at 171.9 us per call, which was the ENTIRE per-frame
+	# cost of the Player node and the single largest script cost in the game.
+	#
+	# Compared against cached inputs rather than driven from a step hook, so it
+	# cannot miss an edge that some other code path moves the player through
+	# (a teleport, snap_to_start, a world regeneration).
 	var slen_v: Variant = _shadow_material.get_shader_parameter(&"shadow_length")
 	var dir_sign: int = 1
 	if (typeof(slen_v) == TYPE_FLOAT or typeof(slen_v) == TYPE_INT) and float(slen_v) < 0.0:
 		dir_sign = -1
-	if _pathfinder != null:
+	if _pathfinder != null \
+			and (current_cell != _shadow_cutoff_cell or dir_sign != _shadow_cutoff_sign):
+		_shadow_cutoff_cell = current_cell
+		_shadow_cutoff_sign = dir_sign
 		var deltas: Vector3 = _pathfinder.shadow_altitude_deltas(current_cell, dir_sign)
 		_shadow_cutoff_target = _cutoff_from_deltas(deltas)
 	# Match player iso step speed: one cell-width per step_duration.
