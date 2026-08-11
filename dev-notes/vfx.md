@@ -3,6 +3,47 @@
 `...` = `"../Godot_v4.6.1-stable_win64.exe/Godot_v4.6.1-stable_win64_console.exe" --path .`
 Every tool here needs a rendering context — **do NOT pass `--headless`.**
 
+## No world shader may use `TIME`
+
+`TIME` is engine uptime and **keeps advancing through `get_tree().paused`** — that
+is why rain used to keep falling, water flowing, grass swaying and flames licking
+behind the pause menu and the journal while the sim itself was frozen.
+
+Every world shader animates off the `world_time` global uniform instead
+(`global uniform float world_time;`, declared in `project.godot`
+`[shader_globals]`). Its only writer is the **`WorldClock` autoload**
+(`scripts/systems/world_clock.gd`), which keeps the default (pausable) process
+mode: pause stops its `_process`, `world_time` holds, and every shader reading it
+renders the frame the pause started on. Unpausing resumes from the held value, so
+nothing jumps. It carries the same 3600 s rollover `TIME` had.
+
+Rejected alternative: `Engine.time_scale = 0`, which also stops shader time in one
+line but zeroes the delta of everything running `PROCESS_MODE_ALWAYS` — the pause
+menu's and the journal's own slide tweens would stall unless each opted out with
+`set_ignore_time_scale(true)`.
+
+Two consequences worth knowing:
+
+- **Autoloads don't run in the editor**, so `world_time` sits at 0 there and
+  water/wind/fire render a **static** frame in the editor viewport. Play the scene
+  or use the preview tools below.
+- **`verify_rain_equivalence.gd` cannot compare across the commit that introduced
+  this.** A pre-`world_time` reference reads `TIME`, the current shader reads the
+  clock, and the two differ by however long the process took to reach the first
+  frame — the diff reports a false failure. Comparing two post-`world_time`
+  revisions is unaffected.
+
+**`verify_world_clock.gd`** proves both halves on the GPU: that `world_time`
+reaches a shader at runtime (there is no CPU read-back to assert against —
+`RenderingServer.global_shader_parameter_get` is editor-only and returns null in a
+running game), and that it holds across 30 paused frames. `tests/test_world_clock.gd`
+guards the rest: the clock's arithmetic, its pausability, and that no world shader
+has re-grown a `TIME`.
+
+```bash
+... --script res://scripts/tools/verify_world_clock.gd   # exit 0 = live + frozen
+```
+
 ## Rain shader
 
 `assets/shaders/rain.gdshader` is aggressively optimised, and each optimisation

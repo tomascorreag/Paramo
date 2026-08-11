@@ -19,6 +19,12 @@ shader_type canvas_item;
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
 
+// The world clock, in seconds — replaces the TIME built-in so the flames freeze
+// with the rest of the world under get_tree().paused (the blob fire already did,
+// its age clock being a CPU accumulator). Written by the WorldClock autoload; see
+// scripts/systems/world_clock.gd. Never use TIME in a world shader.
+global uniform float world_time;
+
 uniform vec2 seed_offset = vec2(0.0, 0.0);
 
 // Displacement: UV warp, quantized to texture pixels.
@@ -55,7 +61,7 @@ void fragment() {
 		vec2 sampled = texel + seed_offset;
 
 		// --- displacement ---
-		vec2 ds = disp_scroll * TIME;
+		vec2 ds = disp_scroll * world_time;
 		vec2 dp = sampled * disp_scale;
 		float dx = _noise(dp + ds);
 		float dy = _noise(dp + ds + vec2(31.0, 19.0));
@@ -69,7 +75,7 @@ void fragment() {
 		vec4 tex = texture(TEXTURE, uv_sample);
 
 		// --- color noise (drives palette band selection per texel) ---
-		vec2 cs = color_scroll * TIME;
+		vec2 cs = color_scroll * world_time;
 		float n1 = _noise(sampled * color_scale + cs);
 		float n2 = _noise(sampled * color_scale * 2.3 + cs * 0.7 + vec2(43.0, 17.0));
 		float n  = n1 * 0.6 + n2 * 0.4;

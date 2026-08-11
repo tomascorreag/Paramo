@@ -180,7 +180,10 @@ func flash_invalid() -> void:
 		return
 	_kill_flash_tween()
 	_flashing = true
-	_flash_tween = get_tree().create_tween()
+	# Node.create_tween(), not get_tree().create_tween(): a node-bound tween
+	# inherits this node's process mode, so an in-flight flash freezes with the
+	# world when the pause menu or the journal opens instead of playing on behind it.
+	_flash_tween = create_tween()
 	_flash_tween.tween_method(_apply_tint_direct, _tint_invalid(), _tint_invalid_peak(), 0.08)
 	_flash_tween.tween_method(_apply_tint_direct, _tint_invalid_peak(), _tint_invalid(), 0.18)
 	_flash_tween.finished.connect(_on_flash_finished)

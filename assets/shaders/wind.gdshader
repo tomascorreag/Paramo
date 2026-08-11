@@ -19,6 +19,11 @@ shader_type canvas_item;
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
 
+// The world clock, in seconds — replaces the TIME built-in so the sway freezes
+// with the rest of the world under get_tree().paused. Written by the WorldClock
+// autoload; see scripts/systems/world_clock.gd. Never use TIME in a world shader.
+global uniform float world_time;
+
 uniform vec2 wind_strength = vec2(1.0, 0.3);
 uniform float wind_scale : hint_range(0.001, 0.2) = 0.05;
 
@@ -57,7 +62,7 @@ void vertex() {
 
 void fragment() {
 	vec2 snapped = round(world_pos / 2.0);
-	vec2 scroll = wind_scroll_per_second * TIME;
+	vec2 scroll = wind_scroll_per_second * world_time;
 
 	float n1 = _noise(snapped * wind_scale * wind_tiling + scroll);
 	float n2 = _noise(snapped * wind_scale_2 * wind_tiling + scroll + vec2(43.0, 17.0));
