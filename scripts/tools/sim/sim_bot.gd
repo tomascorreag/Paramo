@@ -3,9 +3,8 @@ extends RefCounted
 
 ## The balance simulator's scripted player. Verbs: walk to fires and douse
 ## them (the exact economics of ActionExtinguishFire — ring order, 1 water
-## per cell, atomic try_spend), buy unlocks during planning phases, and place
-## ladders/frailejones during planning (see _try_place — random-valid, not
-## value-scored).
+## per cell, atomic try_spend), and buy unlocks + place ladders/frailejones at
+## each season boundary (see _try_place — random-valid, not value-scored).
 ##
 ## Movement is modeled as time, not animation: a decision computes the real
 ## travel seconds over the actual Pathfinder route (per-step durations via
@@ -33,6 +32,10 @@ var object_parent: Node2D = null
 ## The autoload; injected so this class has no compile-time autoload names.
 var fire_manager: Node = null
 var ledger: Node = null
+## The run's RegrowthManager, injected for the same reason. The bot wears the
+## ground it walks exactly as the real Player does (trample_by_player, a tenth
+## of a visitor's rate); null means the run models a player who leaves no track.
+var regrowth: Node = null
 
 ## Cells this bot's ladders occupy. Real ladders register as blocking
 ## occupants on the grid; the sim's edge-only ladders don't, so the bot keeps
@@ -134,6 +137,7 @@ func _consider_fires(now: float) -> void:
 			continue
 		var travel: float = _travel_seconds(path)
 		travel_seconds += travel
+		_wear_path(path)
 		busy_until = now + policy.reaction_delay_seconds + travel
 		_walk_to = path[path.size() - 1]
 		_douse_target = fire_cell
@@ -144,10 +148,10 @@ func _consider_fires(now: float) -> void:
 	busy_until = now + SCAN_COOLDOWN_SECONDS
 
 
-## Planning-phase actions (clock paused, like the game): buy the next
-## affordable unlock(s) in priority order, then place up to
-## place_per_planning items. Noise can skip a purchase.
-func on_planning(unlock_state: Node, day: int) -> void:
+## Season-boundary actions: buy the next affordable unlock(s) in priority
+## order, then place up to place_per_season items. Noise can skip a purchase.
+## Resolves within a single sim tick, so no game time passes here.
+func on_season_boundary(unlock_state: Node, day: int) -> void:
 	for type: StringName in policy.unlock_priority:
 		if bool(unlock_state.call(&"is_unlocked", type)):
 			continue
@@ -158,7 +162,7 @@ func on_planning(unlock_state: Node, day: int) -> void:
 		if bool(unlock_state.call(&"try_unlock", type)):
 			unlock_days[type] = day
 
-	for _i in policy.place_per_planning:
+	for _i in policy.place_per_season:
 		if not _try_place(unlock_state):
 			break
 
@@ -200,8 +204,12 @@ func _try_place(unlock_state: Node) -> bool:
 					Ladder.MAX_HEIGHT_CUBES, blocked)
 			if not tops.is_empty():
 				var top: Vector2i = tops[rng.randi() % tops.size()]
+				# Priced by SPAN, exactly as TraversalPlacementController._place_ladder
+				# does — the sim's token curve is only worth reading if it charges
+				# what the game charges.
 				if Ladder.validate(c, top, grid, blocked) == Ladder.Result.OK \
-						and bool(unlock_state.call(&"try_pay_placement", &"ladder")):
+						and bool(unlock_state.call(&"try_pay_placements", &"ladder",
+								Ladder.OCCUPIED_CELLS)):
 					pathfinder.add_traversal_edge(c, top)
 					_ladder_cells[c] = true
 					_ladder_cells[top] = true
@@ -220,7 +228,7 @@ func _try_place(unlock_state: Node) -> bool:
 # cells (see _ladder_cells).
 func _blocked_cells(grid: TileGrid) -> Dictionary:
 	var blocked: Dictionary = _ladder_cells.duplicate()
-	for kind: StringName in [&"frailejon", &"bridge_deck", &"ladder", &"rock"]:
+	for kind: StringName in [&"frailejon", &"bridge_deck", &"ladder", &"rock", &"fence"]:
 		for c: Vector2i in grid.occupants_of_kind(kind).keys():
 			blocked[c] = true
 	return blocked
@@ -235,6 +243,22 @@ func _plant_frailejon(c: Vector2i) -> void:
 	inst.set(&"cell", c)
 	object_parent.add_child(inst)
 	inst.global_position = pathfinder.cell_to_world(c)
+
+
+## Wear every cell of a walk, the moment the walk is COMMITTED.
+##
+## The bot teleports (it books travel_seconds and arrives), so there is no
+## per-step event to hang this on the way Player._begin_next_step does. Charging
+## the whole route up front is the only faithful option: the alternative — wear
+## on arrival only — would make the bot's damage depend on how far it walks
+## rather than on where, which is the opposite of what a track is. Skips path[0]
+## (the cell already stood on) so a walk of N steps wears N cells, matching the
+## real player exactly.
+func _wear_path(path: Array[Vector2i]) -> void:
+	if regrowth == null or not is_instance_valid(regrowth):
+		return
+	for i in range(1, path.size()):
+		regrowth.call(&"trample_by_player", path[i])
 
 
 func _travel_seconds(path: Array[Vector2i]) -> float:

@@ -172,6 +172,10 @@ var _fuel_frac: float = 1.0
 var _light: PointLight2D = null
 var _flicker_phase: float = 0.0
 var _intensity: float = 0.0
+# Whether set_state has pushed anything yet. The skip below compares against
+# _fuel_frac/_intensity, whose INITIAL values are a plausible state (1.0 / 0.0) —
+# so without this a fire spawned at exactly that state would never push at all.
+var _state_pushed: bool = false
 # The blob path's scattered quads (empty on the sprite path); the sprite path's
 # flames (empty on the blob path). Exactly one is populated at a time.
 var _columns: Array[FireBlobColumn] = []
@@ -532,15 +536,39 @@ static func _shared_falloff() -> GradientTexture2D:
 ## drives the flames and the light; `fuel_frac` (0-1, fuel REMAINING on the tile)
 ## drives the grass dissolve and the heat-ceiling burn-down. This node is a pure
 ## renderer — it holds no sim state of its own.
+## Smallest change worth pushing to the GPU. A fire's intensity moves over
+## seconds, so at 60 fps consecutive frames differ in the fourth decimal —
+## below anything a 480x270 screen can show, and each push is a shader-parameter
+## write per column plus a burn_amount write. Measured at the 80-fire cap:
+## 385 us/frame spent re-sending values that had not visibly moved.
+##
+## 1/256 is chosen against the OUTPUT, not the input: these drive colour ramp
+## lookups and a light energy, and nothing downstream resolves finer than an
+## 8-bit channel.
+const _STATE_EPSILON: float = 1.0 / 256.0
+
+
 func set_state(fire_intensity: float, fuel_frac: float) -> void:
-	_fuel_frac = clampf(fuel_frac, 0.0, 1.0)
+	var next_fuel: float = clampf(fuel_frac, 0.0, 1.0)
+	var next_intensity: float = clampf(fire_intensity, 0.0, 1.0)
+	# Both unchanged (to display precision) and nothing latched since: there is
+	# no work to do. Checked BEFORE the smoulder/douse early-out so a tail that
+	# keeps being told the same fuel value costs nothing either.
+	if _state_pushed \
+			and absf(next_fuel - _fuel_frac) < _STATE_EPSILON \
+			and (_smouldering or _dousing
+					or absf(next_intensity - _intensity) < _STATE_EPSILON):
+		return
+	_state_pushed = true
+
+	_fuel_frac = next_fuel
 	if _overlay_mat != null:
 		# Grass chars as fuel is consumed: full grass at fuel_frac 1, dirt at 0.
 		_overlay_mat.set_shader_parameter(&"burn_amount", 1.0 - _fuel_frac)
 	if _smouldering or _dousing:
 		# The tail/fade owns intensity from here; don't let a late tick resurrect it.
 		return
-	_intensity = clampf(fire_intensity, 0.0, 1.0)
+	_intensity = next_intensity
 	# Blob path only. The sprite path has no intensity concept (fixed flames); it
 	# still gets _intensity above for the shared light. Debug.fire_blob_flames is
 	# the live selector — a toggle re-spawns via _on_flame_style_changed.

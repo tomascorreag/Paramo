@@ -19,22 +19,22 @@ extends Resource
 ## would be broken (keeps a buffer for the next fire).
 @export var water_reserve: float = 2.0
 
-## Unlock purchase order during planning phases (10 tokens each).
+## Unlock purchase order at season boundaries (20 tokens each).
 @export var unlock_priority: Array[StringName] = [&"ladder", &"bridge", &"frailejon"]
 
 ## Probability [0,1] of a suboptimal decision: targeting a random fire
-## instead of the nearest, or skipping an affordable planning purchase.
+## instead of the nearest, or skipping an affordable boundary purchase.
 ## 0 = optimal scripted play; raise to model imperfect players.
 @export var decision_noise: float = 0.0
 
-## Placements attempted per planning phase (5 tokens each, after unlocks).
-## 3 sized against 1-token visitors: 5 planning breaks x 3 x 5 tokens ~= a
-## full run's income, so the bot spends at the economy's edge instead of
-## banking (1 left ~230 tokens idle under the old 5-token income).
-@export var place_per_planning: int = 3
+## Placements attempted per season boundary, after unlocks. The bot only places
+## ladders (2 tiles) and frailejones (1 tile + 1 water), so a boundary now
+## costs single-digit tokens rather than 15 — this number no longer sizes the
+## bot's spend against income, and is due a re-tune off the balance sim.
+@export var place_per_season: int = 3
 
 ## Random walkable cells sampled when searching for a legal ladder wall or a
-## frailejon spot (bounds the per-planning search cost).
+## frailejon spot (bounds the per-boundary search cost).
 @export var placement_samples: int = 30
 
 ## How many of the nearest fires get a pathfinding attempt per decision

@@ -23,9 +23,6 @@ shader_parameter/noise_world_follow = 0.50000002375
 shader_parameter/cutoff_x = 1000.0
 shader_parameter/tile_size_px = Vector2(32, 16)
 
-[sub_resource type="RectangleShape2D" id="SubResource_1"]
-size = Vector2(10, 14)
-
 [sub_resource type="Curve" id="Curve_5u6hq"]
 _data = [Vector2(0.08201058, 1), 0.0, 0.0, 0, 0, Vector2(0.14814815, 0.90647495), -3.2827344, -3.2827344, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
 point_count = 3
@@ -35,7 +32,7 @@ _limits = [0.0, 1.0, 0.0, 2.0]
 _data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.50546443, 1), 0.0, 0.0, 0, 0, Vector2(2, 0.7502668), 0.0, 0.0, 0, 0]
 point_count = 3
 
-[node name="Player" type="CharacterBody2D" unique_id=357036741]
+[node name="Player" type="Node2D" unique_id=357036741]
 y_sort_enabled = true
 script = ExtResource("2")
 step_duration = 0.6
@@ -53,9 +50,6 @@ hframes = 4
 texture = ExtResource("5")
 offset = Vector2(0, -15)
 hframes = 24
-
-[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=787906145]
-shape = SubResource("SubResource_1")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=617833586]
 position_smoothing_enabled = true

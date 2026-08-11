@@ -139,6 +139,14 @@ const _SHAPES: Dictionary = {
 # the floor non-walkable and defeat can_transition()'s traversal-edge override.
 const _DECORATIVE: Dictionary = {
 	&"LADDER_NE": true, &"LADDER_NW": true,
+	# Fences sit ON a walkable floor and must leave it walkable terrain — the
+	# blocking is the Fence occupant's blocks_movement(), checked below in
+	# is_walkable(). Without this entry the fence would fall through to the
+	# "not in _SHAPES" branch and _merge_blocked the floor, which reads the same
+	# in game but is NOT the same: resolve_click and the remove action both go
+	# through is_terrain_walkable, so a blocked floor makes the fence
+	# un-right-clickable and therefore unremovable.
+	&"FENCE_NE": true, &"FENCE_NW": true,
 }
 
 
@@ -168,6 +176,18 @@ var _cell_count: int = 0
 # scanning tile_set.get_custom_data_layer_name(i) on every roughness/walkable
 # query downstream.
 var _custom_layer_ids: Dictionary[TileSet, Dictionary] = {}
+
+## Bumped by every mutation that can change the answer to "where can a walker
+## step, and what does it cost" — a rebuild, an occupant claimed or released, a
+## traversal edge added or dropped.
+##
+## Pathfinder caches each cell's resolved exits and validates that cache against
+## this counter. A SIGNAL would not do: several occupant call sites (Rock,
+## Frailejon, TraversalBase) mutate the grid without anyone emitting
+## graph_changed, and they got away with it only because every query used to be
+## live. A counter cannot be forgotten at a call site the way a signal can — the
+## mutators are all in this file.
+var structure_version: int = 0
 
 
 # ----------------------------------------------------------------------------
@@ -251,6 +271,8 @@ func build(layers: Array[TileMapLayer], clip_rect: Rect2i = Rect2i()) -> void:
 		for data: CellData in row:
 			if data != null:
 				_cell_count += 1
+
+	structure_version += 1
 
 
 func _compute_bounds_union(layers: Array[TileMapLayer]) -> Rect2i:
@@ -671,14 +693,8 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 	if has_traversal_edge(from, to):
 		return true
 
-	var exit_alts := _edge_altitudes(from, dir)
-	if exit_alts.is_empty():
-		return false
-	var enter_alts := _edge_altitudes(to, -dir)
-	if not enter_alts.is_empty():
-		for a in exit_alts:
-			if a in enter_alts:
-				return true
+	if _edges_share_altitude(from, dir, to):
+		return true
 
 	# Scramble: foot-climb a small ledge between two flats, no ladder needed.
 	# Allowed when both endpoints are flats and the gap is 0 < |Δalt| <=
@@ -691,6 +707,51 @@ func can_transition(from: Vector2i, to: Vector2i) -> bool:
 		if delta > 0 and delta <= _SCRAMBLE_MAX_DELTA:
 			return true
 
+	return false
+
+
+# Do the `dir`-facing edge of `from` and the facing edge of `to` meet at a
+# common altitude?
+#
+# The same question _edge_altitudes answers, without building the two Arrays to
+# answer it. Each edge exposes at most TWO altitudes (a flat exposes one; a ramp
+# exposes low and high on its perpendicular edges), so the whole intersection is
+# four integer comparisons — against two typed-Array allocations per call, which
+# measured can_transition at 5.2 us, four times is_walkable's 1.2 us.
+#
+# _edge_altitudes stays: it is the readable form of this rule, it is what
+# dump_pathfinder.gd prints when a transition needs explaining, and both are
+# covered by the same tests.
+func _edges_share_altitude(from: Vector2i, dir: Vector2i, to: Vector2i) -> bool:
+	var tf := _get_raw(from)
+	if tf == null or not tf.walkable:
+		return false
+	var tt := _get_raw(to)
+	if tt == null or not tt.walkable:
+		return false
+
+	# -1 in the `hi` slot means "this edge exposes one altitude only".
+	var f_lo: int = tf.altitude_low
+	var f_hi: int = -9999
+	if tf.rise_dir != Vector2i.ZERO:
+		if dir == tf.rise_dir:
+			f_lo = tf.altitude_high
+		elif dir != -tf.rise_dir:
+			f_hi = tf.altitude_high  # perpendicular: both ends exposed
+
+	var enter_dir := -dir
+	var t_lo: int = tt.altitude_low
+	var t_hi: int = -9999
+	if tt.rise_dir != Vector2i.ZERO:
+		if enter_dir == tt.rise_dir:
+			t_lo = tt.altitude_high
+		elif enter_dir != -tt.rise_dir:
+			t_hi = tt.altitude_high
+
+	if f_lo == t_lo or (t_hi != -9999 and f_lo == t_hi):
+		return true
+	if f_hi != -9999 and (f_hi == t_lo or (t_hi != -9999 and f_hi == t_hi)):
+		return true
 	return false
 
 
@@ -760,15 +821,18 @@ var _traversal_edges: Dictionary = {}  # Vector2i -> Dictionary[Vector2i, bool]
 func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_add_edge_one_way(a, b)
 	_add_edge_one_way(b, a)
+	structure_version += 1
 
 
 func remove_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_remove_edge_one_way(a, b)
 	_remove_edge_one_way(b, a)
+	structure_version += 1
 
 
 func clear_traversal_edges() -> void:
 	_traversal_edges.clear()
+	structure_version += 1
 
 
 func _add_edge_one_way(a: Vector2i, b: Vector2i) -> void:
@@ -864,6 +928,7 @@ func set_occupant(cell: Vector2i, node: Node2D) -> bool:
 	if kind != &"":
 		var by_cell: Dictionary = _occupants_by_kind.get_or_add(kind, {})
 		by_cell[cell] = node
+	structure_version += 1
 	return true
 
 
@@ -883,6 +948,7 @@ func clear_occupant(cell: Vector2i, node: Node2D = null) -> void:
 		by_cell.erase(cell)
 		if by_cell.is_empty():
 			_occupants_by_kind.erase(kind)
+	structure_version += 1
 
 
 func occupant_at(cell: Vector2i) -> Node2D:
@@ -918,6 +984,9 @@ func _test_put(cell: Vector2i, data: CellData) -> void:
 	elif not _bounds.has_point(cell):
 		_expand_bounds_to_include(cell)
 	_put_raw(cell, data)
+	# Same reason build() bumps it: a test that paints a cell between two
+	# queries must not be served Pathfinder's edges from before the paint.
+	structure_version += 1
 
 
 func _expand_bounds_to_include(cell: Vector2i) -> void:

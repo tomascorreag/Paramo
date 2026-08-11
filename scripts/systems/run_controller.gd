@@ -9,11 +9,14 @@ extends Node
 ## would tick against a half-built mountain. It also swaps the Dry/Wet
 ## day/night look at each season boundary.
 ##
-## The dev keys (F fast-forward, M end-season, N next-season) are scaffolding:
-## they exist so a human can drive the whole loop in seconds and watch it cycle
-## and end. Strip `debug_controls` once the real PlanningPhaseScreen lands. The
+## The dev keys (F fast-forward, M end-season) are scaffolding: they exist so a
+## human can drive the whole loop in seconds and watch it cycle and end. The
 ## run's state is now READ off the journal (RunCalendar + the season wheel)
 ## rather than pushed into a debug label from here.
+##
+## There was an N "next season" key alongside them, back when a season boundary
+## parked the run in a PLANNING phase. Seasons roll straight over now, so there
+## is nothing for it to advance.
 
 ## ProceduralWorld whose generation_finished gates start_run(). If null (a
 ## non-procedural map), the run starts immediately on the next idle frame.
@@ -86,8 +89,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_fast_forward()
 		KEY_M:
 			_debug_force_end_season()
-		KEY_N:
-			SeasonManager.begin_next_season()
 
 
 # --- Season signal handlers -------------------------------------------------

@@ -9,11 +9,11 @@ extends Node
 # A* over the 4-neighbor grid exposed by TileGrid, and exposes cell/world
 # coord helpers plus click-to-cell resolution for painted iso layers.
 #
-# Search state is (cell, incoming_direction) so a small per-turn penalty can
-# be applied: among all shortest paths, the one with the fewest direction
-# changes wins.
+# Search state is one per CELL. It used to carry the incoming direction as well,
+# to charge a per-turn penalty so that the straightest of the equally-short
+# routes won; that was dropped for the 3.4x it cost (see find_path).
 #
-# Two additional per-step costs layer on top of the base 1.0 + turn epsilon:
+# Two additional per-step costs layer on top of the base 1.0:
 #   - RAMP PENALTY: each half-step of elevation change when stepping onto a
 #     ramp (SLOPE_*, STAIR_*, HALF_*) adds _RAMP_PENALTY_PER_STEP. Sub-step
 #     so ramps remain traversable — they only lose to flat routes of equal
@@ -49,13 +49,6 @@ const GROUP_NAME: StringName = &"pathfinder"
 # Half-step pixel height. One half-step = 8 px, two half-steps = 16 px = one
 # FULL_CUBE.
 const HALF_STEP_PX: float = 8.0
-
-# Tiebreaker weight applied once per direction change along a path. Must be
-# small enough that the total turn penalty on any realistic path is strictly
-# less than 1 (the cost of a single step), so step-count stays the primary
-# sort key. With 1e-4 we're safe up to 10000-step paths — far beyond any map
-# this game will ever use.
-const _TURN_EPSILON: float = 1e-4
 
 # Extra cost charged per half-step of elevation change when stepping onto a
 # ramp cell. Full stairs/slopes (ramp_size 2) cost 2x this; half variants
@@ -123,6 +116,68 @@ var _traversal_edges: Dictionary[StringName, Array] = {}
 var _reach_anchor: Vector2i = NO_CELL
 var _reach_cache: Dictionary[Vector2i, bool] = {}
 
+# ----------------------------------------------------------------------------
+# Resolved-edge cache
+# ----------------------------------------------------------------------------
+#
+# cell -> a flat [neighbor, cost, ...] pair list: every legal exit from that cell
+# with its total cost (step cost + the destination's enter cost), resolved once
+# and reused by every search until the graph changes.
+#
+# WHY: the search's inner loop used to re-derive all of that per EDGE, and
+# can_transition alone allocates two Array[int]s (_edge_altitudes) and re-runs
+# is_walkable on both endpoints — which is_walkable had already been asked
+# directly a line earlier. MEASURED on level1 (686 reachable cells), over the
+# entry->goal legs a visitor builds at spawn: 27.8 ms mean / 95.9 ms worst per
+# path, i.e. one dropped frame per visitor spawned and a ~600 ms freeze when the
+# park closes and the whole crowd routes home at once. With the table: 5.3 ms /
+# 19.9 ms. The expansion COUNT is unchanged (~480) — this is purely the cost of
+# an expansion, which is why it is a pure speed change and not a behaviour one.
+#
+# Populated LAZILY, per cell, on first visit. Building it eagerly for the whole
+# grid measured 49.7 ms, and graph_changed fires once per TILE of a fence run —
+# so an eager build would trade a spawn hitch for a placement hitch. Lazily, a
+# cell costs exactly what it used to cost the first time a search touches it.
+# Untyped so a miss can return null: a typed Dictionary[Vector2i, Array]
+# cannot hold one, which forces has()+[] — two lookups on the hot path.
+var _edge_cache: Dictionary = {}
+# What the cache above was built against. `structure_version` covers everything
+# the GRID owns (rebuild, occupants, traversal edges); the penalty counter
+# covers what THIS node owns, since set_cell_penalty deliberately emits no
+# signal.
+var _edge_grid_version: int = -1
+var _edge_penalty_version: int = 0
+var _penalty_version: int = 0
+
+# ----------------------------------------------------------------------------
+# Connected components
+# ----------------------------------------------------------------------------
+#
+# Which cells can reach which. Learned LAZILY and only as a by-product of work
+# that was happening anyway — never computed on spec:
+#   - compute_reachable_set floods a component by definition, so it registers
+#     what it found;
+#   - a FAILED find_path has already expanded every cell it could reach, so its
+#     settled set IS the component of `from`.
+#
+# It buys two things. A search whose target is in another component returns []
+# in O(1) instead of expanding the whole component to discover the obvious
+# (measured: 3.1 ms, DEARER than a successful 40-step route at 2.0 ms — with no
+# goal to stop at, A* runs to exhaustion). And compute_reachable_set becomes
+# free for any anchor already seen, which is what UXOverlay asks for on every
+# step the player takes.
+#
+# CORRECTNESS REQUIREMENT: the traversable graph must be UNDIRECTED, since one
+# cell's reachable set is reused as every other member's. Verified exhaustively
+# rather than assumed — profile_systems.gd walks every walkable cell and reports
+# the asymmetric-edge count (0 on level1, 1233 cells). TileGrid.can_transition
+# intersects the same two edge-altitude sets whichever way it is asked, ladder
+# edges are registered both ways, and occupant blocking is per-cell. If a
+# ONE-WAY traversal is ever added (a drop you can fall down but not climb), this
+# cache is the thing it breaks.
+var _component_of: Dictionary = {}          # cell -> index into _components
+var _components: Array[Dictionary] = []     # index -> the whole cell set
+
 
 func _enter_tree() -> void:
 	# Join the group in _enter_tree (runs top-down before sibling _readys) so
@@ -167,86 +222,166 @@ func rebuild() -> void:
 # Public queries
 # ----------------------------------------------------------------------------
 
-# Custom A* over the 4-neighbor grid. State is (cell, incoming_direction): by
-# embedding the incoming direction in the search state we can charge a tiny
-# penalty whenever a step changes direction from the previous one, producing
-# straightest-possible paths among all shortest paths. The penalty is strictly
-# less than 1 per turn, so step count remains the primary cost.
+# Custom A* over the 4-neighbor grid. One state per CELL.
+#
+# It used to be one state per (cell, incoming_direction), so that a step which
+# changed direction could be charged a 1e-4 penalty and the straightest of the
+# many equally-short routes would win. That cost a 5x state space (4 arrival
+# directions plus the start) for an effect worth nothing on route LENGTH:
+# measured on level1 spawn legs, 480 expansions against 182, i.e. 5.1 ms against
+# 1.5 ms per route. Dropped deliberately (2026-08-10) — the price is that on
+# open ground a route may now staircase where it used to turn once, since ties
+# among shortest paths fall to the heap's FIFO counter.
+#
+# If the staircase ever needs undoing, do NOT simply put the direction back: key
+# on the incoming AXIS instead (2 states, not 4). A turn is an axis change, and
+# the one case the axis cannot tell apart — a 180 degree reversal — steps back
+# onto the cell just left at strictly higher g, so it is never on an optimal
+# path anyway.
 func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	if _grid == null:
 		return []
+	_validate_edge_cache()
 	if not _grid.is_walkable(from) or not _grid.is_walkable(to):
 		return []
 	if from == to:
 		var same: Array[Vector2i] = [from]
 		return same
+	# Known to be in different components: no route exists, and finding that out
+	# by search means expanding every cell `from` can reach.
+	var known: int = _component_of.get(from, -1)
+	if known >= 0 and not _components[known].has(to):
+		return []
 
-	# State key encoding: Vector3i(cell.x, cell.y, dir + 1). dir = -1 for the
-	# start (encoded as 0), neighbors encode 1..4. Vector3i is natively hashable
-	# and avoids the per-expansion String allocation the old encoding paid for.
-	var start_key := Vector3i(from.x, from.y, 0)
-	var g_score: Dictionary[Vector3i, float] = { start_key: 0.0 }
-	var came_from: Dictionary[Vector3i, Array] = {}  # key -> [prev_key, cell]
+	var g_score: Dictionary[Vector2i, float] = { from: 0.0 }
+	var came_from: Dictionary[Vector2i, Vector2i] = {}
 
-	# Open set entries: [f, tiebreak_counter, cell, dir, key]. Min-heap on
-	# (f, counter); the counter preserves the original FIFO order of equal-f
-	# entries so tie-breaking matches the prior linear-scan behavior. Stale
-	# entries (a key already settled at lower g) are filtered on pop via the
-	# g_score re-check, since the heap doesn't support cheap delete.
+	# Open set entries: [f, tiebreak_counter, cell]. Min-heap on (f, counter);
+	# the counter preserves FIFO order among equal-f entries. Stale entries (a
+	# cell already settled at lower g) are filtered on pop via the g_score
+	# re-check, since the heap doesn't support cheap delete.
 	var open: Array = []
 	var counter: int = 0
-	_heap_push(open, [_heuristic(from, to), counter, from, -1, start_key])
+	_heap_push(open, [_heuristic(from, to), counter, from])
 
 	while not open.is_empty():
 		var cur: Array = _heap_pop(open)
-
 		var cur_cell: Vector2i = cur[2]
-		var cur_dir: int = cur[3]
-		var cur_key: Vector3i = cur[4]
 
 		if cur_cell == to:
-			return _reconstruct_path(came_from, cur_key, from)
+			return _reconstruct_path(came_from, to, from)
 
-		var cur_g: float = g_score[cur_key]
+		var cur_g: float = g_score[cur_cell]
 
-		for dir_idx in _NEIGHBOR_DIRS.size():
-			var d: Vector2i = _NEIGHBOR_DIRS[dir_idx]
-			var nb: Vector2i = cur_cell + d
-			if not _grid.is_walkable(nb):
-				continue
-			if not _grid.can_transition(cur_cell, nb):
-				continue
+		# Flat [neighbor, cost] pairs — see _edges_for.
+		var edges: Array = _edges_for(cur_cell)
+		var e: int = 0
+		while e < edges.size():
+			var nb: Vector2i = edges[e]
+			var tentative_g: float = cur_g + float(edges[e + 1])
+			e += 2
 
-			var turn_cost: float = 0.0 if cur_dir == -1 or cur_dir == dir_idx else _TURN_EPSILON
-			# Ladder steps (traversal edges) cost one unit per half-step of
-			# altitude climbed, so one full cube (2 half-steps) costs the same
-			# as 2 horizontal tile steps. Scramble steps (a bare ledge, no
-			# ladder) cost double that — 2 units per half-step — so A* prefers a
-			# ladder/ramp when one exists but still scrambles when it's the only
-			# route. Normal/ramp steps stay at the flat 1.0 (ramps lean on the
-			# small _cell_enter_cost tiebreaker instead).
-			var step_cost: float = 1.0
-			if _grid.has_traversal_edge(cur_cell, nb):
-				var alt_delta: float = absf(
-					_grid.altitude_center(nb) - _grid.altitude_center(cur_cell)
-				)
-				if alt_delta > step_cost:
-					step_cost = alt_delta
-			elif _grid.classify_step(cur_cell, nb) == TileGrid.StepKind.SCRAMBLE:
-				step_cost = 2.0 * absf(
-					_grid.altitude_center(nb) - _grid.altitude_center(cur_cell)
-				)
-			var tentative_g: float = cur_g + step_cost + turn_cost + _cell_enter_cost(nb)
-			var nb_key := Vector3i(nb.x, nb.y, dir_idx + 1)
-			if g_score.has(nb_key) and tentative_g >= g_score[nb_key]:
+			if g_score.has(nb) and tentative_g >= g_score[nb]:
 				continue
-			g_score[nb_key] = tentative_g
-			came_from[nb_key] = [cur_key, nb]
+			g_score[nb] = tentative_g
+			came_from[nb] = cur_cell
 			counter += 1
-			var f: float = tentative_g + _heuristic(nb, to)
-			_heap_push(open, [f, counter, nb, dir_idx, nb_key])
+			_heap_push(open, [tentative_g + _heuristic(nb, to), counter, nb])
 
+	# The heap emptied without reaching `to`, so everything `from` can reach was
+	# pushed and popped: g_score's keys ARE its component. Bank it so the next
+	# hopeless query is answered without repeating the scan.
+	_register_component(g_score)
 	return []
+
+
+# ----------------------------------------------------------------------------
+# Resolved edges
+# ----------------------------------------------------------------------------
+
+## Every legal exit from `cell`, as flat [neighbor, cost] pairs. `cost` is the
+## step cost plus the DESTINATION's enter cost — both depend only on the edge,
+## never on the route taken to reach it, which is what makes them cacheable at
+## all.
+##
+## Flat pairs rather than an array of small arrays: this is read once per
+## expansion per edge, and the nested version allocates an Array per edge at
+## build time and pays a second index per read.
+func _edges_for(cell: Vector2i) -> Array:
+	var cached: Variant = _edge_cache.get(cell)
+	if cached != null:
+		return cached
+
+	var out: Array = []
+	for d in _NEIGHBOR_DIRS:
+		var nb: Vector2i = cell + d
+		if not _grid.is_walkable(nb):
+			continue
+		if not _grid.can_transition(cell, nb):
+			continue
+		# Ladder steps (traversal edges) cost one unit per half-step of altitude
+		# climbed, so one full cube (2 half-steps) costs the same as 2 horizontal
+		# tile steps. Scramble steps (a bare ledge, no ladder) cost double that —
+		# 2 units per half-step — so A* prefers a ladder/ramp when one exists but
+		# still scrambles when it's the only route. Normal/ramp steps stay at the
+		# flat 1.0 (ramps lean on the small _cell_enter_cost tiebreaker instead).
+		var step_cost: float = 1.0
+		if _grid.has_traversal_edge(cell, nb):
+			var alt_delta: float = absf(
+				_grid.altitude_center(nb) - _grid.altitude_center(cell)
+			)
+			if alt_delta > step_cost:
+				step_cost = alt_delta
+		elif _grid.classify_step(cell, nb) == TileGrid.StepKind.SCRAMBLE:
+			step_cost = 2.0 * absf(
+				_grid.altitude_center(nb) - _grid.altitude_center(cell)
+			)
+		out.append(nb)
+		out.append(step_cost + _cell_enter_cost(nb))
+	_edge_cache[cell] = out
+	return out
+
+
+## Drop the resolved edges if anything they were derived from has moved. Called
+## at the top of every query that reads them, so no call site has to remember —
+## the counters are bumped inside the mutators themselves.
+func _validate_edge_cache() -> void:
+	var grid_version: int = _grid.structure_version if _grid != null else -1
+	if grid_version == _edge_grid_version and _penalty_version == _edge_penalty_version:
+		return
+	_edge_grid_version = grid_version
+	_edge_penalty_version = _penalty_version
+	_edge_cache.clear()
+	# Components depend on the TOPOLOGY only, so a penalty change need not drop
+	# them — but penalty changes are rare and one invalidation path is easier to
+	# reason about than two.
+	_component_of.clear()
+	_components.clear()
+
+
+## Record `cells` (any dictionary keyed by cell) as one complete connected
+## component. The caller must have a CLOSED set — a full flood fill or an
+## exhausted search — never a partial one, or the O(1) "no route" answer above
+## starts lying.
+func _register_component(cells: Dictionary) -> void:
+	if cells.is_empty():
+		return
+	var set: Dictionary[Vector2i, bool] = {}
+	for c: Vector2i in cells:
+		set[c] = true
+	_register_component_set(set)
+
+
+## As above, for a caller that already holds the set in its final form — it is
+## stored BY REFERENCE, so compute_reachable_set hands out the very dictionary
+## it cached rather than a copy of it.
+func _register_component_set(set: Dictionary[Vector2i, bool]) -> void:
+	if set.is_empty():
+		return
+	var idx: int = _components.size()
+	for c: Vector2i in set:
+		_component_of[c] = idx
+	_components.append(set)
 
 
 # ----------------------------------------------------------------------------
@@ -320,26 +455,40 @@ func is_terrain_walkable(cell: Vector2i) -> bool:
 
 # Flood-fill reachable set from `from` using the same traversal model as
 # find_path (4-neighbor + can_transition + traversal edges, ramp/penalty
-# rules ignored — reachability, not cost). O(N) once; callers should cache
-# and only recompute when their anchor cell moves. Used by UI that needs to
-# answer "is this cell reachable?" cheaply per hover (UXOverlay).
+# rules ignored — reachability, not cost). Used by UI that needs to answer "is
+# this cell reachable?" cheaply per hover (UXOverlay).
+#
+# A component already learned is returned DIRECTLY — the same shared dictionary,
+# read-only by contract, exactly as reachable_from has always behaved. That is
+# what makes this free for the caller that asks once per player step: the whole
+# landmass is one component, so the player walking around inside it never
+# invalidates the answer. A fill only happens on the first anchor in an unseen
+# component, or after the graph changes.
 func compute_reachable_set(from: Vector2i) -> Dictionary[Vector2i, bool]:
 	var reachable: Dictionary[Vector2i, bool] = {}
 	if _grid == null or not _grid.is_walkable(from):
 		return reachable
+	_validate_edge_cache()
+	var known: int = _component_of.get(from, -1)
+	if known >= 0:
+		return _components[known]
 	reachable[from] = true
 	var queue: Array[Vector2i] = [from]
 	var head: int = 0
 	while head < queue.size():
 		var cur: Vector2i = queue[head]
 		head += 1
-		for d in _NEIGHBOR_DIRS:
-			var nb: Vector2i = cur + d
+		# The same resolved edges find_path walks. Reachability ignores cost, so
+		# only the neighbor of each pair is read — but sharing the table means
+		# the flood fill and the search can never disagree about which edges
+		# exist, and the fill stops re-deriving edges the searches already paid
+		# for.
+		var edges: Array = _edges_for(cur)
+		var e: int = 0
+		while e < edges.size():
+			var nb: Vector2i = edges[e]
+			e += 2
 			if reachable.has(nb):
-				continue
-			if not _grid.is_walkable(nb):
-				continue
-			if not _grid.can_transition(cur, nb):
 				continue
 			reachable[nb] = true
 			queue.append(nb)
@@ -460,6 +609,7 @@ func highest_visible_top(cell: Vector2i) -> float:
 # Penalty is added to the base step cost every time a search considers moving
 # INTO `cell`, so a large value (>1.0) forces detours, a small value nudges.
 func set_cell_penalty(cell: Vector2i, penalty: float) -> void:
+	_penalty_version += 1
 	if penalty == 0.0:
 		_cell_penalties.erase(cell)
 		return
@@ -467,6 +617,7 @@ func set_cell_penalty(cell: Vector2i, penalty: float) -> void:
 
 
 func clear_cell_penalty(cell: Vector2i) -> void:
+	_penalty_version += 1
 	_cell_penalties.erase(cell)
 
 
@@ -478,6 +629,7 @@ func get_cell_penalty(cell: Vector2i) -> float:
 ## or test setup. Not called by rebuild() — penalties track live world objects
 ## that outlive the grid, so rebuild intentionally preserves them.
 func clear_all_cell_penalties() -> void:
+	_penalty_version += 1
 	_cell_penalties.clear()
 
 
@@ -504,6 +656,19 @@ func add_traversal_edge(a: Vector2i, b: Vector2i) -> void:
 	_traversal_edges[key] = [a, b]
 	if _grid != null:
 		_grid.add_traversal_edge(a, b)
+	graph_changed.emit()
+
+
+## Announce that the graph changed WITHOUT rebuilding it.
+##
+## For a structure whose effect is entirely an occupant claim — a fence blocks
+## its cell purely through blocks_movement(), painting no geometry — there is
+## nothing to re-ingest, so rebuild() would be a full grid scan to reach the
+## same state. But the emission itself still has to happen: graph_changed is
+## what drops the cached reachability set (`_reach_anchor`) that the action menu
+## and UXOverlay read, and without it a fenced cell stays reachable in the UI
+## until something else forces a rebuild.
+func notify_graph_changed() -> void:
 	graph_changed.emit()
 
 
@@ -675,16 +840,15 @@ static func _heuristic(a: Vector2i, b: Vector2i) -> float:
 	return float(absi(a.x - b.x) + absi(a.y - b.y))
 
 
-func _reconstruct_path(came_from: Dictionary, end_key: Vector3i, start: Vector2i) -> Array[Vector2i]:
-	# came_from[key] = [prev_key, cell_of_key]. Walk back from the goal's key,
-	# collecting destination cells; the start has no came_from entry and is
-	# appended at the end.
+func _reconstruct_path(came_from: Dictionary, end_cell: Vector2i,
+		start: Vector2i) -> Array[Vector2i]:
+	# came_from[cell] = the cell it was reached from. Walk back from the goal;
+	# the start has no entry and is appended at the end.
 	var reversed: Array[Vector2i] = []
-	var k: Vector3i = end_key
-	while came_from.has(k):
-		var entry: Array = came_from[k]
-		reversed.append(entry[1])
-		k = entry[0]
+	var c: Vector2i = end_cell
+	while came_from.has(c):
+		reversed.append(c)
+		c = came_from[c]
 	reversed.append(start)
 	reversed.reverse()
 	return reversed

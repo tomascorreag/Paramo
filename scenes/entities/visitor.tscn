@@ -1,0 +1,46 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" uid="uid://6b228nm58dd7" path="res://scripts/entities/visitor.gd" id="1_visitor"]
+[ext_resource type="Texture2D" uid="uid://defvn510sfulv" path="res://assets/sprites/characters/base.png" id="2_shadow_tex"]
+[ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3_shadow_shader"]
+[ext_resource type="Texture2D" uid="uid://d2y3ffudbp030" path="res://assets/sprites/characters/Visitor_1_general.png" id="4_sheet"]
+[ext_resource type="Shader" uid="uid://ctmx1rwimdbc2" path="res://assets/shaders/visitor_recolor.gdshader" id="5_recolor"]
+
+[sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
+resource_local_to_scene = true
+shader = ExtResource("3_shadow_shader")
+shader_parameter/shadow_color = Color(0, 0, 0.05, 0.5)
+shader_parameter/shadow_length = 6.0
+shader_parameter/max_height = 4.0
+shader_parameter/taper = 0.3
+shader_parameter/cap_width = 6.0
+shader_parameter/visual_y_offset = -2.0
+shader_parameter/shadow_opacity = 0.5
+shader_parameter/sprite_offset = Vector2(0, -15)
+shader_parameter/roughness = 0.0
+shader_parameter/noise_cell_px = 3.0
+shader_parameter/noise_world_follow = 0.5
+shader_parameter/cutoff_x = 1000.0
+shader_parameter/tile_size_px = Vector2(32, 16)
+
+[sub_resource type="ShaderMaterial" id="SubResource_recolor_mat"]
+resource_local_to_scene = true
+shader = ExtResource("5_recolor")
+
+[node name="Visitor" type="Node2D"]
+y_sort_enabled = true
+script = ExtResource("1_visitor")
+
+[node name="Shadow" type="Sprite2D" parent="."]
+y_sort_enabled = true
+material = SubResource("SubResource_shadow_mat")
+texture = ExtResource("2_shadow_tex")
+offset = Vector2(0, -15)
+hframes = 4
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture_filter = 1
+material = SubResource("SubResource_recolor_mat")
+texture = ExtResource("4_sheet")
+offset = Vector2(0, -15)
+hframes = 24

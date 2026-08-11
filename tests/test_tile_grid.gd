@@ -906,3 +906,75 @@ func test_build_is_idempotent_when_rebuilt() -> void:
 	grid.build([layer_b])
 	assert_false(grid.is_walkable(Vector2i(1, 1)), "old cells should be cleared")
 	assert_true(grid.is_walkable(Vector2i(9, 9)))
+
+
+# ===========================================================================
+# _edges_share_altitude — the allocation-free form of the edge-match rule
+# ===========================================================================
+#
+# can_transition used to ask _edge_altitudes for two Array[int]s and intersect
+# them; it now answers the same question with integer comparisons, because those
+# two allocations put it at 5.2 us — four times is_walkable — on a call every
+# pathfinder edge and every GridWalker step validation makes.
+#
+# _edge_altitudes is still the readable statement of the rule and is still what
+# dump_pathfinder.gd prints, so this walks the whole shape x altitude x
+# direction matrix and asserts the two forms never disagree. A hand-derived
+# rewrite of a rule with this many branches is exactly the kind that passes the
+# existing cases and diverges on the one nobody wrote a test for.
+
+func test_edges_share_altitude_matches_edge_altitudes_everywhere() -> void:
+	var kinds: Array[StringName] = [
+		&"FLAT", &"FULL_CUBE", &"HALF_CUBE",
+		&"SLOPE_NE", &"SLOPE_NW", &"SLOPE_SE", &"SLOPE_SW",
+		&"HALF_STAIR_NE", &"HALF_STAIR_NW", &"HALF_STAIR_SE", &"HALF_STAIR_SW",
+	]
+	var dirs: Array[Vector2i] = [
+		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	var from := Vector2i(0, 0)
+	var checked: int = 0
+	var mismatches: Array[String] = []
+
+	for kind_a: StringName in kinds:
+		for kind_b: StringName in kinds:
+			for alt_a in [0, 1, 2]:
+				for alt_b in [0, 1, 2, 3]:
+					for dir: Vector2i in dirs:
+						grid = TileGrid.new()
+						var to: Vector2i = from + dir
+						var shape_a: Dictionary = TileGrid._SHAPES[kind_a]
+						var shape_b: Dictionary = TileGrid._SHAPES[kind_b]
+						_inject_walkable(from, kind_a, shape_a["rise"], alt_a,
+								alt_a + int(shape_a["ramp_size"]))
+						_inject_walkable(to, kind_b, shape_b["rise"], alt_b,
+								alt_b + int(shape_b["ramp_size"]))
+
+						# The original rule, spelled out.
+						var exit_alts: Array[int] = grid._edge_altitudes(from, dir)
+						var enter_alts: Array[int] = grid._edge_altitudes(to, -dir)
+						var expected: bool = false
+						for a in exit_alts:
+							if a in enter_alts:
+								expected = true
+								break
+
+						var actual: bool = grid._edges_share_altitude(from, dir, to)
+						checked += 1
+						if actual != expected and mismatches.size() < 5:
+							mismatches.append("%s@%d -> %s@%d dir %s: got %s, rule says %s"
+									% [kind_a, alt_a, kind_b, alt_b, dir, actual, expected])
+
+	assert_eq(mismatches, [] as Array[String],
+			"the fast form disagrees with _edge_altitudes")
+	assert_true(checked > 1000, "expected a wide matrix, only checked %d" % checked)
+
+
+func test_edges_share_altitude_rejects_unpainted_and_blocked() -> void:
+	_inject_walkable(Vector2i(0, 0), &"FLAT", Vector2i.ZERO, 0, 0)
+	assert_false(grid._edges_share_altitude(Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 0)),
+			"no tile at the destination")
+	_inject_blocked(Vector2i(1, 0), 0)
+	assert_false(grid._edges_share_altitude(Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 0)),
+			"a blocked destination is not enterable")
+	assert_false(grid._edges_share_altitude(Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 0)),
+			"...nor is a blocked origin exitable")

@@ -80,7 +80,15 @@ func is_offerable(ctx: ActionContext) -> bool:
 ## bug, a greyed extinguish entry reads as "you are out of water".
 ##
 ## Default: free actions are always enabled; unlock-gated actions are enabled
-## while the player can afford one placement (UnlockState.placement_cost).
+## while the player can afford ONE TILE of this placement. One tile, not the
+## whole build, because a bridge or fence run is priced by a span the player has
+## not aimed yet when the wheel is drawn — the wheel answers "can you start
+## this", and the commit re-checks the real span.
+##
+## `unlock_id` is passed through so the cost is the one this action actually
+## charges: planting also spends water, and a wheel that ignored that would
+## offer an enabled plant to a player with a dry reserve.
+##
 ## Override for other cost models (extinguish checks water). Side-effect free;
 ## called both when the wheel is built and again on selection, since a
 ## walk-then-act can span a change in the balance.
@@ -88,7 +96,7 @@ func is_enabled(ctx: ActionContext) -> bool:
 	if unlock_id == &"" or ctx == null or ctx.unlocks == null:
 		return true
 	if ctx.unlocks.has_method(&"can_afford_placement"):
-		return bool(ctx.unlocks.call(&"can_afford_placement"))
+		return bool(ctx.unlocks.call(&"can_afford_placement", unlock_id, 1))
 	return true
 
 

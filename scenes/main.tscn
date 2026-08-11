@@ -2,8 +2,10 @@
 
 [ext_resource type="PackedScene" uid="uid://bf4q55ftkyndu" path="res://scenes/maps/level1.tscn" id="1_level1"]
 [ext_resource type="PackedScene" path="res://scenes/ui/debug_overlay.tscn" id="2_dbg"]
+[ext_resource type="Script" path="res://scripts/tools/web_profile_boot.gd" id="3_probe"]
 
 [node name="Main" type="Node2D" unique_id=196845560]
+script = ExtResource("3_probe")
 
 [node name="Level1" parent="." unique_id=1959178868 instance=ExtResource("1_level1")]
 position = Vector2(21, 18)

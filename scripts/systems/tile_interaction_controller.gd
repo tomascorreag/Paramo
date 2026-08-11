@@ -25,6 +25,8 @@ const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/ac
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
 const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/action_build_ladder.gd")
 const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
+const _ACTION_BUILD_FENCE: GDScript = preload("res://scripts/systems/actions/action_build_fence.gd")
+const _ACTION_REMOVE_FENCE: GDScript = preload("res://scripts/systems/actions/action_remove_fence.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
 const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
 const _ACTION_IGNITE_FIRE: GDScript = preload("res://scripts/systems/actions/action_ignite_fire.gd")
@@ -96,8 +98,10 @@ func _ready() -> void:
 	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
 	_registry.register(_ACTION_BUILD_BRIDGE.new())
 	_registry.register(_ACTION_BUILD_LADDER.new())
+	_registry.register(_ACTION_BUILD_FENCE.new())
 	_registry.register(_ACTION_REMOVE_BRIDGE.new())
 	_registry.register(_ACTION_REMOVE_LADDER.new())
+	_registry.register(_ACTION_REMOVE_FENCE.new())
 	_registry.register(_ACTION_REMOVE_ROCK.new())
 	_registry.register(_ACTION_EXTINGUISH_FIRE.new())
 	# Debug-only (self-gates on Debug.enabled); registered unconditionally so the
@@ -435,8 +439,10 @@ func _deny(cell: Vector2i) -> void:
 # ---------------------------------------------------------------------------
 
 func plant_frailejon(cell: Vector2i) -> void:
-	# Charge at commit. Instancing never fails after this point (no validate
-	# step — _applies already vetted the cell), so no refund path is needed.
+	# Charge at commit — 1 token AND 1 water, one cell (see UnlockState:
+	# planting is the only placement that spends the reserve). Instancing never
+	# fails after this point (no validate step — _applies already vetted the
+	# cell), so no refund path is needed.
 	var unlocks := _unlocks_node()
 	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
 		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
@@ -480,12 +486,18 @@ func remove_rock(cell: Vector2i) -> void:
 	var node := grid.occupant_at(cell) as Rock
 	if node == null:
 		return
-	# Rock clears its occupant claim in _exit_tree. queue_free defers to end
-	# of frame — rebuild() now would still see the stale occupant. Clear the
-	# claim eagerly so the rebuild reads the post-removal world.
+	# Rock clears its occupant claim in _exit_tree, and queue_free defers that to
+	# the end of the frame — so clear it eagerly, or every query until then still
+	# sees the rock.
 	grid.clear_occupant(cell, node)
 	node.queue_free()
-	pathfinder.rebuild()
+	# ANNOUNCE, don't rebuild. A rock blocks purely through blocks_movement() on
+	# its occupant claim; it paints no terrain, so there is nothing for a rebuild
+	# to re-ingest and it would spend 18.7 ms reconstructing an identical grid.
+	# clear_occupant already bumped TileGrid.structure_version, so the
+	# pathfinder's resolved-edge cache drops itself; the emit is what refreshes
+	# the reachability the action menu and UXOverlay read.
+	pathfinder.notify_graph_changed()
 
 
 func begin_traversal(origin: Vector2i, kind: StringName) -> void:

@@ -26,20 +26,34 @@ signal visitors_arrived(count: int)
 const TOKENS: StringName = &"tokens"
 const SOURCE: StringName = &"visitors"
 
-## Visitors on a perfect day (no rain, pristine mountain). Small on purpose:
-## at 1 token each, an unlock (10) costs roughly three perfect days' income.
-## (5 -> 1 on 2026-08-06: with natural-fraction appeal keeping income alive
-## all run, 5/visitor banked ~230 unspent tokens per simulated run.)
-@export var base_visitors_per_day: int = 4
-@export var tokens_per_visitor: float = 1.0
+## Visitors on a perfect day (no rain, pristine mountain). At 2 tokens each a
+## perfect day pays 8, so an unlock (20) is two and a half good days — the shop
+## is priced in days of weather, and a rained-out one buys nothing.
+## (1 -> 5 -> 2 alongside the per-tile placement prices. 5 was set to make one
+## perfect day pay for exactly one unlock and measured badly: a 20-run sweep
+## ended every run on ~197 unspent tokens, the same over-supply that forced the
+## 2026-08-06 cut from 5 to 1. 2 keeps the unlock reachable inside a season
+## without the pile-up.)
+@export var base_visitors_per_day: int = 6
+@export var tokens_per_visitor: float = 2.0
 
 const REGROWTH_GROUP: StringName = &"regrowth"
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
+
+## How VisitorSpawner finds this node to hear `visitors_arrived`. The spawner is
+## a SEPARATE node on purpose: the headless balance simulator instantiates THIS
+## script directly (sim_runner.gd's _SYSTEM_DEFS), so anything that spawns scene
+## nodes must live somewhere the sim never constructs.
+const GROUP_NAME: StringName = &"visitor_flow"
 
 var _rain_integral: float = 0.0
 var _rain_elapsed: float = 0.0
 var _day_night: Node = null
 var _regrowth: Node = null
+
+
+func _enter_tree() -> void:
+	add_to_group(GROUP_NAME)
 
 
 func _ready() -> void:

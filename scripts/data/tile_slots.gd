@@ -146,6 +146,23 @@ const LADDER_NE: StringName         = &"LADDER_NE"
 const LADDER_NW: StringName         = &"LADDER_NW"
 
 
+# --- Fences (barbed wire strung between two posts) --------------------------
+# The suffix names the AXIS THE WIRE RUNS ALONG, not a face it blocks: the two
+# posts sit at the midpoints of a pair of opposite diamond edges, so the wire
+# is parallel to the direction of travel and a straight run of tiles reads as
+# one continuous line.
+#
+#     FENCE_NE = posts on the NE and SW edges  -> run along grid dir (0, ±1)
+#     FENCE_NW = posts on the NW and SE edges  -> run along grid dir (±1, 0)
+#
+# Non-walkable AND non-blocking as geometry: like LADDER_*, these are listed in
+# tile_grid._DECORATIVE so ingest skips them and the floor underneath stays
+# walkable terrain. The barrier is the Fence traversal's occupant claim
+# (blocks_movement() == true), which is_walkable consults per cell.
+const FENCE_NE: StringName          = &"FENCE_NE"
+const FENCE_NW: StringName          = &"FENCE_NW"
+
+
 # --- Edges (tile-edge features along the named diagonal side) ---------------
 const EDGE_NW: StringName           = &"EDGE_NW"
 const EDGE_NE: StringName           = &"EDGE_NE"

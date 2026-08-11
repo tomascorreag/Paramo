@@ -267,5 +267,6 @@ func _placeholder_items() -> Array[Dictionary]:
 		{ "id": &"pickaxe", "icon": preload("res://assets/sprites/UX/icons/pickaxe.tres") },
 		{ "id": &"ladder", "icon": preload("res://assets/sprites/UX/icons/ladder.tres") },
 		{ "id": &"bridge", "icon": preload("res://assets/sprites/UX/icons/bridge.tres") },
+		{ "id": &"fence", "icon": preload("res://assets/sprites/UX/icons/fence.tres") },
 		{ "id": &"inspect", "icon": preload("res://assets/sprites/UX/icons/inspect.tres") },
 	]

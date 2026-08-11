@@ -35,6 +35,39 @@ const SCENARIOS: Dictionary = {
 	"short_run": {
 		"balance": {"SeasonManager": {"days_per_year": 4}},
 	},
+	# Tourism with no ground cost: visitors still arrive, pay and walk, but
+	# their feet take nothing. The A/B partner for "defaults" — run both over
+	# the same --seed0 range and the difference IS trampling, with fire, weather
+	# and the bot held identical by the shared seeds.
+	"no_trample": {
+		"balance": {"RegrowthManager": {"trample_per_step": 0.0}},
+	},
+	# The crowd wears the ground but the player does not — isolates the bot's
+	# own tracks, which are concentrated (it walks to fires, repeatedly, from
+	# wherever it happens to be) rather than spread like tourist routes.
+	"no_player_trample": {
+		"balance": {"RegrowthManager": {"player_trample_fraction": 0.0}},
+	},
+	# Nobody comes at all: the ceiling on what tourism costs the mountain, and
+	# the floor on what it pays. Between this and no_trample sits the crowd's
+	# economic value; between no_trample and defaults sits its ecological price.
+	"no_visitors": {
+		"balance": {"VisitorSpawner": {"enabled": false}},
+	},
+	# Visitors walk the pathfinder's optimal line instead of detouring through
+	# waypoints. The A/B that prices the ROUTE NOISE: it is the most expensive
+	# visitor feature per body (every waypoint is another A*, on spawn and again
+	# on every re-route) and its payoff is entirely visual, so the wall-clock
+	# delta against "defaults" is the number to weigh it against. It also removes
+	# the waypoint stops, hence every regroup barrier.
+	"no_wander": {
+		"balance": {"VisitorSpawner": {"wander_chance": 0.0}},
+	},
+	# Parties still detour, but members no longer wait for each other at the
+	# waypoints. Isolates the regrouping barrier from the noise it rides on.
+	"no_regroup": {
+		"balance": {"VisitorSpawner": {"regroup_at_waypoints": false}},
+	},
 	# Faster regrowth: does halving the char recovery time restore tourism
 	# quickly enough to matter?
 	"fast_regrowth": {
