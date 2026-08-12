@@ -9,9 +9,10 @@ extends GutTest
 # registered under source id 0; each test paints the tiles it needs via
 # _paint() before constructing the index.
 #
-# TileKindIndex also cross-validates against TileSlots on _init(); tests that
-# deliberately mismatch will emit push_warning() lines in GUT output. Those
-# are expected and do not fail the tests.
+# TileKindIndex warns on _init() about a painted tile_kind that TileSlots does
+# not declare; tests that deliberately mismatch emit push_warning() lines in GUT
+# output. Those are expected and do not fail the tests. The reverse direction
+# ("declared but unpainted") is not a runtime warning — see the last test here.
 
 const _TILE_KIND_FIELD: String = "tile_kind"
 const _SOURCE_ID: int = 0
@@ -173,3 +174,48 @@ func test_missing_custom_data_layer_leaves_index_empty() -> void:
 	var idx := TileKindIndex.new(bare_set, _SOURCE_ID)
 	assert_eq(idx.all_painted_names().size(), 0)
 	assert_false(idx.has(TileSlots.FLAT))
+
+
+# ===========================================================================
+# The shipped tileset: every declared slot is painted SOMEWHERE
+# ===========================================================================
+#
+# This replaces the per-construction "declared but not painted on source N"
+# warning TileKindIndex used to push. That warning asked a question no single
+# source can answer — TileSlots is the union across sources, so each index
+# warned about every slot the other sources own (257 lines on a level1 run).
+# The question is only meaningful against the union, and only once, which is
+# what this asserts. A slot added to TileSlots but never painted fails here
+# instead of drowning in a log nobody reads.
+
+const _SHIPPED_TILESET: String = "res://resources/tiles/base_tileset.tres"
+const _TILE_SLOTS_PATH: String = "res://scripts/data/tile_slots.gd"
+
+
+func test_every_declared_slot_is_painted_on_some_source() -> void:
+	var ts: TileSet = load(_SHIPPED_TILESET)
+	assert_not_null(ts, "shipped tileset must load")
+	if ts == null:
+		return
+
+	var painted: Dictionary[StringName, bool] = {}
+	for i in ts.get_source_count():
+		var src_id := ts.get_source_id(i)
+		if ts.get_source(src_id) is not TileSetAtlasSource:
+			continue
+		for name in TileKindIndex.new(ts, src_id).all_painted_names():
+			painted[name] = true
+
+	var slots: Script = load(_TILE_SLOTS_PATH)
+	assert_not_null(slots, "TileSlots script must load")
+	var constants: Dictionary = slots.get_script_constant_map()
+	var missing: Array[String] = []
+	for const_name in constants:
+		var value: Variant = constants[const_name]
+		if value is StringName and not painted.has(value as StringName):
+			missing.append(String(const_name))
+	missing.sort()
+	assert_eq(
+		missing, ([] as Array[String]),
+		"TileSlots constants with no painted tile on any source of %s" % _SHIPPED_TILESET
+	)

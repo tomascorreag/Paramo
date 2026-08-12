@@ -46,6 +46,13 @@ jobs:
       - name: Import resources
         run: godot --headless --import || true
 
+      # Gate the deploy on the suite. tests.yml runs the same command on every
+      # branch and PR, but nothing stopped a red main from publishing to the
+      # live site until this step existed. .gutconfig.json sets should_exit, so
+      # a failing run quits non-zero and the job stops here.
+      - name: Run GUT
+        run: godot --headless --path . -s addons/gut/gut_cmdln.gd
+
       # Regenerate the runtime song copies under docs/music/ from their sources
       # (music/*.strudel.js) so the assets served via the export head_include are
       # fresh at deploy time. See CLAUDE.md (Music).
