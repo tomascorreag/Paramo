@@ -30,6 +30,13 @@ uniform vec2 scroll_velocity = vec2(0.05, 0.04);
 global uniform vec2 water_disp_scroll;
 global uniform vec2 water_disp_scale;
 
+// The world clock, in seconds — a drop-in replacement for the TIME built-in,
+// written by the WorldClock autoload (scripts/systems/world_clock.gd). It stops
+// advancing while the SceneTree is paused, so the water freezes with the rest of
+// the world behind the pause menu / journal; TIME would not. Never use TIME in a
+// world shader.
+global uniform float world_time;
+
 uniform float base_alpha : hint_range(0.0, 1.0) = 0.55;
 uniform vec2 wave_scale = vec2(0.04, 0.04);
 uniform vec2 wave_scale_2 = vec2(0.1, 0.1);
@@ -62,7 +69,7 @@ void fragment() {
 
 	// Direction-invariant displacement: two opposing global scrolls, summed.
 	// Identical at any shared world_pos for every water material → seams line up.
-	vec2 ds = water_disp_scroll * TIME;
+	vec2 ds = water_disp_scroll * world_time;
 	vec2 dp = sampled * water_disp_scale;
 	float dx = _noise(dp + ds) + _noise(dp - ds);
 	float dy = _noise(dp + ds + vec2(31.0, 19.0)) + _noise(dp - ds + vec2(31.0, 19.0));
@@ -74,7 +81,7 @@ void fragment() {
 
 	// Directional color noise — drives the quantized highlight bands that visually
 	// communicate flow direction per-material.
-	vec2 scroll = scroll_velocity * TIME;
+	vec2 scroll = scroll_velocity * world_time;
 	float n1 = _noise(sampled * wave_scale + scroll);
 	float n2 = _noise(sampled * wave_scale_2 + scroll * 0.7 + vec2(43.0, 17.0));
 	float combined = n1 * 0.6 + n2 * 0.4;

@@ -54,10 +54,9 @@ godot.log
 # copied into assets/audio/.
 assets/audio_all/
 
-# Local Claude state
+# Local Claude state. CLAUDE.md itself is TRACKED — it's the repo's contributor
+# guidance, not local state; only the session/settings dir is private.
 .claude/
-CLAUDE.md
-TILE_SYSTEM_REWRITE.md
 
 # Secrets (defensive — none currently exist in repo)
 .env

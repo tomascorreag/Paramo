@@ -40,13 +40,24 @@ extends Node
 ## Painting
 ## ---------------------------------------------------------------------------
 ##
-## There is no partial-grass art, so appearance is a threshold on the value:
-## bare (dirt source) below `bare_threshold`, grass again above
-## `regrow_threshold`. Those two are deliberately far apart — a single threshold
-## makes a cell hovering at it flip between grass and dirt every single day.
-## The gap also models the real thing: a path that has been walked bare stays
-## bare a while after the walking stops, and re-bares quickly when it resumes,
-## because the value keeps falling and rising underneath the paint.
+## Appearance follows the value CONTINUOUSLY, in two stages.
+##
+## Above `bare_threshold` the cell is grass, and its LENGTH tracks the value: the
+## atlas paints the same cube at several grass lengths per tone, GrassLadder
+## orders them, and the value is cut into one band per rung. The ceiling is the
+## variant TERRAIN GENERATION chose for that cell — grass grows back to the stand
+## that belongs there and no further — and the ladder never leaves that variant's
+## tone, so a cell keeps its grass TYPE while its length moves. A cell whose
+## variant has no shorter form (a slope, a wall, a stair) simply has
+## one rung and behaves as it always did.
+##
+## Below `bare_threshold` it is dirt, and it takes `regrow_threshold` to come
+## back. Those two are deliberately far apart — at a single threshold a cell
+## hovering there flips between grass and dirt every day. The gap also models the
+## real thing: a path walked bare stays bare a while after the walking stops, and
+## re-bares quickly when it resumes, because the value keeps falling and rising
+## underneath the paint. The rung boundaries above it get the same treatment at a
+## much smaller scale, via `grass_step_hysteresis`.
 ##
 ## Repaints go straight to the TileMapLayer (set_cell), exactly as fire does in
 ## both directions: TileGrid never observes source-id swaps and doesn't need to
@@ -135,9 +146,20 @@ const SOURCE_GRASS: int = 0
 ## bare_threshold or cells flip paint every day (see the header).
 @export var regrow_threshold: float = 0.55
 
+## How far the value must move PAST a rung boundary before the grass changes
+## length, in vegetation units. The same deadband bare_threshold/regrow_threshold
+## give the dirt swap, applied to every rung above it: without one, a cell
+## sitting on a boundary — walked a little each day, healing a little each day,
+## which is exactly what a lightly used route does — would re-cut its tile every
+## sweep. Costs nothing at rest; the rung only moves when the value really moves.
+@export var grass_step_hysteresis: float = 0.03
+
 # cell -> {"coord": Vector2i, "layer": TileMapLayer, "kind": StringName,
 #          "veg": float, "rate": float, "bare": bool,
-#          "d": float, "i": float}
+#          "top": int, "rung": int, "d": float, "i": float}
+# "coord" is the variant TERRAIN GENERATION chose, "top" its rung on that
+# variant's grass ladder (the cell's maximum length) and "rung" the length it is
+# currently wearing — see _rung_for.
 # "d"/"i" are the clock and rain-integral readings when this cell last recovered
 # — see _recover_cell.
 var _veg: Dictionary = {}
@@ -170,6 +192,14 @@ var _rain_days: float = 0.0
 
 var _day_night: Node = null
 var _world_hooked: bool = false
+
+# Grass-length ladders, read off the atlas once per TileSet. Every ground layer
+# on a map shares one TileSet, so this is built on the first damaged cell and
+# then reused for the whole run; it is keyed by the resource rather than cached
+# outright so a fixture (or a second map) with a different atlas cannot inherit
+# the wrong ladders.
+var _ladder: GrassLadder = null
+var _ladder_tile_set: TileSet = null
 
 # Recovery's own RNG stream (per-cell rate draws, dirt-variant picks). Randomly
 # seeded for the game; the balance simulator seeds it per run for determinism.
@@ -428,11 +458,19 @@ func _begin_tracking(cell: Vector2i, layer: TileMapLayer = null,
 		kind = cd.tile_kind
 	if coord.x < 0:
 		return {}
+	# The variant generation chose IS the cell's longest grass, so its rung is
+	# both the ceiling and the starting length. Captured here, at the one moment
+	# the cell is known to be undamaged — the painted coord after this point is
+	# whatever length the wear has left, and reading the ceiling off that would
+	# ratchet the cell shorter every time it was re-tracked.
+	var top: int = _ladder_for(layer).top_rung(coord)
 	var rec: Dictionary = {
 		"coord": coord,
 		"layer": layer,
 		"kind": kind,
 		"veg": 1.0,
+		"top": top,
+		"rung": top,
 		# Drawn once, never re-rolled — see the header.
 		"rate": rng.randf_range(1.0 - recovery_rate_spread, 1.0 + recovery_rate_spread),
 		"bare": false,
@@ -471,7 +509,9 @@ func _refresh_paint(cell: Vector2i, rec: Dictionary) -> void:
 		_erase(cell)
 		return
 	var veg: float = float(rec["veg"])
-	if not bool(rec["bare"]) and veg <= bare_threshold:
+	var was_bare: bool = bool(rec["bare"])
+
+	if not was_bare and veg <= bare_threshold:
 		# Keeps the cell's shape (a slope stays a slope) and picks a random dirt
 		# variant of the same kind, so worn ground has the same visual variety
 		# burned ground does. Drawn from OUR rng, never fire's.
@@ -483,9 +523,61 @@ func _refresh_paint(cell: Vector2i, rec: Dictionary) -> void:
 			return  # no dirt art for this cell; leave it grass rather than empty
 		layer.set_cell(cell, FireManager.SOURCE_DIRT, dirt, 0)
 		_set_bare(rec, true)
-	elif bool(rec["bare"]) and veg >= regrow_threshold:
-		layer.set_cell(cell, SOURCE_GRASS, rec["coord"] as Vector2i, 0)
-		_set_bare(rec, false)
+		return
+	if was_bare and veg < regrow_threshold:
+		return
+
+	# Grass is standing (or coming back): wear it at the length the value has
+	# earned. On a cell whose variant has no shorter form this collapses to the
+	# old behaviour — one rung, so the coord never changes and the only paint
+	# that ever happens is the dirt swap above and the return from it.
+	var rung: int = _rung_for(veg, int(rec["top"]), int(rec["rung"]))
+	if not was_bare and rung == int(rec["rung"]):
+		return
+	rec["rung"] = rung
+	layer.set_cell(cell, SOURCE_GRASS,
+			_ladder_for(layer).coord_at(rec["coord"] as Vector2i, rung), 0)
+	_set_bare(rec, false)
+
+
+# The rung a cell wears at `veg`, given its ceiling `top` and the rung it is on.
+#
+# The grass span is everything above bare_threshold (below that the cell is
+# dirt, which is rung -1 in spirit and handled by the caller), cut into `top+1`
+# equal bands. So a cell generated with tall grass passes through more visible
+# lengths on its way out than one generated short, which is what makes the loss
+# read as continuous on the cells that have the most to lose.
+#
+# `grass_step_hysteresis` is applied against the DIRECTION of travel: the value
+# must clear a boundary by that much to grow, and fall that far below it to
+# wear. A cell parked on a boundary therefore holds its current length instead
+# of re-cutting its tile on every sweep.
+func _rung_for(veg: float, top: int, current: int) -> int:
+	if top <= 0:
+		return 0
+	var span: float = 1.0 - bare_threshold
+	if span <= 0.0:
+		return top
+	var bands: int = top + 1
+	var t: float = (veg - bare_threshold) / span
+	var h: float = grass_step_hysteresis / span
+	var up: int = clampi(int(floor((t - h) * float(bands))), 0, top)
+	if up > current:
+		return up
+	var down: int = clampi(int(floor((t + h) * float(bands))), 0, top)
+	if down < current:
+		return down
+	return clampi(current, 0, top)
+
+
+# Ladders for the atlas this layer paints from. Rebuilt only when handed a
+# different TileSet, so the atlas scan happens once per map rather than per cell.
+func _ladder_for(layer: TileMapLayer) -> GrassLadder:
+	var ts: TileSet = layer.tile_set if layer != null else null
+	if _ladder == null or ts != _ladder_tile_set:
+		_ladder_tile_set = ts
+		_ladder = GrassLadder.new(ts, SOURCE_GRASS)
+	return _ladder
 
 
 # A regeneration repaints the same TileMapLayer nodes with a new world, so stale

@@ -55,6 +55,13 @@ class TileStub:
 	var tile_kind: StringName = &"FLAT"
 
 
+# The longest rung of each shipped tone, so the ladder tests below start with
+# the most to lose. Named rather than derived because the POINT of those tests is
+# what the atlas authors — deriving them from GrassLadder would make them pass
+# against any ladder at all, including an empty one.
+const _TALL_WARM: Vector2i = Vector2i(0, 4)
+const _TALL_COOL: Vector2i = Vector2i(1, 4)
+
 var _rain: RainStub
 var _grid: GridStub
 var _grass_coord: Vector2i
@@ -132,6 +139,20 @@ func _put_grass(cell: Vector2i) -> void:
 	tile.layer = _layer
 	_grid.cells[cell] = tile
 	FireManager._grid = _grid
+
+
+# As _put_grass, but for a NAMED grass variant — the ladder tests need to start
+# from a known rung, and get_tile_id(0) only ever gives one of them.
+func _put_grass_variant(cell: Vector2i, coord: Vector2i) -> void:
+	_layer.set_cell(cell, RegrowthManager.SOURCE_GRASS, coord, 0)
+	var tile := TileStub.new()
+	tile.layer = _layer
+	_grid.cells[cell] = tile
+	FireManager._grid = _grid
+
+
+func _ladder() -> GrassLadder:
+	return GrassLadder.new(_layer.tile_set, RegrowthManager.SOURCE_GRASS)
 
 
 func _burn_out(cell: Vector2i, grass_coord: Vector2i = Vector2i(-1, -1)) -> void:
@@ -594,6 +615,122 @@ func test_recovery_is_independent_of_the_sweep_cadence() -> void:
 
 	assert_almost_eq(in_forty_steps, in_one_step, 0.0001,
 			"cadence changed the amount recovered")
+
+
+func test_grass_gets_shorter_before_it_disappears() -> void:
+	# The feature in one test: loss is CONTINUOUS. A cell that has taken some
+	# wear but is nowhere near bare must already look shorter — under the old
+	# single threshold it looked untouched right up to the moment it turned to
+	# dirt.
+	var cell := Vector2i(2, 2)
+	_put_grass_variant(cell, _TALL_WARM)
+	_regrowth.trample_per_step = 0.6
+	_regrowth.trample(cell)
+
+	assert_eq(_layer.get_cell_source_id(cell), RegrowthManager.SOURCE_GRASS,
+			"0.4 vegetation is well above bare_threshold — still grass")
+	var worn: Vector2i = _layer.get_cell_atlas_coords(cell)
+	assert_ne(worn, _TALL_WARM, "the grass never got shorter")
+	assert_lt(_ladder().top_rung(worn), _ladder().top_rung(_TALL_WARM),
+			"the grass changed variant but not to a SHORTER one")
+
+
+func test_wearing_a_cell_never_changes_its_grass_type() -> void:
+	# Two tones ship, and a cell must keep the one generation gave it: a cell
+	# stepping across tones as it wore would read as the species changing, not
+	# as the same stand of grass being walked down.
+	var cell := Vector2i(3, 2)
+	_put_grass_variant(cell, _TALL_COOL)
+	_regrowth.trample_per_step = 0.2
+
+	var seen: Array[Vector2i] = []
+	for _i in 4:
+		_regrowth.trample(cell)
+		seen.append(_layer.get_cell_atlas_coords(cell))
+
+	for coord: Vector2i in seen:
+		assert_eq(coord.x, _TALL_COOL.x,
+				"%s is not on the cool ladder (column %d)" % [coord, _TALL_COOL.x])
+
+
+func test_grass_grows_back_no_longer_than_generation_made_it() -> void:
+	# The ceiling, and the reason the ladder is anchored to the coord captured
+	# at first damage: a short-grass cell that healed into the tall art would
+	# quietly rewrite the mountain's authored texture every time it was walked
+	# on and left alone.
+	var cell := Vector2i(4, 2)
+	var short_warm := Vector2i(0, 6)  # rung 1 of 5
+	_put_grass_variant(cell, short_warm)
+	_regrowth.trample_per_step = 1.0
+	_regrowth.trample(cell)
+	assert_true(_regrowth.is_bare(cell))
+
+	_regrowth.base_recovery_per_day = 1.0
+	_regrowth.rain_recovery_bonus = 0.0
+	_advance_days()
+
+	assert_eq(_layer.get_cell_atlas_coords(cell), short_warm,
+			"a fully recovered cell must wear exactly the variant it was born with")
+
+
+func test_grass_grows_back_through_the_lengths_it_lost() -> void:
+	# Recovery is the same ladder in reverse: a burn scar comes back as short
+	# grass first and only reaches its full length when the value does.
+	var cell := Vector2i(5, 2)
+	_put_grass_variant(cell, _TALL_WARM)
+	_regrowth.trample_per_step = 1.0
+	_regrowth.trample(cell)
+	_regrowth.base_recovery_per_day = 0.3
+	_regrowth.rain_recovery_bonus = 0.0
+
+	var rungs: Array[int] = []
+	for _i in 4:
+		_advance_days()
+		if not _regrowth.is_bare(cell):
+			rungs.append(_ladder().top_rung(_layer.get_cell_atlas_coords(cell)))
+
+	assert_gt(rungs.size(), 1, "the cell never came back at all")
+	assert_gt(rungs[rungs.size() - 1], rungs[0], "the grass never grew longer")
+	for i in range(1, rungs.size()):
+		assert_true(rungs[i] >= rungs[i - 1], "recovery walked the ladder DOWN")
+
+
+func test_length_does_not_flicker_on_a_rung_boundary() -> void:
+	# The same problem bare_threshold/regrow_threshold solve, one scale down: a
+	# lightly used route sits on a boundary for days, and without a deadband it
+	# would re-cut its tile on every sweep.
+	var cell := Vector2i(6, 2)
+	_put_grass_variant(cell, _TALL_WARM)
+	_regrowth.grass_step_hysteresis = 0.03
+	_regrowth.trample(cell, 0.49)  # veg 0.51, just over the rung-2 boundary
+	var settled: Vector2i = _layer.get_cell_atlas_coords(cell)
+
+	_regrowth.trample(cell, 0.015)  # inside the deadband
+	assert_eq(_layer.get_cell_atlas_coords(cell), settled,
+			"a nudge smaller than the hysteresis changed the grass length")
+
+	_regrowth.trample(cell, 0.05)  # and now clear of it
+	assert_ne(_layer.get_cell_atlas_coords(cell), settled,
+			"the deadband swallowed a move that really crossed the boundary")
+
+
+func test_a_single_rung_variant_behaves_as_it_always_did() -> void:
+	# Slopes, walls and stairs are painted once each and have no shorter art.
+	# They must still wear to dirt and come back — the ladder is an addition, not
+	# a precondition, and most of the grass source opts out of it.
+	var cell := Vector2i(7, 6)
+	var slope := Vector2i(2, 0)  # SLOPE_NW, no grass_length authored
+	_put_grass_variant(cell, slope)
+	_regrowth.trample_per_step = 0.25
+
+	for _i in 3:  # veg 0.25 — worn thin, but still above bare_threshold
+		_regrowth.trample(cell)
+	assert_eq(_layer.get_cell_atlas_coords(cell), slope,
+			"nothing to step down to, so the art must not change")
+
+	_regrowth.trample(cell)
+	assert_true(_regrowth.is_bare(cell))
+	assert_eq(_layer.get_cell_source_id(cell), FireManager.SOURCE_DIRT)
 
 
 func test_time_spent_burning_is_not_banked_and_paid_out_later() -> void:
