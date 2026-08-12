@@ -116,9 +116,10 @@ const SOURCE_GRASS: int = 0
 ## happened at the trailhead funnel — hence the measured "no detectable effect on
 ## the ground". At 0.18 a couple of crossings a day holds a cell down and ~5
 ## wear it bare, so routes that genuinely overlap now leave a mark and the rest
-## of the mountain still recovers. (0.36 is that doubled: ~2 crossings bare a
-## cell, and one a day outpaces even a rainy day's recovery.)
-@export var trample_per_step: float = 0.36
+## of the mountain still recovers. (It sat at 0.36 — that doubled — for a while:
+## ~2 crossings bare a cell and one a day outpaces even a rainy day's recovery,
+## which read as too punishing on the ground; halved back to the measured rate.)
+@export var trample_per_step: float = 0.18
 
 ## The PLAYER's wear as a fraction of a visitor's, applied by Player and by the
 ## simulator's bot. One person walking their own mountain should leave a fainter

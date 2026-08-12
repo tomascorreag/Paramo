@@ -6,8 +6,9 @@ extends CanvasLayer
 ## get_tree().paused; this layer runs PROCESS_MODE_ALWAYS so its own buttons stay
 ## live while everything else is frozen.
 ##
-## The main view shows an inline Settings section (a single master-volume slider)
-## with Quit and Resume beneath it; Quit swaps to a confirm view. Volume drives
+## The main view shows an inline Settings section (a master-volume slider and a
+## fullscreen toggle) with Quit and Resume beneath it; Quit swaps to a confirm
+## view. Volume drives
 ## two sinks: the page-side Strudel music gain through JavaScriptBridge (web
 ## only) and the Godot-side SFX bus (all platforms). Quit confirms first,
 ## then fully restarts: on web a
@@ -25,9 +26,11 @@ enum View { MAIN, CONFIRM }
 @onready var _main: VBoxContainer = %Main
 @onready var _confirm: VBoxContainer = %Confirm
 @onready var _volume_slider: HSlider = %VolumeSlider
+@onready var _fullscreen_btn: Button = %FullscreenBtn
 
 var _open: bool = false
 var _view: View = View.MAIN
+var _was_fullscreen: bool = false
 
 
 func _ready() -> void:
@@ -44,6 +47,8 @@ func _wire() -> void:
 	(%ResumeBtn as Button).pressed.connect(close)
 	(%CancelBtn as Button).pressed.connect(_set_view.bind(View.MAIN))
 	(%YesBtn as Button).pressed.connect(_do_restart)
+	_fullscreen_btn.pressed.connect(_on_fullscreen_pressed)
+	_refresh_fullscreen_label()
 	_volume_slider.value_changed.connect(_on_volume_changed)
 	# Apply the authored default now — otherwise the SFX bus sits at 0 dB (louder
 	# than the slider claims) until the player first drags it.
@@ -76,8 +81,19 @@ func open() -> void:
 		return
 	_open = true
 	_set_view(View.MAIN)
+	_refresh_fullscreen_label()
 	visible = true
 	get_tree().paused = true
+
+
+# The window mode can change behind the menu's back — the `toggle_fullscreen`
+# action (F11) is handled by DisplayManager, and the OS/window manager can do it
+# too (alt+enter, a titlebar button). Polling the mode while the modal is open is
+# two DisplayServer calls a frame in the one state where nothing else runs, and it
+# is the only way to keep the label honest without a signal per source.
+func _process(_delta: float) -> void:
+	if _open and _is_fullscreen() != _was_fullscreen:
+		_refresh_fullscreen_label()
 
 
 func close() -> void:
@@ -99,6 +115,29 @@ func _set_view(v: View) -> void:
 
 
 # --- Actions ----------------------------------------------------------------
+
+func _is_fullscreen() -> bool:
+	var mode := DisplayServer.window_get_mode()
+	return mode == DisplayServer.WINDOW_MODE_FULLSCREEN \
+		or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+
+
+# The button is labelled with the ACTION it performs, not the current state, so
+# there is no on/off wording to translate ("activado"/"desactivado" does not fit
+# a 160px panel row). Store the KEY: a Button re-translates whatever sits in
+# `text` on a locale change, so writing tr() here would freeze the language.
+func _refresh_fullscreen_label() -> void:
+	_was_fullscreen = _is_fullscreen()
+	_fullscreen_btn.text = "UI_WINDOWED" if _was_fullscreen else "UI_FULLSCREEN"
+
+
+func _on_fullscreen_pressed() -> void:
+	# On web the browser only grants fullscreen from inside a user gesture; a
+	# `pressed` handler runs during input processing, so this call is honoured
+	# where a self-initiated one would be dropped silently.
+	DisplayManager.toggle_fullscreen()
+	_refresh_fullscreen_label()
+
 
 func _on_volume_changed(v: float) -> void:
 	# Two sinks, because the game's audio comes from two places: the music is

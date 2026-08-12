@@ -3,6 +3,8 @@ UI_PAUSED,paused,pausa
 UI_QUIT_Q,quit?,¿salir?
 UI_SETTINGS,settings,ajustes
 UI_VOLUME,volume,volumen
+UI_FULLSCREEN,fullscreen,pantalla completa
+UI_WINDOWED,windowed,ventana
 UI_DISCARD_RUN_Q,discard run and restart?,¿descartar la partida y reiniciar?
 UI_YES,yes,sí
 UI_CANCEL,cancel,cancelar

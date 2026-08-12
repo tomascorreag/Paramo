@@ -167,3 +167,57 @@ func test_pause_menu_buttons_fit_their_text_in_every_locale() -> void:
 			assert_lte(w + padding, available,
 				"%s: '%s' needs %.0fpx (+%.0f padding) in a %.0fpx button"
 					% [locale, text, w, padding, available])
+
+
+func test_fullscreen_button_fits_both_of_its_labels_in_every_locale() -> void:
+	# This one stretches to the Settings column rather than carrying a minimum
+	# size, so its budget is the panel's inner width, and it has to hold BOTH of
+	# the keys it swaps between (see PauseMenu._refresh_fullscreen_label) — the
+	# label the player never sees at boot is the one that silently clips.
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
+	var btn := pause.get_node(
+		"Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn") as Button
+	assert_not_null(btn)
+
+	var panel := pause.get_node("Center/Panel") as Panel
+	var margin := pause.get_node("Center/Panel/Margin") as MarginContainer
+	var available: float = panel.custom_minimum_size.x \
+		- margin.get_theme_constant(&"margin_left") \
+		- margin.get_theme_constant(&"margin_right")
+	var padding: float = btn.get_theme_stylebox(&"normal").get_margin(SIDE_LEFT) \
+		+ btn.get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
+	var font: Font = btn.get_theme_font(&"font")
+	var font_size: int = btn.get_theme_font_size(&"font_size")
+
+	for locale: String in ["en_GB", "es_CO"]:
+		TranslationServer.set_locale(locale)
+		for key: String in ["UI_FULLSCREEN", "UI_WINDOWED"]:
+			var text := tr(key)
+			assert_ne(text, key, "%s has no %s translation" % [key, locale])
+			var w: float = font.get_string_size(
+				text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size).x
+			assert_lte(w + padding, available,
+				"%s: '%s' needs %.0fpx (+%.0f padding) in a %.0fpx row"
+					% [locale, text, w, padding, available])
+
+
+func test_pause_panel_is_tall_enough_for_its_settings() -> void:
+	# The Panel does NOT grow to its content: the MarginContainer is anchored to
+	# the panel rect rather than being a container child, so custom_minimum_size
+	# IS the content box and anything that overflows is drawn outside the frame
+	# with no error. Adding a settings row means raising that number.
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var panel := pause.get_node("Center/Panel") as Panel
+	var margin := pause.get_node("Center/Panel/Margin") as MarginContainer
+	var stack := pause.get_node("Center/Panel/Margin/Stack") as VBoxContainer
+	var available: float = panel.size.y \
+		- margin.get_theme_constant(&"margin_top") \
+		- margin.get_theme_constant(&"margin_bottom")
+	assert_lte(stack.get_combined_minimum_size().y, available,
+		"the main view needs %.0fpx in a %.0fpx panel"
+			% [stack.get_combined_minimum_size().y, available])
