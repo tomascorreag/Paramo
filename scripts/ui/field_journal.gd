@@ -11,7 +11,7 @@ extends CanvasLayer
 ##
 ## The Book (Book.png, 480x270 = the logical resolution) RISES up from below the
 ## bottom edge on open and DROPS back down on close. It slides by animating the
-## full-rect Book's offset_top/offset_bottom together (both +H hides it below, 0
+## full-rect Book's offset_top/offset_bottom together (both at _park_offset() hides it below, 0
 ## rests it) rather than `position` — a full-rect-anchored Control recomputes
 ## `position` from its anchors, so a position tween fights the layout; the offsets
 ## slide it vertically while keeping the horizontal anchoring and resolution
@@ -58,7 +58,7 @@ func _ready() -> void:
 	visibility_changed.connect(_sync_page_viewports)
 	_sync_page_viewports()
 	# Start the book parked below the bottom edge so the first open rises cleanly.
-	var h := _viewport_height()
+	var h := _park_offset()
 	_book.offset_top = h
 	_book.offset_bottom = h
 	_dim.modulate.a = 0.0
@@ -116,6 +116,12 @@ func open() -> void:
 	_open = true
 	visible = true
 	get_tree().paused = true
+	# Re-park stale offsets: if the window was resized while closed, the
+	# stored park offset may no longer clear the bottom edge and the book
+	# would pop in mid-rise.
+	var h := _park_offset()
+	_book.offset_top = maxf(_book.offset_top, h)
+	_book.offset_bottom = _book.offset_top
 	if _tween and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
@@ -130,7 +136,7 @@ func close() -> void:
 	if not _open:
 		return
 	_open = false
-	var h := _viewport_height()
+	var h := _park_offset()
 	if _tween and _tween.is_valid():
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
@@ -144,8 +150,13 @@ func close() -> void:
 	)
 
 
-func _viewport_height() -> float:
-	return get_viewport().get_visible_rect().size.y
+# Offset at which the book is fully below the bottom edge. BookArt is a
+# centered 270-tall rect, so its top sits at offset + vp.y/2 - 135; hiding
+# needs offset >= vp.y/2 + 135. The old `offset = vp.y` only cleared it when
+# vp.y >= 270 — at the default windowed logical height (202) the book's top
+# 34 px popped in/out. +2 covers EXPAND nudging the logical height a pixel.
+func _park_offset() -> float:
+	return get_viewport().get_visible_rect().size.y * 0.5 + 137.0
 
 
 func _collect_page_viewports() -> void:

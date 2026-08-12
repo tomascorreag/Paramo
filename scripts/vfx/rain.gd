@@ -33,10 +33,11 @@ var _lantern_lookup_done: bool = false
 func _ready() -> void:
 	add_to_group(GROUP)
 	_mat = _rect.material as ShaderMaterial
-	if _mat != null:
-		var v: Variant = _mat.get_shader_parameter(PARAM_VIEWPORT)
-		if v is Vector2:
-			_vp_size = v
+	# The shader's world_px math spans the LOGICAL viewport (window/N, see
+	# DisplayManager), which is almost never the authored 480x270 — track the
+	# real rect and follow resizes, or the pattern desyncs from the camera.
+	get_viewport().size_changed.connect(_update_viewport_size)
+	_update_viewport_size()
 	# Start dry regardless of the authored scene value. Nothing else zeroes the
 	# rain at load, and the only driver (DayNightSceneController._process) is
 	# suppressed while TimeManager is paused — so without this the title gate's
@@ -50,6 +51,12 @@ func _ready() -> void:
 	# Lantern lookup deferred so Player._ready (which mounts the controller and
 	# adds it to LANTERN_GROUP) has run first.
 	call_deferred(&"_resolve_lantern")
+
+
+func _update_viewport_size() -> void:
+	_vp_size = get_viewport().get_visible_rect().size
+	if _mat != null:
+		_mat.set_shader_parameter(PARAM_VIEWPORT, _vp_size)
 
 
 func _resolve_lantern() -> void:
