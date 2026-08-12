@@ -79,6 +79,14 @@ func test_book_art_is_the_native_book_size() -> void:
 	assert_eq(art.anchor_right, 0.5)
 
 
+func test_book_parks_fully_below_any_viewport() -> void:
+	# The park offset must clear BookArt's half-height (135) below the bottom
+	# edge at ANY logical viewport height — the old `offset = vp.y` park only
+	# hid the book when vp.y >= 270.
+	var vp_h: float = journal.get_viewport().get_visible_rect().size.y
+	assert_gte(journal._park_offset(), vp_h * 0.5 + 135.0)
+
+
 func test_pages_sit_on_the_measured_page_rects() -> void:
 	for name_: String in PAGE_RECTS:
 		var rect: Rect2i = PAGE_RECTS[name_]

@@ -23,3 +23,5 @@
 - [ ] Clean up: fix and optimize processes that might be hacky/unoptimized, not only in the game but for the repo in general. Make sure not to downgrade any functionality.
 - [ ] make the pause and journal views completely pause the world, including effects like rain , fire and visitors, both functionally and visually.
 - [ ] Make grass tile degradation more of a continuous thing, with grass growing longer over time or shorter with degradation until it's gone. The max grass length should be the one that is currently assigned randomly during terrian generation..
+- [ ] add a fullscreen toggle to the in-game settings
+- [ ] Reduce the damage visitors/player do while walking by 50%.
