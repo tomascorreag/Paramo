@@ -434,10 +434,13 @@ func test_known_set_swatches_carry_the_ink_material() -> void:
 	# this asserts: same SHADER, not same material.
 	for s: JournalKnownSet in _sections():
 		assert_not_null(s.ink_material, "%s: no ink material" % s.title)
-		var swatches := 0
+		# Every TextureRect the section owns, not the swatches alone: a locked
+		# entry's price coin is one too, and it is on this shader for the same
+		# reason (its own `dim`, so it fades with its own number).
+		var inked := 0
 		for child in s.get_children():
 			if child is TextureRect:
-				swatches += 1
+				inked += 1
 				var mat := (child as TextureRect).material as ShaderMaterial
 				assert_not_null(
 					mat, "%s: a swatch is not going through the ink shader" % s.title)
@@ -449,8 +452,11 @@ func test_known_set_swatches_carry_the_ink_material() -> void:
 					CanvasItem.TEXTURE_FILTER_NEAREST,
 					"%s: swatches must stay hard-edged" % s.title)
 		assert_eq(
-			swatches, s.swatch_textures().size(),
+			s._swatches.size(), s.swatch_textures().size(),
 			"%s: a resolved texture did not get a node" % s.title)
+		assert_eq(
+			inked, s._swatches.size() + s._cost_icons.size(),
+			"%s: an inked child is neither a swatch nor a price coin" % s.title)
 
 
 ## The four hue-family ramps journal_ink.gdshader picks between, by shader uniform.

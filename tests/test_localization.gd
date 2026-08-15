@@ -27,7 +27,14 @@ const QUOTED_UPPER_SNAKE: String = "\"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\""
 # Only these prefixes are treated as translation keys. Other quoted UPPER_SNAKE
 # strings exist (feature tags, shader defines), so without this the scan would
 # report them as missing translations.
-const KEY_PREFIXES: Array[String] = ["UI_", "JOURNAL_", "LOADING_", "SEASON_"]
+const KEY_PREFIXES: Array[String] = [
+	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_",
+]
+
+# The lowercase-chrome convention covers UI copy. CLAUDE.md puts in-world
+# narrative copy out of its scope, and this prefix is what marks it: NARRATIVE_*
+# is prose in the park's voice, written in sentence case.
+const SENTENCE_CASE_PREFIX: String = "NARRATIVE_"
 
 var _csv: Dictionary = {}      # key -> {locale: value}
 var _locales: PackedStringArray = PackedStringArray()
@@ -77,6 +84,8 @@ func test_ui_copy_is_lowercase() -> void:
 	# The project's UI copy convention (CLAUDE.md) is lowercase chrome, in every
 	# language. Checked on the CSV because that is now where the copy lives.
 	for key: String in _csv:
+		if key.begins_with(SENTENCE_CASE_PREFIX):
+			continue
 		for locale: String in _locales:
 			var value := String(_csv[key][locale])
 			assert_eq(value, value.to_lower(),

@@ -71,6 +71,17 @@ const DAY_SIGMA: float = 0.18 # day-curve gaussian width
 # burning cell) scales with the number it does not control.
 const MAX_CONCURRENT_BURNING: int = 64 # ignition cap — see above, NOT a ceiling
 
+## First day_count on which the world lights its own fires. 1 = the opening day
+## (day_count 0) never spontaneously ignites, which is what the FTUE is built on:
+## the player learns to walk, read the journal and build without a fire on the
+## mountain. Set to 0 for the pre-FTUE behaviour.
+##
+## Gates `_roll_ignitions` ONLY. `_roll_spread` and the public `ignite()` (the
+## debug ignite action, the balance simulator's scripted burns) are untouched —
+## on day 0 there is nothing to spread from anyway, and silencing the debug key
+## would cost more than it buys.
+var first_ignition_day: int = 1
+
 # --- Rain coupling ---
 # Spread chance hits zero at this rain intensity. Linear ramp from 0 (no rain
 # = full spread) to RAIN_SPREAD_ZERO_AT (spread = 0).
@@ -190,6 +201,16 @@ func is_burning(cell: Vector2i) -> bool:
 ## caches whatever atlas coord happened to be there as `grass_coord`, so a later
 ## extinguish repaints that foreign coord from SOURCE_GRASS and corrupts the
 ## tile. Any new caller must go through here rather than `_ignite`.
+## Is the world allowed to start its OWN fires right now? False through the
+## FTUE's opening day (see first_ignition_day). Says nothing about spread or
+## about the public ignite() — both bypass it deliberately. Public so the gate
+## is testable without reaching into _roll_ignitions.
+func spontaneous_ignition_allowed() -> bool:
+	if _time_manager == null:
+		return true
+	return int(_time_manager.day_count) >= first_ignition_day
+
+
 func can_ignite(cell: Vector2i) -> bool:
 	if _grid == null:
 		return false
@@ -532,6 +553,8 @@ func _roll_ignitions() -> void:
 	if _burning.size() >= MAX_CONCURRENT_BURNING:
 		return
 	if _grid == null:
+		return
+	if not spontaneous_ignition_allowed():
 		return
 	var b: Rect2i = _grid.bounds()
 	if b.size.x <= 0 or b.size.y <= 0:

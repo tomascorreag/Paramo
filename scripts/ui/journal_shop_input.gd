@@ -23,6 +23,16 @@ extends Control
 ## computed by one code path, so they cannot disagree. What the hover DOES is
 ## JournalKnownSet's business (see HOVER_LIFT_PX there); this node only says where
 ## the pointer is.
+##
+## An entry that is FOR SALE — locked and affordable — also gets a "left click to
+## buy" tag floating over it (JournalTooltip). It says the one thing the page
+## cannot: the price is printed beside every locked swatch, but nothing on a book
+## says a picture in it is a button.
+##
+## It also runs through the same REFUSALS, which is the other half of that claim:
+## the tutorial gate is asked here as well as in _try_buy, and the section itself
+## declines to react to an entry the player cannot afford. A swatch that lifts is
+## a promise that a click will do something.
 
 ## The right page's SubViewportContainer, whose local space equals its
 ## viewport's canvas space.
@@ -36,6 +46,9 @@ const UNLOCKS_GROUP: StringName = &"unlocks"
 const TOKENS: StringName = &"tokens"
 
 var _unlocks: Node = null
+## The "left click to buy" tag, built on first use — a journal that is never
+## hovered never makes one.
+var _tooltip: JournalTooltip = null
 
 
 func _ready() -> void:
@@ -77,7 +90,12 @@ func _to_page(local: Vector2) -> Vector2:
 func handle_hover(pr_local: Vector2) -> void:
 	var hit_section: JournalKnownSet = null
 	var hit_index: int = -1
-	if content != null and Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
+	# Gated exactly where _try_buy is gated, and for the same reason the sections
+	# refuse to react to an unaffordable entry: during the FTUE the page is
+	# READABLE before it is a shop, and a swatch that lifts under the pointer
+	# promises a purchase the step has not unlocked yet.
+	if TutorialGate.allows(TutorialGate.Action.SHOP) and content != null \
+			and Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
 		for section: JournalKnownSet in sections:
 			if section == null:
 				continue
@@ -92,9 +110,11 @@ func handle_hover(pr_local: Vector2) -> void:
 	for section: JournalKnownSet in sections:
 		if section != null:
 			section.set_hovered(hit_index if section == hit_section else -1)
+	_update_tooltip(hit_section, hit_index)
 
 
 func _clear_hover() -> void:
+	_update_tooltip(null, -1)
 	for section: JournalKnownSet in sections:
 		if section != null:
 			section.set_hovered(-1)
@@ -117,7 +137,66 @@ func handle_click(pr_local: Vector2) -> bool:
 	return false
 
 
+# --- "left click to buy" tag -------------------------------------------------
+
+## Whether the tag has anything to say about this entry: only one that is FOR
+## SALE — locked, and affordable right now. Owned entries have nothing to buy,
+## and an unaffordable one is the case the whole hover path already declines to
+## react to; a tag over it would be the same false promise in words.
+func _is_for_sale(section: JournalKnownSet, index: int) -> bool:
+	if section == null or index < 0 or _unlocks_node() == null:
+		return false
+	var id: StringName = section.entry_id_at(index)
+	if id == &"":
+		return false
+	return not bool(_unlocks.call(&"is_unlocked", id)) \
+			and bool(_unlocks.call(&"can_afford_unlock", id))
+
+
+func _update_tooltip(section: JournalKnownSet, index: int) -> void:
+	if not _is_for_sale(section, index):
+		if _tooltip != null and is_instance_valid(_tooltip):
+			_tooltip.hide_tip()
+		return
+	var tip := _tooltip_node()
+	if tip == null:
+		return
+	var parent := tip.get_parent() as Control
+	# Section-local -> the glyph's parent, through the page. The SAME chain
+	# handle_hover walks, run backwards: whatever the warp does to the page, the
+	# glyph lands on the entry the arithmetic picked, not on the one next door.
+	var offset: Vector2 = content.position + section.position
+	var ink := section.entry_ink_rect(index)
+	var to_local := parent.get_global_transform().affine_inverse() \
+			* page_right.get_global_transform()
+	var art := Rect2(to_local * (ink.position + offset),
+			to_local.basis_xform(ink.size))
+	# The ink COLOUR comes from the section too, so the glyph and the page's own
+	# lettering are the same palette entry by construction rather than by two edits.
+	tip.show_over(art, Rect2(Vector2.ZERO, parent.size), section.text_color)
+
+
+# Parented to BookHit's PARENT (BookArt) rather than to BookHit, and that is a
+# draw-order decision: BookHit comes BEFORE Pages in field_journal.tscn, so
+# anything under it is painted UNDER the paper. Appended to BookArt it is the
+# last child, and therefore on top of the book.
+func _tooltip_node() -> JournalTooltip:
+	if _tooltip != null and is_instance_valid(_tooltip):
+		return _tooltip
+	var host := get_parent() as Control
+	if host == null:
+		return null
+	_tooltip = JournalTooltip.new()
+	host.add_child(_tooltip)
+	return _tooltip
+
+
 func _try_buy(section: JournalKnownSet, index: int) -> bool:
+	# Gated at the BUY, not at the click: the shop page is readable from the
+	# moment the journal opens (that is the step before this one), it just
+	# doesn't sell anything yet.
+	if not TutorialGate.allows(TutorialGate.Action.SHOP):
+		return false
 	var id: StringName = section.entry_id_at(index)
 	if id == &"" or _unlocks_node() == null:
 		return false
@@ -125,13 +204,17 @@ func _try_buy(section: JournalKnownSet, index: int) -> bool:
 		return false
 	# Asked BEFORE the attempt, because try_unlock reports the same false for
 	# "too poor" and "nothing happened" and only the first deserves a recoil.
-	if not bool(_unlocks.call(&"can_afford_unlock")):
+	if not bool(_unlocks.call(&"can_afford_unlock", id)):
 		section.flash_denied(index)
 		return false
 	var bought: bool = bool(_unlocks.call(&"try_unlock", id))
 	# Bought or refused, the presentation may need updating (try_unlock's spend
 	# also fires resource_changed, but a refusal does not).
 	_refresh_states()
+	# The pointer has not moved, so nothing else will re-ask: an entry just bought
+	# is no longer for sale, and a purchase that leaves "buy" floating over it
+	# reads as the click not having landed.
+	_update_tooltip(section, index)
 	return bought
 
 
@@ -146,14 +229,17 @@ func _on_resource_changed(id: StringName, _value: float, _delta: float) -> void:
 func _refresh_states() -> void:
 	if _unlocks_node() == null:
 		return
-	var cost: int = int(_unlocks.get(&"unlock_cost"))
-	var affordable: bool = bool(_unlocks.call(&"can_afford_unlock"))
+	# Per ENTRY, not per page: prices differ by type (ladder 10, bridge 20,
+	# fence 30), so both the printed number and the affordable/faded state have
+	# to be asked about that entry's own type.
 	for section: JournalKnownSet in sections:
 		if section == null:
 			continue
 		for id_str: String in section.entry_ids:
 			var id := StringName(id_str)
 			var locked: bool = not bool(_unlocks.call(&"is_unlocked", id))
+			var cost: int = int(_unlocks.call(&"unlock_cost_for", id))
+			var affordable: bool = bool(_unlocks.call(&"can_afford_unlock", id))
 			section.set_entry_state(id, locked, cost, affordable)
 
 

@@ -81,6 +81,24 @@ extends Control
 		entry_ids = value
 		queue_redraw()
 
+## Glyph printed beside a LOCKED entry's price. The token coin
+## (icons/money_small.tres) — the same 8px glyph RunCalendar stamps token yields
+## with, deliberately, so "10" here and "4" in the calendar read as the same
+## currency rather than as two unrelated numbers on one spread.
+##
+## A CHILD TextureRect like the swatches, not a draw_texture_rect in `_draw`, for
+## the same reason they are: the coin has to go through `ink_material` and the
+## price's digits must not (see the comment above `_rebuild`). It also gets the
+## per-entry `dim` that way, which is what lets the glyph fade with its own
+## number when that entry alone is unaffordable.
+##
+## Null prints the bare number — what preview tools and layout tests that never
+## set a shop state already see.
+@export var cost_icon: Texture2D = null:
+	set(value):
+		cost_icon = value
+		_rebuild()
+
 ## The TileSet `tile_kinds` are cut out of. The journal's is base_tileset.tres,
 ## the same one StructureLayerManager paints structures into.
 @export var tileset: TileSet = null:
@@ -132,6 +150,23 @@ extends Control
 		block_px = value
 		_rebuild()
 
+## Air between the title's rule and the swatch row, in texels, on top of the two
+## whole blocks the heading costs. Negative pulls the row UP into the heading's
+## second block — which is where the visible hole is: the rule sits
+## `header_underline_offset_px` rows into that block and the remaining ~14 rows of
+## it are blank paper the swatches used to start after.
+##
+## KEEP IT A MULTIPLE OF `block_px` IF YOU CAN. The swatch row's top is
+## `header_row_px()`, and a row whose top is not on a block boundary straddles two
+## warp bands, so the seam duplicates or drops a scanline through the ART, not just
+## through blank paper. Off-multiple values are allowed because a small nudge is
+## sometimes worth the seam risk on a swatch with slack at that row — but check it
+## with preview_run_calendar.gd rather than by eye, and clear the ink of the seam.
+@export_range(-36, 36) var header_gap_px: int = 0:
+	set(value):
+		header_gap_px = value
+		_rebuild()
+
 ## Extra texels around a swatch that still count as pointing at it. On top of
 ## `entry_rect`'s own rule that the whole DRAWN swatch is hittable, which is the
 ## part that matters when the art is bigger than its cell.
@@ -165,7 +200,9 @@ extends Control
 @export_range(0, 17) var header_underline_offset_px: int = 2:
 	set(value):
 		header_underline_offset_px = value
-		queue_redraw()
+		# _rebuild, not queue_redraw: this feeds header_row_px()'s floor, so it can
+		# move the swatch row as well as the rule.
+		_rebuild()
 
 @export var text_color: Color = Palette.P06:
 	set(value):
@@ -199,6 +236,8 @@ const HOVER_LIFT_PX: int = 1
 ## A hovered LOCKED swatch inks up toward owned instead of only moving. Reads as
 ## the thing surfacing when you point at it, and costs nothing extra: the `dim`
 ## uniform is already the mechanism the lock state uses.
+##
+## Only an entry the player could actually buy does this — see `reacts_to_hover`.
 const HOVER_ALPHA: float = 0.7
 
 ## How far an unaffordable entry recoils when clicked, in texels.
@@ -221,7 +260,28 @@ static var _indices: Dictionary[String, TileKindIndex] = {}
 ## Fade applied to a locked entry's swatch, via the ink shader's `dim` uniform.
 const LOCKED_ALPHA: float = 0.4
 
+## The price, in the data face at the data size — Tiny5 at 8, straight off the
+## theme. Same figures as the calendar's day stats; a price set any larger stops
+## being an annotation on the picture and starts competing with it.
+const COST_FONT_SIZE: int = 8
+
+## The coin's footprint, and the air between it and its digits. Both match
+## RunCalendar's stat glyphs exactly (8px art, 1px gap): the two are the same
+## currency at the same size on the same spread, and a different pitch here
+## would read as a different kind of number.
+const COST_ICON_PX: int = 8
+const COST_GAP_PX: int = 1
+
+## Air between the price and the right and bottom edges of the entry's rect. The
+## bottom one is load-bearing: it puts the baseline 2 rows above the cell's foot,
+## which keeps every inked row of the price — glyph included — inside the cell's
+## LOWER warp block and clear of both its seams.
+const COST_MARGIN_PX: int = 2
+
 var _swatches: Array[TextureRect] = []
+# One per swatch, 1:1, hidden while that entry is owned. Empty when `cost_icon`
+# is null, which is the pre-shop behaviour: a bare number.
+var _cost_icons: Array[TextureRect] = []
 # Where each swatch RESTS, before the hover lift and the denial shake are added.
 # Kept separately so those two offsets can be applied and removed without
 # accumulating rounding into the authored layout.
@@ -245,11 +305,19 @@ func _ready() -> void:
 	_rebuild()
 
 
-## Height of the title row, rounded UP to a whole block, PLUS the block holding its
-## rule. Everything below it is therefore in phase with the page whatever face the
-## title ends up using. See JournalTitle for why the rule needs a block of its own.
+## Where the swatch row starts: the title row rounded UP to a whole block, PLUS the
+## block holding its rule, PLUS `header_gap_px`. At the default gap of 0 everything
+## below is in phase with the page whatever face the title ends up using; see
+## JournalTitle for why the rule needs a block of its own, and `header_gap_px` for
+## what a gap off the block grid costs.
 func header_row_px() -> int:
-	return JournalTitle.row_px(active_header_font(), header_font_size, block_px)
+	var rows := JournalTitle.row_px(active_header_font(), header_font_size, block_px) \
+			+ header_gap_px
+	# Floor at the row just under the rule: a gap negative enough to reach it would
+	# print the swatches THROUGH the heading's own underline, which is never what
+	# tightening the spacing meant.
+	return maxi(rows, maxi(1, block_px) + header_underline_offset_px
+			+ JournalTitle.UNDERLINE_THICK_PX)
 
 
 ## The title face actually used: the export if set, else the theme's Label font.
@@ -317,6 +385,22 @@ func entry_rect(index: int) -> Rect2:
 	return r.grow_individual(
 			pad if index == 0 else 0.0, pad,
 			pad if index == _swatches.size() - 1 else 0.0, pad)
+
+
+## What is actually INKED for one entry, in this node's local space.
+##
+## Not `entry_rect()`, which is the HIT rect: that one covers the whole cell and
+## is grown by `hit_padding_px` on top, and a 20-texel ladder centred in a
+## 36-texel cell leaves rows of blank paper inside it. Anything placed relative
+## to the PICTURE — the buy glyph tucked into its corner — needs the picture.
+## Follows the hover lift, since the swatch's live position is what it reads.
+func entry_ink_rect(index: int) -> Rect2:
+	if index < 0 or index >= _swatches.size() \
+			or not is_instance_valid(_swatches[index]):
+		return entry_rect(index)
+	var r: TextureRect = _swatches[index]
+	var ink := _ink_rect(r.texture)
+	return Rect2(r.position + ink.position, ink.size)
 
 
 ## Which entry a local-space point lands on, -1 for a miss. Hit-tested in
@@ -405,13 +489,31 @@ func _deny_offset(index: int) -> int:
 	return int(roundf(sin(_deny_phase * PI * DENY_SHAKES) * _deny_phase)) * DENY_SHAKE_PX
 
 
+## Whether pointing at this entry does anything. An entry the player cannot
+## afford does NOT: the lift and the ink-up both say "this is available", and
+## saying it over a price the player cannot meet turns the refusal into a
+## surprise at click time instead of information before it. The price beside the
+## swatch is already the reason, printed; the swatch just stops answering.
+##
+## Owned entries still react. They are not BLOCKED, they are done — the section
+## is a reference list as well as a shop, and a lift is the honest response to
+## pointing at something that is on the page because you have it.
+func reacts_to_hover(index: int) -> bool:
+	var state := _state_for(index)
+	return not bool(state.get("locked", false)) \
+			or bool(state.get("affordable", false))
+
+
 func _apply_states() -> void:
 	for i in _swatches.size():
 		var r: TextureRect = _swatches[i]
 		if not is_instance_valid(r):
 			continue
 		var locked: bool = _state_for(i).get("locked", false)
-		var hovered: bool = i == _hovered
+		# `_hovered` stays the truth about where the POINTER is — the input node
+		# resolves that, and a refusal must not make the two disagree about it.
+		# What changes is whether this entry answers.
+		var hovered: bool = i == _hovered and reacts_to_hover(i)
 		var m := r.material as ShaderMaterial
 		if m != null:
 			m.set_shader_parameter(&"dim",
@@ -419,7 +521,65 @@ func _apply_states() -> void:
 		if i < _rest_positions.size():
 			r.position = _rest_positions[i] + Vector2(
 				_deny_offset(i), -HOVER_LIFT_PX if hovered else 0)
+	_apply_cost_icons()
 	queue_redraw()
+
+
+# The coin beside each locked price. Positioned here rather than in _rebuild
+# because it moves with the state: the digits it hangs off can change width when
+# a price is retuned, and it has to shake with the denial recoil.
+func _apply_cost_icons() -> void:
+	var face := get_theme_font(&"font", &"Label")
+	for i in _cost_icons.size():
+		var g: TextureRect = _cost_icons[i]
+		if not is_instance_valid(g):
+			continue
+		var state := _state_for(i)
+		g.visible = face != null and bool(state.get("locked", false))
+		if not g.visible:
+			continue
+		g.position = _cost_icon_pos(i, _cost_text_width(face, i))
+		var m := g.material as ShaderMaterial
+		if m != null:
+			# The glyph fades with ITS OWN number, not with the section: at 20 tokens
+			# the ladder is affordable and the fence is not, and a coin that stays
+			# bright over a faded price says the opposite of what the price says.
+			m.set_shader_parameter(&"dim",
+				1.0 if state.get("affordable", false) else LOCKED_ALPHA)
+
+
+func _cost_text(index: int) -> String:
+	return str(int(_state_for(index).get("cost", 0)))
+
+
+func _cost_text_width(face: Font, index: int) -> float:
+	return face.get_string_size(_cost_text(index),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE).x
+
+
+# Where a price's digits start. The whole group — coin, gap, digits — hangs off
+# the entry's right edge, so a three-digit price grows LEFTWARD into its own cell
+# instead of pushing the coin over the neighbour.
+func _cost_number_x(index: int, text_w: float) -> float:
+	return entry_rect(index).end.x - COST_MARGIN_PX - text_w + _deny_offset(index)
+
+
+func _cost_icon_pos(index: int, text_w: float) -> Vector2:
+	return Vector2(
+		_cost_number_x(index, text_w) - COST_GAP_PX - COST_ICON_PX,
+		entry_rect(index).end.y - COST_MARGIN_PX - COST_ICON_PX)
+
+
+## Width of one entry's whole price, coin included — what has to fit inside the
+## cell. Public because that is the claim worth testing: the ladder's cell is 20
+## texels and the group is 17 of them, so this is the number that goes negative
+## first if either a price or a cell is retuned.
+func cost_group_width(index: int) -> float:
+	var face := get_theme_font(&"font", &"Label")
+	if face == null:
+		return 0.0
+	var w := _cost_text_width(face, index)
+	return w if _cost_icons.is_empty() else w + COST_GAP_PX + COST_ICON_PX
 
 
 # Cuts one tile's art out of the atlas. get_tile_texture_region accounts for
@@ -489,7 +649,7 @@ func _rebuild() -> void:
 	# in the tree and before `tileset` is assigned.
 	if not is_inside_tree():
 		return
-	for r: TextureRect in _swatches:
+	for r: TextureRect in _swatches + _cost_icons:
 		if is_instance_valid(r):
 			# remove_child BEFORE queue_free: the free is deferred to the end of the
 			# frame, so a second _rebuild in the same frame — two export setters poked
@@ -498,6 +658,7 @@ func _rebuild() -> void:
 			remove_child(r)
 			r.queue_free()
 	_swatches.clear()
+	_cost_icons.clear()
 	_rest_positions.clear()
 
 	var top: int = header_row_px()
@@ -537,6 +698,28 @@ func _rebuild() -> void:
 		# duplicate of themselves baked in beside them.
 		_swatches.append(r)
 
+	# A SECOND pass, after every swatch, because child order is draw order and a
+	# price is an annotation ON the picture: a 32px swatch's transparent margin
+	# reaches into its neighbour's cell, and adding each coin next to its own
+	# swatch would bury it under the following one the moment the art grows.
+	if cost_icon != null:
+		for i in _swatches.size():
+			var g := PixelUI.make_icon_sized(cost_icon)
+			# Drawn into a fixed square rather than at the texture's own size, the
+			# same stance RunCalendar takes with the same glyph: a wrong-sized coin
+			# should be visibly stretched here, not silently shove its digits out of
+			# the cell and leave the layout looking merely cramped.
+			g.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			g.stretch_mode = TextureRect.STRETCH_SCALE
+			g.custom_minimum_size = Vector2(COST_ICON_PX, COST_ICON_PX)
+			g.size = Vector2(COST_ICON_PX, COST_ICON_PX)
+			if ink_material != null:
+				g.material = ink_material.duplicate() as ShaderMaterial
+			# Owned until told otherwise, and an owned entry has no price.
+			g.visible = false
+			add_child(g)
+			_cost_icons.append(g)
+
 	_apply_states()
 
 
@@ -555,19 +738,20 @@ func _draw() -> void:
 # bottom keeps every ink row inside the cell's LOWER warp block, clear of both
 # seams (the block-seam rule — ink flush against a block edge gets duplicated
 # or dropped by the page warp).
+#
+# The DIGITS only. Their coin is a child TextureRect (see `cost_icon`) because it
+# needs the ink ramp and these must not — this node's material would cover both.
 func _draw_costs() -> void:
 	var face := get_theme_font(&"font", &"Label")
 	if face == null:
 		return
-	const COST_FONT_SIZE: int = 8
 	for i in _swatches.size():
 		var state := _state_for(i)
 		if not state.get("locked", false):
 			continue
-		var text := str(int(state.get("cost", 0)))
+		var text := _cost_text(i)
 		var rect := entry_rect(i)
-		var w: float = face.get_string_size(
-				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE).x
+		var w: float = _cost_text_width(face, i)
 		var color := text_color if state.get("affordable", false) \
 				else Palette.with_alpha(text_color, LOCKED_ALPHA)
 		if i == _denied and _deny_phase > 0.0:
@@ -579,5 +763,5 @@ func _draw_costs() -> void:
 			# the ramps exist to enforce.
 			color = Palette.with_alpha(Palette.DANGER, _deny_phase)
 		draw_string(face,
-				Vector2(rect.end.x - w - 2.0 + _deny_offset(i), rect.end.y - 2.0),
+				Vector2(_cost_number_x(i, w), rect.end.y - COST_MARGIN_PX),
 				text, HORIZONTAL_ALIGNMENT_LEFT, -1, COST_FONT_SIZE, color)

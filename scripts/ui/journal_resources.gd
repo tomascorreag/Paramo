@@ -79,6 +79,20 @@ extends Control
 		block_px = value
 		queue_redraw()
 
+## Air between the title's rule and the glyph/count row, in texels, on top of the
+## two whole blocks the heading costs. Negative pulls the row UP into the heading's
+## second block, where the rule sits `header_underline_offset_px` rows down and the
+## rest is blank paper.
+##
+## KEEP IT A MULTIPLE OF `block_px` IF YOU CAN: the row's top is `header_row_px()`,
+## and Tiny5-16 fills its 18-row block exactly, so a top off the block grid puts
+## ink on a warp seam and the shader duplicates or drops that scanline.
+## `section_height_px` follows this, so a negative gap also shortens the section.
+@export_range(-36, 36) var header_gap_px: int = 0:
+	set(value):
+		header_gap_px = value
+		queue_redraw()
+
 ## Lead-in from this node's left edge, on the 4-texel column grid the page's
 ## `col_block_px` snaps to. Same value JournalKnownSet insets its swatches by, so
 ## the two sections line up down the page.
@@ -171,10 +185,16 @@ func _ready() -> void:
 	ResourceLedger.resource_changed.connect(_on_resource_changed)
 
 
-## Height of the heading, including the block its rule sits in. Everything below
-## this section starts at a multiple of `block_px` because of it.
+## Where the glyph/count row starts: the heading, the block its rule sits in, plus
+## `header_gap_px`. At the default gap of 0 that is a multiple of `block_px`, which
+## is what keeps everything below this section off the warp seams.
 func header_row_px() -> int:
-	return JournalTitle.row_px(active_header_font(), header_font_size, block_px)
+	var rows := JournalTitle.row_px(active_header_font(), header_font_size, block_px) \
+			+ header_gap_px
+	# Floor at the row just under the rule, so a negative gap cannot print the
+	# counts through the heading's own underline.
+	return maxi(rows, maxi(1, block_px) + header_underline_offset_px
+			+ JournalTitle.UNDERLINE_THICK_PX)
 
 
 func active_header_font() -> Font:

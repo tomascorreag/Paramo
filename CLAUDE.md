@@ -68,6 +68,7 @@ headless run sees them.
 | `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette | [journal](dev-notes/journal.md) |
 | `preview_run_calendar.gd` | Journal pages in 4 run states, both locales | [journal](dev-notes/journal.md) |
 | `preview_language_gate.gd` | Title-screen language boxes in 4 states | [journal](dev-notes/journal.md) |
+| `preview_tutorial_strip.gd` | FTUE hint strip, 4 steps x both locales | [ftue](dev-notes/ftue.md) |
 | `measure_tile_ink.gd` | Where a tile's art lands on its cell, in texels | [tiles](dev-notes/tiles.md) |
 | `preview_fence.gd` | A built fence run, in context | [tiles](dev-notes/tiles.md) |
 | `preview_grass_wear.gd` | A wear ramp across real terrain; audits generated grass rungs | [vegetation](dev-notes/vegetation.md) |
@@ -100,6 +101,17 @@ to them. Generator, indexing and sim tools are headless.
 - **Compare balance arms seed by seed**, 12+ paired seeds for anything downstream
   of fire. Never price code changes off the sim's wall clock (12% arm drift).
 - **`MAX_CONCURRENT_BURNING` is not a ceiling** — spread bypasses `can_ignite`.
+- **The run opens just after dawn, with no spontaneous fire and 15 tokens** —
+  FTUE concessions with knock-on effects (unlocks are priced per type now —
+  ladder/frailejon 10, bridge 20, fence 30 — which moves every balance-sim arm).
+  See [ftue](dev-notes/ftue.md) before retuning any of them.
+- **`toggle_journal` is Space, which the language gate also answers** — the
+  journal ignores it until the run is ACTIVE *and* the cinematic is gone.
+- **During the FTUE, a verb does nothing until the step that teaches it** —
+  `TutorialGate` (static, four bits) is checked in `ClickToMoveController`,
+  `FieldJournal`, `JournalShopInput` and `TileInteractionController`. It defaults
+  OPEN and reopens on the tutorial leaving the tree; a refusal never consumes the
+  event. See [ftue](dev-notes/ftue.md).
 
 ## Architecture
 
@@ -223,7 +235,10 @@ All player-facing chrome is **lowercase** — menu items, buttons, headers, sect
 titles (`paused`, `settings`, `volume`, `resume`). A deliberate typographic
 choice for the pixel-art look; don't Title-Case or ALL-CAPS. Applies in **every
 language** (`pausa`, `ajustes`), guarded by `tests/test_localization.gd`. Proper
-nouns and in-world narrative copy are out of scope.
+nouns and in-world narrative copy are out of scope — and the `NARRATIVE_` key
+prefix is what marks that exemption. It is the FTUE's prose (see
+[ftue](dev-notes/ftue.md)), written in sentence case, and the lowercase test
+skips that prefix and nothing else.
 
 ### Localization: es-CO and en-GB
 

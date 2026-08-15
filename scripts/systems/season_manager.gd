@@ -70,13 +70,21 @@ var days_per_season: int:
 ## on purpose. Migrate to a RunConfig .tres in the balance pass.
 @export var starting_water: float = 10.0
 
-## Tokens the run starts with. Everything placeable begins LOCKED (20 to unlock
-## a type, then 1 per tile placed), so 10 buys NOTHING on day one: the opening
-## move is to survive a day of visitors and unlock a verb with what they paid.
-## Deliberately half an unlock — the first decision is which verb, and it should
-## cost a day's attention rather than be handed over at spawn. Migrate to a
-## RunConfig .tres later.
-@export var starting_tokens: float = 10.0
+## Tokens the run starts with. Everything placeable begins LOCKED (10-30 to
+## unlock a type — see UnlockState.unlock_costs — then 1 per tile placed).
+##
+## Was 10 — deliberately half an unlock, so day one bought nothing and the
+## opening move was to survive a day of visitors first. The FTUE overrides that
+## call (2026-08-13): its last step is "buy a tool, then build it", and a player
+## who cannot complete the tutorial on day one has no smooth first day.
+##
+## 15 buys the cheap end of the shop (a ladder or a frailejon at 10) and leaves
+## 5 tiles of placement, but NOT a bridge or a fence — so the opening choice is
+## still a real one, and the expensive verbs still cost a day of visitors.
+## Roughly one perfect day's income (6 visitors x 2 tokens) handed over at
+## spawn: rerun sim/balance_sim.gd against the old arm before treating any
+## downstream number as unchanged. Migrate to a RunConfig .tres later.
+@export var starting_tokens: float = 15.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season

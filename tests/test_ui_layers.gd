@@ -42,6 +42,7 @@ func test_no_two_layers_collide() -> void:
 		UILayers.TOAST,
 		UILayers.RADIAL_MENU,
 		UILayers.JOURNAL,
+		UILayers.TUTORIAL,
 		UILayers.PAUSE,
 		UILayers.LOADING,
 		UILayers.TITLE,

@@ -115,6 +115,31 @@ func test_validate_ok_nw_two_cubes() -> void:
 	assert_eq(Ladder.validate(Vector2i(0, 0), Vector2i(-1, 0), grid), Ladder.Result.OK)
 
 
+# Height is NOT the constraint players hit: everything up to MAX_HEIGHT_CUBES
+# validates, and the price is flat (a ladder is charged for the 2 cells it
+# claims, whatever its rise). A refusal on a tall wall is geometry — a ramp
+# endpoint, a non-adjacent landing, or an SE/SW face — not height or tokens.
+func test_validate_ok_three_cubes() -> void:
+	_inject_flat(Vector2i(0, 0), 0)
+	_inject_flat(Vector2i(0, -1), 6)
+	assert_eq(Ladder.validate(Vector2i(0, 0), Vector2i(0, -1), grid), Ladder.Result.OK)
+
+
+func test_validate_ok_at_the_height_cap() -> void:
+	_inject_flat(Vector2i(0, 0), 0)
+	_inject_flat(Vector2i(0, -1), 2 * Ladder.MAX_HEIGHT_CUBES)
+	assert_eq(Ladder.validate(Vector2i(0, 0), Vector2i(0, -1), grid), Ladder.Result.OK)
+
+
+func test_validate_rejects_one_cube_over_the_cap() -> void:
+	_inject_flat(Vector2i(0, 0), 0)
+	_inject_flat(Vector2i(0, -1), 2 * (Ladder.MAX_HEIGHT_CUBES + 1))
+	assert_eq(
+		Ladder.validate(Vector2i(0, 0), Vector2i(0, -1), grid),
+		Ladder.Result.BAD_HEIGHT
+	)
+
+
 func test_validate_rejects_se_direction() -> void:
 	_inject_flat(Vector2i(0, 0), 0)
 	_inject_flat(Vector2i(1, 0), 2)
