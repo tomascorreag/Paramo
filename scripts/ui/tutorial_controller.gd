@@ -2,9 +2,17 @@ class_name TutorialController
 extends CanvasLayer
 
 ## The first-time-user experience: a hint strip that opens the run in the
-## park's voice (three narrative lines), teaches the verbs of the game in the
+## park's voice (two narrative lines), teaches the verbs of the game in the
 ## order the player needs them — walk, open the journal, buy a tool, close the
-## journal, build it — and signs off with a fourth.
+## journal, build it — then gets out of the way, lets a fire start where the
+## player can't see it, and teaches the last verb by making them go and put it
+## out. A third narrative line signs off.
+##
+## The fire arc is the one part of this that acts on the world rather than
+## describing it. It is three steps: a QUIET one with no copy at all (the strip
+## is gone and the player has the mountain), then a fire lit off-screen that the
+## player follows the screen-edge aura to, then the douse. See the "the fire
+## arc" constant block, and dev-notes/ftue.md.
 ##
 ## Built in code (the layout is data-driven off `_STEPS`, so it belongs in the
 ## code-built UI family alongside radial_menu.gd, not in a .tscn): a panel at
@@ -102,6 +110,51 @@ const _SKIP_HOLD: float = 1.1
 ## enough to read as "let go and it's off", slow enough to be seen happening.
 const _SKIP_DECAY: float = 4.0
 
+# --- The fire arc -----------------------------------------------------------
+#
+# After the build step the FTUE goes quiet, the player walks the mountain for a
+# while, and then a fire starts somewhere they can't see. The screen-edge aura
+# (FireAuraOverlay) is already in the game and already points at off-screen
+# fires; this arc exists to make the player meet it once, deliberately, before
+# a real fire does it for them.
+
+## How long the strip stays gone before the fire starts. Long enough to stop
+## reading as part of the tutorial's rhythm and start reading as play — the
+## player has to have LOOKED AWAY from the bottom of the screen for the aura to
+## be the thing that gets their attention back.
+const _ROAM_SECONDS: float = 12.0
+
+## Fuel the scripted fire is given, against FireDynamics' default of 1.0 (~10 s
+## of burn). The player has to notice the glow, read the line, cross most of a
+## screen and right-click — 10 s is not that, and a fire that burns out on the
+## way teaches nothing. 30 is ~4 minutes at full intensity: not a timer the
+## player can feel, which is the point.
+const _FIRE_FUEL: float = 30.0
+
+## Where the fire is lit, as a signed distance BEYOND the edge of the screen in
+## screen-heights (the same metric FireAuraOverlay shapes its glow with, so
+## these are directly comparable to its EDGE_HOLD/REACH).
+##
+## _TARGET is what the search aims at: far enough out that the fire itself is
+## invisible and only the aura reports it, near enough that the aura is strong
+## (the overlay's REACH is 0.9, past which a fire contributes nothing at all —
+## a fire lit beyond it would leave the player with no indicator to follow).
+## _MIN is the floor for "genuinely off screen"; _MAX keeps the walk sane.
+const _FIRE_TARGET_OFFSCREEN: float = 0.35
+const _FIRE_MIN_OFFSCREEN: float = 0.10
+const _FIRE_MAX_OFFSCREEN: float = 0.60
+
+## However the camera is framed, never light a fire within this many cells of
+## the player. The screen metric above is the real test; this is the guard
+## against a camera state that makes a neighbouring cell read as off-screen.
+const _FIRE_MIN_CELLS: int = 4
+
+## How far INSIDE the frame the fire has to come before the follow step counts
+## as done. Not zero: a fire whose flame is half off the edge has been found in
+## the sense that matters, and holding the line until it is dead centre asks the
+## player to keep walking past the thing they were sent to.
+const _FIRE_ONSCREEN_INSET: float = 0.12
+
 # Ordered. `key` is a TRANSLATION KEY — it is assigned to Label.text verbatim so
 # the line re-translates itself if the locale changes mid-step (see CLAUDE.md:
 # a `tr()`-ed string would freeze that label in one language).
@@ -149,6 +202,20 @@ const _STEPS: Array[Dictionary] = [
 		"id": &"build_endpoint", "key": "TUTORIAL_ENDPOINT",
 		"placement_only": true, "click": &"left",
 	},
+	# A held beat with NOTHING on screen. The verbs are all taught by now, the
+	# strip is gone, and the player has the mountain to themselves for
+	# _ROAM_SECONDS. It is the only step with no copy, and that is its content:
+	# an FTUE that never lets go teaches the player to wait for the next line
+	# instead of to look at the world. It also buys the distance the next step
+	# needs — the fire is lit where the player ISN'T, and where that is depends
+	# on where they wandered.
+	{"id": &"roam", "key": "", "quiet": true},
+	# The fire is already burning when this line appears (lit on the way out of
+	# `roam`, so the screen-edge aura is up before the copy explains it). Both
+	# fire steps are "fire_only": if no cell could be lit, the whole arc is
+	# stepped over rather than pointing at a fire that isn't there.
+	{"id": &"fire_follow", "key": "TUTORIAL_FIRE_FOLLOW", "fire_only": true, "click": &"left"},
+	{"id": &"fire_douse", "key": "TUTORIAL_FIRE_DOUSE", "fire_only": true, "click": &"right"},
 	{"id": &"closing", "key": "NARRATIVE_CLOSING", "narrative": true},
 ]
 
@@ -203,11 +270,18 @@ var _skip_hold: float = 0.0
 ## What the shop step bought, so the build step can name it. Empty until then.
 var _bought_type: StringName = &""
 
+## The cell the scripted fire was lit on, or NO_CELL for "there isn't one" —
+## which is both the state before the roam step ends AND the state after a
+## failed search, and is what makes the two fire steps skip themselves.
+var _fire_cell: Vector2i = Pathfinder.NO_CELL
+
 # Scene peers, resolved by group once the run is live.
 var _click_to_move: Node
 var _journal: Node
 var _unlocks: Node
 var _traversal: Node
+var _pathfinder: Node
+var _player: Node
 
 
 func _ready() -> void:
@@ -241,7 +315,29 @@ func _process(delta: float) -> void:
 		if _completion_pending and _step_elapsed >= _MIN_ON_SCREEN:
 			_completion_pending = false
 			_advance()
+		_tick_fire_follow()
 	_tick_skip_hold(delta)
+
+
+## The follow step is the FTUE's ONE polled completion, and the exception proves
+## the rule the rest of the table follows: "the fire is on screen now" is not an
+## event any system in this game emits — it is a relationship between a camera
+## that moves continuously and a cell that doesn't. There is nothing to connect
+## to, so it is read, once a frame, off the same canvas transform
+## FireAuraOverlay projects its fires with.
+##
+## It also covers the fire going out from under the step (rain, or a douse the
+## player somehow landed early): the arc is dropped rather than left asking the
+## player to walk to a fire that isn't burning.
+func _tick_fire_follow() -> void:
+	if _current_id() != &"fire_follow" or _fire_cell == Pathfinder.NO_CELL:
+		return
+	if not FireManager.is_burning(_fire_cell):
+		_fire_cell = Pathfinder.NO_CELL
+		_complete_step()
+		return
+	if _fire_is_on_screen():
+		_complete_step()
 
 
 # --- Lifecycle --------------------------------------------------------------
@@ -276,9 +372,15 @@ func _show_step(index: int) -> void:
 	_label.text = _step_key()
 	_apply_click_glyph()
 	_connect_step_signal()
-	_fade_strip_to(1.0)
+	# A quiet step fades the strip AWAY and leaves it away — it has no copy, and
+	# an empty panel sitting at the bottom of the screen is worse than no panel.
+	# The skip button goes with it: it is the tutorial's control, and for these
+	# seconds there is no tutorial on screen to end.
+	_fade_strip_to(0.0 if _is_quiet() else 1.0)
 	if _is_narrative():
 		_start_dwell()
+	elif _is_quiet():
+		_arm_step_timer(_ROAM_SECONDS)
 
 
 ## The mouse button the current step asks for, or `&""` for the steps that ask
@@ -313,21 +415,45 @@ func _granted_mask() -> int:
 	return mask
 
 
-## Whether the current step has anything to say right now. Only the second-click
-## step can answer no: it exists for the traversals, and asking a player who just
-## planted a frailejon to "click one of the x marks" would point at nothing.
-## Read off the placement controller's live state rather than off `_bought_type`,
-## because the thing that decides whether a second click is coming is whether a
-## placement is actually open.
+## Whether the current step has anything to say right now. Two steps can answer
+## no. The second-click step exists for the traversals, and asking a player who
+## just planted a frailejon to "click one of the x marks" would point at nothing
+## — read off the placement controller's live state rather than off
+## `_bought_type`, because what decides whether a second click is coming is
+## whether a placement is actually open. The two fire steps answer no when no
+## fire could be lit at all: a generator that dealt no reachable grass in range,
+## or a player boxed in by rock and water.
+##
+## Deliberately NOT "and the fire is still burning" — a step's applicability is
+## decided once, when it is shown, and a fire that goes out later is handled
+## where it happens (_tick_fire_follow for the follow step, the douse step's own
+## signals for the douse). Folding a live world query in here would also make
+## the step unrenderable by preview_tutorial_strip.gd, which has no fire.
 func _step_applies() -> bool:
-	if not bool(_STEPS[_step].get("placement_only", false)):
-		return true
-	return _traversal != null and bool(_traversal.call(&"is_placing"))
+	var step: Dictionary = _STEPS[_step]
+	if bool(step.get("placement_only", false)):
+		return _traversal != null and bool(_traversal.call(&"is_placing"))
+	if bool(step.get("fire_only", false)):
+		return _fire_cell != Pathfinder.NO_CELL
+	return true
 
 
 func _is_narrative() -> bool:
 	return _step >= 0 and _step < _STEPS.size() \
 			and bool(_STEPS[_step].get("narrative", false))
+
+
+## A step with no copy, whose content is the absence of the strip.
+func _is_quiet() -> bool:
+	return _step >= 0 and _step < _STEPS.size() \
+			and bool(_STEPS[_step].get("quiet", false))
+
+
+## The id of the step on screen, or `&""` outside the table.
+func _current_id() -> StringName:
+	if _step < 0 or _step >= _STEPS.size():
+		return &""
+	return _STEPS[_step]["id"]
 
 
 ## A narrative line has no action to wait on, so it waits on the clock instead —
@@ -337,10 +463,17 @@ func _is_narrative() -> bool:
 ## when it lands.
 func _start_dwell() -> void:
 	var line: String = tr(_label.text)
-	var dwell: float = clampf(
+	_arm_step_timer(clampf(
 			_DWELL_FLOOR + line.length() * _DWELL_PER_CHAR,
-			_DWELL_FLOOR, _DWELL_CEILING)
-	var timer := get_tree().create_timer(dwell, true)
+			_DWELL_FLOOR, _DWELL_CEILING))
+
+
+## Complete the step that is up in `seconds`, unless something else completes it
+## first. Bound to the step INDEX, so a timer that outlives its step (the player
+## clicked a narrative line through) can't complete whatever is up when it lands.
+## Shared by the narrative's reading dwell and the roam step's fixed hold.
+func _arm_step_timer(seconds: float) -> void:
+	var timer := get_tree().create_timer(seconds, true)
 	timer.timeout.connect(_on_dwell_elapsed.bind(_step))
 
 
@@ -402,6 +535,13 @@ func _complete_step() -> void:
 func _advance() -> void:
 	_advancing = true
 	_fade_strip_to(0.0)
+	# Light the fire on the way OUT of the roam step rather than on the way into
+	# the step that talks about it: the aura then comes up during the hand-off
+	# beat, so the glow is already on the edge of the screen when the line
+	# explaining it appears. The other order has the player reading about a fire
+	# that starts a moment later, which reads as the tutorial causing it.
+	if _current_id() == &"roam":
+		_light_the_fire()
 	var next: int = _step + 1
 	# process_always so the beat still elapses when the step that just completed
 	# left the tree paused (opening the journal does exactly that).
@@ -473,6 +613,23 @@ func _connect_step_signal() -> void:
 			# a click the player can no longer make.
 			if _traversal != null:
 				_traversal.connect(&"placement_ended", _on_placement_ended)
+		&"fire_douse":
+			# Two exits again, and only one of them is the lesson. `extinguished`
+			# is the player's bucket (and rain, which is the same outcome from the
+			# player's side: the fire is out and the line must come down).
+			# `tile_burned` is the fire finishing its tile — it cannot happen
+			# inside four minutes at _FIRE_FUEL, but a step whose only exit is an
+			# action on an object that can cease to exist is a strip that hangs.
+			FireManager.tile_extinguished.connect(_on_fire_gone)
+			FireManager.tile_burned.connect(_on_fire_burned)
+			# The fire can also have gone out during the hand-off beat, in the
+			# gap between the follow step's last poll and this connection —
+			# rain, at the wrong second. Deferred so the step is fully shown
+			# before it completes (and so _MIN_ON_SCREEN still applies), and
+			# harmless outside a live run, where _complete_step returns on
+			# `_running`.
+			if not FireManager.is_burning(_fire_cell):
+				call_deferred(&"_complete_step")
 
 
 func _disconnect_step_signal() -> void:
@@ -504,6 +661,11 @@ func _disconnect_step_signal() -> void:
 			if _traversal != null and _traversal.is_connected(
 					&"placement_ended", _on_placement_ended):
 				_traversal.disconnect(&"placement_ended", _on_placement_ended)
+		&"fire_douse":
+			if FireManager.tile_extinguished.is_connected(_on_fire_gone):
+				FireManager.tile_extinguished.disconnect(_on_fire_gone)
+			if FireManager.tile_burned.is_connected(_on_fire_burned):
+				FireManager.tile_burned.disconnect(_on_fire_burned)
 
 
 func _on_moved(_cells: Array) -> void:
@@ -532,6 +694,123 @@ func _on_unlocked(type: StringName) -> void:
 
 func _on_placed(_type: StringName, _count: int) -> void:
 	_complete_step()
+
+
+## Any fire went out, not only the scripted one — a player who found a second
+## fire and doused that instead has learned the verb the step is teaching, and
+## refusing to advance because they aimed at the wrong flame would be pedantry.
+func _on_fire_gone(_cell: Vector2i) -> void:
+	_complete_step()
+
+
+func _on_fire_burned(cell: Vector2i, _coord: Vector2i, _layer: TileMapLayer) -> void:
+	# Only the scripted fire finishing counts: any OTHER tile burning out is a
+	# fire the player hasn't been asked about.
+	if cell == _fire_cell:
+		_complete_step()
+
+
+# --- The fire arc -----------------------------------------------------------
+
+## Start the scripted fire, or leave `_fire_cell` at NO_CELL and let both fire
+## steps skip themselves. Contained (it never spreads) and over-fuelled (it
+## outlasts the walk) — see FireManager.ignite for why those two concessions
+## exist and why nothing else can reach them.
+func _light_the_fire() -> void:
+	_fire_cell = _pick_fire_cell()
+	if _fire_cell == Pathfinder.NO_CELL:
+		return
+	if not FireManager.ignite(_fire_cell, true, _FIRE_FUEL):
+		# can_ignite passed during the search and the ignition still didn't take
+		# (no grass source on the tileset, a null CellData). Treat it as no fire.
+		_fire_cell = Pathfinder.NO_CELL
+
+
+## Where to light it: a cell the player can WALK to, that will BURN, and that is
+## off the edge of the screen but still inside the reach of the screen-edge aura
+## — because the aura is the only thing that will tell the player it exists.
+##
+## Reachability comes from the pathfinder's own flood fill, so the answer can
+## never be a fire across a ravine; burnability from FireManager.can_ignite, so
+## it can never be water, rock or dirt. What is left is ranked on ONE number:
+## how far beyond the edge of the screen the cell sits, against
+## _FIRE_TARGET_OFFSCREEN.
+##
+## The fallback is deliberate rather than an accident of the ranking: if nothing
+## sits in the off-screen band (a wide window, a player standing at the edge of
+## the mountain), take the FARTHEST burnable cell there is instead. That is the
+## widest search this can do, and it still walks the player somewhere; if even
+## that finds nothing, the arc is skipped whole and the FTUE closes as it did
+## before it existed.
+func _pick_fire_cell() -> Vector2i:
+	if _pathfinder == null or not is_instance_valid(_pathfinder) \
+			or _player == null or not is_instance_valid(_player):
+		return Pathfinder.NO_CELL
+	var anchor: Vector2i = _player.get(&"current_cell")
+	# reachable_from hands back its own cached dictionary — read, never mutate.
+	var reachable: Dictionary = _pathfinder.call(&"reachable_from", anchor)
+
+	var best: Vector2i = Pathfinder.NO_CELL
+	var best_error: float = INF
+	var fallback: Vector2i = Pathfinder.NO_CELL
+	var fallback_sd: float = -INF
+
+	for cell: Vector2i in reachable:
+		if maxi(absi(cell.x - anchor.x), absi(cell.y - anchor.y)) < _FIRE_MIN_CELLS:
+			continue
+		if not FireManager.can_ignite(cell):
+			continue
+		var sd: float = _cell_offscreen_distance(cell)
+		if sd > fallback_sd:
+			fallback_sd = sd
+			fallback = cell
+		if sd < _FIRE_MIN_OFFSCREEN or sd > _FIRE_MAX_OFFSCREEN:
+			continue
+		var error: float = absf(sd - _FIRE_TARGET_OFFSCREEN)
+		if error < best_error:
+			best_error = error
+			best = cell
+	return best if best != Pathfinder.NO_CELL else fallback
+
+
+## Is the fire far enough inside the frame to count as found?
+func _fire_is_on_screen() -> bool:
+	if _fire_cell == Pathfinder.NO_CELL:
+		return false
+	var uv: Vector2 = _cell_screen_uv(_fire_cell)
+	return uv.x > _FIRE_ONSCREEN_INSET and uv.x < 1.0 - _FIRE_ONSCREEN_INSET \
+			and uv.y > _FIRE_ONSCREEN_INSET and uv.y < 1.0 - _FIRE_ONSCREEN_INSET
+
+
+## How far `cell` sits BEYOND the edge of the screen, in screen-heights:
+## positive outside (euclidean, so corners are handled), negative inside
+## (distance to the nearest edge). The same signed distance FireAuraOverlay
+## shapes its glow with, computed the same way, so a cell scored here at 0.35
+## is a cell the aura will light at 0.35 of its falloff.
+func _cell_offscreen_distance(cell: Vector2i) -> float:
+	var uv: Vector2 = _cell_screen_uv(cell)
+	var dx: float = maxf(maxf(-uv.x, uv.x - 1.0), 0.0)
+	var dy: float = maxf(maxf(-uv.y, uv.y - 1.0), 0.0)
+	var outside: float = sqrt(dx * dx + dy * dy)
+	if outside > 0.0:
+		return outside
+	return -minf(minf(uv.x, 1.0 - uv.x), minf(uv.y, 1.0 - uv.y))
+
+
+## A cell's position in normalized screen space: 0..1 on screen, outside it off.
+## Built from the viewport's canvas transform rather than from a camera node, so
+## it is correct whichever camera is current (the free-camera debug mode swaps
+## it). The altitude lift is the same one UXOverlay.cell_visual_center applies —
+## without it a fire on a high ledge is scored against the ground under it,
+## which on this projection is up to half a screen away.
+func _cell_screen_uv(cell: Vector2i) -> Vector2:
+	var world: Vector2 = _pathfinder.call(&"cell_to_world", cell)
+	world.y -= float(_pathfinder.call(&"altitude_center", cell)) * Pathfinder.HALF_STEP_PX
+	var vp := get_viewport()
+	var size: Vector2 = vp.get_visible_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return Vector2(0.5, 0.5)
+	return (vp.get_canvas_transform() * world) / size
 
 
 # --- UI construction --------------------------------------------------------
@@ -701,3 +980,9 @@ func _resolve_peers() -> void:
 	_journal = tree.get_first_node_in_group(&"journal")
 	_unlocks = tree.get_first_node_in_group(UnlockState.GROUP)
 	_traversal = tree.get_first_node_in_group(TraversalPlacementController.GROUP_NAME)
+	# The fire arc's two: where the player is standing, and what a cell's world
+	# position and altitude are. Resolved here with the rest even though they are
+	# not needed until the roam step ends — one lookup point is easier to keep
+	# honest than two, and both nodes exist for the whole run.
+	_pathfinder = tree.get_first_node_in_group(Pathfinder.GROUP_NAME)
+	_player = tree.get_first_node_in_group(&"player")

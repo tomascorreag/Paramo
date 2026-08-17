@@ -434,9 +434,9 @@ func test_known_set_swatches_carry_the_ink_material() -> void:
 	# this asserts: same SHADER, not same material.
 	for s: JournalKnownSet in _sections():
 		assert_not_null(s.ink_material, "%s: no ink material" % s.title)
-		# Every TextureRect the section owns, not the swatches alone: a locked
-		# entry's price coin is one too, and it is on this shader for the same
-		# reason (its own `dim`, so it fades with its own number).
+		# Every TextureRect the section owns. That is the swatches and nothing
+		# else now — the price coin used to be one, until the price left the page
+		# for the tag it is charged by (JournalTooltip).
 		var inked := 0
 		for child in s.get_children():
 			if child is TextureRect:
@@ -455,8 +455,8 @@ func test_known_set_swatches_carry_the_ink_material() -> void:
 			s._swatches.size(), s.swatch_textures().size(),
 			"%s: a resolved texture did not get a node" % s.title)
 		assert_eq(
-			inked, s._swatches.size() + s._cost_icons.size(),
-			"%s: an inked child is neither a swatch nor a price coin" % s.title)
+			inked, s._swatches.size(),
+			"%s: an inked child that is not a swatch" % s.title)
 
 
 ## The four hue-family ramps journal_ink.gdshader picks between, by shader uniform.

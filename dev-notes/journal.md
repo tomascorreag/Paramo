@@ -105,18 +105,19 @@ lived) and `PageSlit` (the slot the season wheel shows through). The tool drives
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full            # whole 480x270 book
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full --locale es_CO
-... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full --shop 20  # prices on the right page
+... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full --shop 20 --hover 0  # the shop, live
 ```
 
 `--hover <i>` parks the pointer on "known buildings" entry `i` by calling
 `JournalShopInput.handle_hover` directly — hover is resolved by arithmetic, not
-by a real cursor, so the lift, the ink-up and the buy tag can all be rendered
-without one. Needs `--shop`.
+by a real cursor, so the lift, the ink-up, the price and the verb glyphs can all
+be rendered without one. Needs `--shop`, and it is now **the only way to see a
+price at all**: an unhovered page prints none.
 
 `--shop <n>` puts an `UnlockState` in the tree and stocks the ledger with `n`
 tokens. Without it there is no economy, so the right page renders every entry
-owned and prints no prices at all — the shop is invisible in the only tool that
-draws it. 20 is the state worth looking at: ladder (10) and bridge (20)
+owned and can print no price whatever the pointer does — the shop is invisible in
+the only tool that draws it. 20 is the state worth looking at: ladder (10) and bridge (20)
 affordable, fence (30) not, which is the only arrangement where the per-entry
 fade has anything to say.
 
@@ -222,14 +223,14 @@ the player can put on the mountain, printed in brown ink. Render with `--full`.
   clicks by pure arithmetic — page Controls stay mouse-IGNORE and the SubViewports
   keep `gui_disable_input`; nothing is forwarded. A locked entry (`UnlockState`)
   fades via the ink shader's `dim` uniform (the shader overwrites COLOR, so
-  `self_modulate` is silently ignored) with the cost printed beside it. Contents
+  `self_modulate` is silently ignored). Contents
   are authored in the `.tscn`; `set_known` remains the hook for a discovery
   system (the shop tracks purchase, not discovery).
 - **An entry the player cannot afford does not react to hover**, and neither does
   anything while `TutorialGate` withholds `SHOP`. The lift and the ink-up both
   say "this is available"; saying it over a price the player cannot meet turns
-  the refusal into a surprise at click time, when the printed price was already
-  the reason. `_hovered` still tracks the pointer — the input node resolves that
+  the refusal into a surprise at click time, when the price in the tag was
+  already the reason. `_hovered` still tracks the pointer — the input node resolves that
   and the two must not disagree about where the cursor is; what changes is
   whether the entry answers (`JournalKnownSet.reacts_to_hover`). Affording it
   mid-hover wakes it up without a mouse move, because the ledger's
@@ -237,42 +238,82 @@ the player can put on the mountain, printed in brown ink. Render with `--full`.
   not blocked, they are done, and the section is a reference list as well as a
   shop. The click-time recoil (`flash_denied`) is unchanged — hover is
   affordance, a click is intent, and only intent earns a refusal.
-- **An entry that is for sale gets a "left click to buy" tag** (`JournalTooltip`,
-  code-built by `JournalShopInput`). The price says what it costs; nothing on a
-  book says a picture in it is a button. For sale means LOCKED and AFFORDABLE —
-  owned entries have nothing to sell and unaffordable ones are the case the hover
-  path already refuses to react to, so a tag there would be the same false
-  promise in words. Buying takes it down without a mouse move, since the pointer
-  does not move when you click and nothing else would re-ask.
-- **The tag is NOT ink on paper, and cannot be.** Everything inside the page's
-  SubViewport goes through `page_warp.gdshader` and is clipped to the paper; a
-  tag drawn there would shear across a warp block and be cut off at the page
-  edge. It is a normal fill + frame panel floating over the book.
-- **It is parented to BookHit's PARENT, not to BookHit.** `BookHit` sits BEFORE
-  `Pages` in `field_journal.tscn`, so anything under it is painted UNDER the
-  paper — invisible, in a way no geometry assertion catches. Appended to
-  `BookArt` it is the last child and therefore on top.
-- **Anchored to the entry's INK (`entry_ink_top`), not to its cell.** A 20-texel
-  ladder centred in a 36-texel cell leaves 8 rows of blank paper above its
-  picture; anchored to the cell the tag floats above nothing and reads as
-  belonging to the section heading instead.
+- **NOTHING IS PRICED UNTIL IT IS POINTED AT, and the price is not in the page.**
+  Every price printed at once turned a reference page into a price list — eleven
+  small numbers competing with eleven pictures, on a spread whose whole argument
+  is that it is a book. The price now belongs to the verb that pays it: it is
+  drawn by `JournalTooltip`, beside the click glyph, only for the hovered entry.
+  `JournalKnownSet` keeps the *state* (`set_entry_state` → locked / cost /
+  affordable, read back with `cost_of`) because the swatch's own fade runs off it,
+  but it draws no text and owns no coin. An entry the player cannot afford still
+  shows its price even though it does not lift: it is the entry whose price
+  matters most, and hiding it would hide the reason for the refusal.
+- **A hovered entry gets two lines of mouse verbs** (`JournalTooltip`, code-built
+  by `JournalShopInput`):
 
-- **A price is a coin plus digits, and only the digits are drawn by the section.**
-  The coin (`cost_icon` = `icons/money_small.tres`, the same 8px glyph the
-  calendar stamps token yields with — one currency, one glyph) is a child
-  `TextureRect` like the swatches, for the reason they are: it needs the ink ramp
-  and the digits must not, and this node's own material would cover both. Being a
-  child also gives it a per-entry `dim`, which is what lets it fade with *its own*
-  number — at 20 tokens the ladder is affordable and the fence is not, and a
-  bright coin over a faded price says the opposite of what the price says. It
-  cannot take the denial red, though: the ink shader overwrites `COLOR`, so on a
-  refused click the coin only shakes while the digits redden.
-- **The whole price group has to fit the cell, and the ladder's has 3 texels
-  spare.** 8 (coin) + 1 (gap) + 8 (two digits at Tiny5's 4-texel advance) + 2
-  (margin) = 19 in a 20-texel cell. A three-digit price or a narrower cell fails
-  as a silent overlap with the neighbour's picture, so
-  `test_journal_shop.gd::test_a_price_fits_inside_its_own_cell` checks the
-  arithmetic instead of waiting for someone to look.
+  ```
+        [right click] [info]      over the art — read about it (a STUB)
+             ( art )
+        [left click] [coin] 20    under the art — buy it, for this much
+  ```
+
+  Nothing on a book says a picture in it is a button, and a price alone does not
+  say which button. The buy line follows the same refusals as the click
+  (`_is_for_sale`), so it never promises a purchase that would be denied; the info
+  line is not a promise about money, so it stays up over owned and unaffordable
+  entries. Buying drops the buy line without a mouse move, since the pointer does
+  not move when you click and nothing else would re-ask.
+- **Moving the price out of the page dropped three constraints it never earned.**
+  In the cell it had to fit 20 texels, sit clear of both seams of a warp block,
+  and be a child `TextureRect` to get its own `dim`. Outside the paper it is a
+  `draw_texture` + `draw_string` in a node that is not warped and not clipped, so
+  the cell-fit test and the block-phase reasoning for prices are both gone.
+- **Bare glyphs in the page's own brown — no panel, no frame, no word.** The
+  journal is a diegetic object and a framed UI tag over the paper reads as the
+  game interrupting the book. They also need no translation: the verb is the glyph
+  and the price is a number. The mice and the info disc are white masks, so
+  drawing them in the ink colour is the whole recolour, and that colour comes from
+  the section's own `text_color` — glyphs and page ink are the same palette entry
+  by construction. NOT the `journal_ink` shader: that overwrites `COLOR` and would
+  map a flat white mask to one ramp stop whatever the page is set to.
+- **The coin keeps its own gold; only its alpha follows the price.** It is the one
+  thing in the tag that is not a white mask, and the gold is what makes it read as
+  the same currency as the supplies count a few rows above it. Tinting it with the
+  page ink (the first attempt) rendered a brown disc that read as a hole. The
+  denial red is the one case that overrides the art — a refusal has to read at a
+  glance.
+- **Both lines are centred on the art, clamped into `_tag_bounds`.** Two measured
+  constraints, not preferences. Hung off the entry's corner (which is what a
+  single glyph did) a multi-glyph line floats over the NEXT entry's column — seen
+  on the ladder, whose line reached across the bridge. And a swatch sits a few
+  texels down inside its cell, so a line placed above the ART lands squarely on
+  the heading's rule, in the same brown: `JournalShopInput._tag_bounds` raises the
+  allowed top to `header_row_px()`, which parks the read line on the upper part of
+  the picture. `OVERLAP_PX` is what keeps each line reading as a cursor resting on
+  the picture rather than a loose object beside it.
+- **The refusal has two halves in two places now.** The swatch recoils where it
+  sits (`JournalKnownSet.flash_denied`) and the price reddens where *it* sits
+  (`JournalTooltip.flash_denied`, driven from `_try_buy`). The tooltip sets full
+  red synchronously before starting its tween — a tween writes its start value a
+  frame later, and a refusal has to answer the click that caused it.
+- **The info glyph was painted into the UX atlas at (32,144)**, beside the two
+  mice and in their idiom: a 9x9 white silhouette with the letterform knocked out
+  of it, the way the mice knock out the pressed button.
+  `assets/sprites/UX/icons/info.tres` cuts it out. Editing `icons.png` needs a
+  `--headless --import` before a headless run sees the new pixels.
+- **Anchored to `entry_ink_rect`, not `entry_rect`.** The latter is the HIT rect:
+  it covers the whole cell and is grown by `hit_padding_px` again on top, so a tag
+  placed on it drifts off the picture it names.
+- **It is NOT inside the page, and cannot be.** Everything under the page's
+  SubViewport goes through `page_warp.gdshader` and is clipped to the paper; a
+  glyph drawn there would shear across a warp block and be cut off at the page
+  edge. It floats over the book instead. The book and the page are 1:1, so 8px
+  type in the tag is the same 8px type the page sets.
+- **Parented to BookHit's PARENT, not to BookHit.** `BookHit` sits BEFORE `Pages`
+  in `field_journal.tscn`, so anything under it is painted UNDER the paper —
+  invisible, in a way no geometry assertion catches. Appended to `BookArt` it is
+  the last child and therefore on top.
+
 - **Swatches are laid out and centred by their ink, not their texture**, and each
   entry can carry its own cell size (`cell_sizes`, falling back to `cell_size`).
   These are atlas cut-outs that don't fill their cells: a ladder inks cols 16..29

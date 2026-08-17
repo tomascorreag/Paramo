@@ -23,6 +23,18 @@ const STEP_SIGNALS: Dictionary = {
 	&"close_journal": ["res://scripts/ui/field_journal.gd", "closed"],
 	&"build": ["res://scripts/systems/unlock_state.gd", "placement_paid"],
 	&"build_endpoint": ["res://scripts/systems/unlock_state.gd", "placement_paid"],
+	&"fire_douse": ["res://scripts/systems/fire_manager.gd", "tile_extinguished"],
+}
+
+## Steps that advance on something other than a named signal, and what instead.
+## Kept as an explicit list rather than "everything not in STEP_SIGNALS" so that
+## a step losing its signal entry fails here instead of being quietly reclassified.
+const UNSIGNALLED_STEPS: Dictionary = {
+	&"welcome": "narrative dwell",
+	&"charge": "narrative dwell",
+	&"roam": "a fixed _ROAM_SECONDS hold",
+	&"fire_follow": "polled: the fire's cell entering the frame",
+	&"closing": "narrative dwell",
 }
 
 # The build steps also hang off the placement controller: `build` leaves early
@@ -64,11 +76,91 @@ func test_steps_teach_move_journal_shop_build_in_order() -> void:
 		if not bool(step.get("narrative", false)):
 			ids.append(step["id"])
 	assert_eq(ids, [&"move", &"journal", &"shop", &"close_journal", &"build",
-			&"build_endpoint"],
+			&"build_endpoint", &"roam", &"fire_follow", &"fire_douse"],
 			"FTUE order is load-bearing: the shop step can only be done from the "
-			+ "journal the previous step opened, and the build step can only be "
+			+ "journal the previous step opened, the build step can only be "
 			+ "done with the tool the shop step bought, from a world the "
-			+ "close step got back to.")
+			+ "close step got back to — and the fire arc runs last because it is "
+			+ "the only part that needs the player already able to walk away.")
+
+
+func test_the_fire_arc_is_roam_then_follow_then_douse() -> void:
+	# The order inside the arc is the whole lesson: the strip has to be GONE
+	# before the fire starts, or the player learns that fires are announced; the
+	# fire has to be found before it can be put out, or the aura teaches nothing.
+	var ids: Array = []
+	for step: Dictionary in TutorialController._STEPS:
+		ids.append(step["id"])
+	var roam: int = ids.find(&"roam")
+	assert_gt(roam, ids.find(&"build_endpoint"),
+			"the quiet beat must come after every taught verb — it is the FTUE "
+			+ "letting go, and there is nothing left to let go of before that")
+	assert_eq(ids[roam + 1], &"fire_follow")
+	assert_eq(ids[roam + 2], &"fire_douse")
+	assert_eq(ids[roam + 3], &"closing", "the sign-off closes the fire arc too")
+
+
+func test_the_quiet_beat_shows_nothing_and_holds_long_enough_to_be_play() -> void:
+	# A step with copy is the tutorial talking. This one's content is that it
+	# isn't: an empty panel parked at the bottom of the screen would be worse
+	# than no panel, so it must carry no key at all.
+	for step: Dictionary in TutorialController._STEPS:
+		if step["id"] != &"roam":
+			continue
+		assert_true(bool(step.get("quiet", false)),
+				"the roam step must be marked quiet, or the strip stays up empty")
+		assert_eq(String(step["key"]), "",
+				"a quiet step must have no copy")
+		assert_false(step.has("grants"),
+				"every verb is taught by now; the quiet beat must not be the "
+				+ "step that grants one, or the gate opens with nothing on screen")
+	# Long enough that the player stops waiting for the next line and looks at
+	# the world — which is the state the off-screen glow has to interrupt.
+	assert_gte(TutorialController._ROAM_SECONDS, 6.0,
+			"below this the strip reads as still talking")
+	assert_lte(TutorialController._ROAM_SECONDS, 30.0,
+			"above this a player who has stopped exploring is just waiting")
+
+
+func test_the_scripted_fire_stays_inside_the_auras_reach() -> void:
+	# The screen-edge aura is the ONLY thing that reports this fire — it is lit
+	# off-screen on purpose. FireAuraOverlay contributes nothing past REACH, so a
+	# fire placed beyond it leaves the player with a line telling them to follow
+	# a glow that is not being drawn.
+	assert_lt(TutorialController._FIRE_MAX_OFFSCREEN, FireAuraOverlay.REACH,
+			"the fire must be lit inside the aura's reach, or nothing points at it")
+	assert_lt(TutorialController._FIRE_TARGET_OFFSCREEN,
+			TutorialController._FIRE_MAX_OFFSCREEN)
+	assert_gt(TutorialController._FIRE_TARGET_OFFSCREEN,
+			TutorialController._FIRE_MIN_OFFSCREEN,
+			"the target has to sit inside the band the search accepts")
+	# And genuinely off screen: the aura's rise term is still fading a fire in
+	# at the edge, so a cell scored just outside would be visible AND unlit.
+	assert_gt(TutorialController._FIRE_MIN_OFFSCREEN, 0.0,
+			"a fire the player can already see is not an off-screen fire")
+
+
+func test_the_scripted_fire_outlasts_the_walk_and_does_not_spread() -> void:
+	# Two concessions, both reachable only from FireManager.ignite's optional
+	# arguments (see dev-notes/ftue.md), and both load-bearing for a step whose
+	# completion is "the player right-clicked THAT fire".
+	#
+	# Fuel: a default tile burns out in roughly FUEL_DEFAULT / FUEL_BURN_PER_SEC
+	# seconds at full intensity. The player has to notice the glow, read the
+	# line and cross most of a screen; a fire that dies on the way leaves the
+	# strip asking for a click on nothing.
+	var default_life: float = FireDynamics.FUEL_DEFAULT / FireDynamics.FUEL_BURN_PER_SEC
+	var tutorial_life: float = TutorialController._FIRE_FUEL / FireDynamics.FUEL_BURN_PER_SEC
+	assert_gt(tutorial_life, default_life * 4.0,
+			"the tutorial fire must outlast the walk over to it by a wide "
+			+ "margin — %.0fs is what a normal tile gets" % default_life)
+	# Spread: the containment flag has to be honoured where spread is rolled.
+	var src := FileAccess.get_file_as_string("res://scripts/systems/fire_manager.gd")
+	assert_false(src.is_empty(), "fire_manager.gd must be readable")
+	assert_true(src.contains("entry.get(\"contained\", false)"),
+			"a contained fire must be refused a spread roll, or the single fire "
+			+ "the FTUE asks the player to douse is a front by the time they "
+			+ "arrive")
 
 
 func test_narrative_brackets_the_instructions() -> void:
@@ -181,6 +273,12 @@ func test_each_verb_is_blocked_until_the_step_that_teaches_it() -> void:
 				TutorialGate.Action.SHOP],
 		&"build": TutorialGate.Action.values(),
 		&"build_endpoint": TutorialGate.Action.values(),
+		# The fire arc teaches an action the gate has no bit for: dousing goes
+		# through the tile action menu, which BUILD already opened two steps
+		# earlier. Nothing to withhold, so nothing here narrows.
+		&"roam": TutorialGate.Action.values(),
+		&"fire_follow": TutorialGate.Action.values(),
+		&"fire_douse": TutorialGate.Action.values(),
 		&"closing": TutorialGate.Action.values(),
 	}
 	var seen: int = 0
@@ -278,6 +376,37 @@ func test_every_step_signal_still_exists() -> void:
 				% [id, entry[0].get_file(), entry[1]])
 
 
+func test_every_step_is_accounted_for_by_one_of_the_two_tables() -> void:
+	# The failure this catches is the FTUE's signature one: a step that advances
+	# on nothing at all. It is silent — the strip simply sits there forever — and
+	# a new step is exactly how it gets introduced.
+	for step: Dictionary in TutorialController._STEPS:
+		var id: StringName = step["id"]
+		assert_true(STEP_SIGNALS.has(id) or UNSIGNALLED_STEPS.has(id),
+				"step '%s' names neither a completion signal nor a reason it " % id
+				+ "needs none — if it advances on something new, say so in "
+				+ "UNSIGNALLED_STEPS")
+		assert_false(STEP_SIGNALS.has(id) and UNSIGNALLED_STEPS.has(id),
+				"step '%s' is in both tables" % id)
+
+
+func test_the_douse_step_advances_on_the_fire_actually_going_out() -> void:
+	# The player's bucket, rain and a burnout all end the same way from the
+	# strip's side, and only ONE of them is a signal the douse action emits —
+	# ActionExtinguishFire calls FireManager.extinguish, which is the private
+	# _extinguish every other route also funnels through. That is what makes a
+	# single signal on the manager the honest place to listen.
+	var src := FileAccess.get_file_as_string(
+			"res://scripts/systems/actions/action_extinguish_fire.gd")
+	assert_false(src.is_empty(), "action_extinguish_fire.gd must be readable")
+	assert_true(src.contains("FireManager.extinguish("),
+			"the douse action no longer goes through FireManager.extinguish, so "
+			+ "the FTUE's fire step will never see it")
+	var mgr := FileAccess.get_file_as_string("res://scripts/systems/fire_manager.gd")
+	assert_true(mgr.contains("tile_extinguished.emit("),
+			"FireManager must report an extinguish, or the step hangs")
+
+
 func test_the_placement_signals_still_exist() -> void:
 	var script: GDScript = load(PLACEMENT_SCRIPT)
 	assert_not_null(script, "%s must load" % PLACEMENT_SCRIPT)
@@ -319,6 +448,10 @@ func test_only_the_click_steps_carry_a_mouse_glyph() -> void:
 		&"move": &"left",
 		&"build": &"right",
 		&"build_endpoint": &"left",
+		# The fire arc is the FTUE's second left-then-right pair: walk to it,
+		# then open the ring on it.
+		&"fire_follow": &"left",
+		&"fire_douse": &"right",
 	}
 	for step: Dictionary in TutorialController._STEPS:
 		var id: StringName = step["id"]
@@ -345,10 +478,40 @@ func test_the_build_step_asks_for_the_button_the_game_listens_on() -> void:
 						"%s (col %d) does not ask for a right click" % [key, col])
 
 
+func test_the_endpoint_step_asks_for_the_button_the_game_commits_on() -> void:
+	# The second click of a traversal placement is the FTUE's one place where the
+	# button FLIPS mid-action: the right click that opened the ring is answered
+	# with a LEFT click on the endpoint. Read off the controller rather than
+	# asserted as a constant, because a glyph that disagrees with the code teaches
+	# a click the game will ignore — and a right click there CANCELS, so a wrong
+	# glyph doesn't merely do nothing, it throws the placement away.
+	var src := FileAccess.get_file_as_string(PLACEMENT_SCRIPT)
+	assert_false(src.is_empty(), "%s must be readable" % PLACEMENT_SCRIPT)
+	assert_true(src.contains("mb.button_index != MOUSE_BUTTON_LEFT"),
+			"the endpoint commit is no longer a left click; the FTUE glyph says "
+			+ "it is")
+	assert_true(src.contains("mb.button_index == MOUSE_BUTTON_RIGHT"),
+			"a right click on the endpoint no longer cancels")
+	for step: Dictionary in TutorialController._STEPS:
+		if step["id"] == &"build_endpoint":
+			assert_eq(step.get("click", &""), &"left")
+	# And the copy agrees: every endpoint line asks for a plain click, never a
+	# right one.
+	for type: StringName in TutorialController._ENDPOINT_KEYS:
+		var key: String = TutorialController._ENDPOINT_KEYS[type]
+		for col: int in [1, 2]:
+			var line: String = String(_csv_keys[key][col]).to_lower()
+			assert_false(line.contains("right click") or line.contains("clic derecho"),
+					"%s (col %d) asks for a right click on a left-click step"
+					% [key, col])
+
+
 func test_every_step_key_is_translated() -> void:
 	var keys: Array = ["UI_SKIP_TUTORIAL"]
 	for step: Dictionary in TutorialController._STEPS:
-		keys.append(String(step["key"]))
+		# A quiet step has no copy by design — its own test asserts that.
+		if not String(step["key"]).is_empty():
+			keys.append(String(step["key"]))
 	# The build step swaps in a per-type line; those keys never appear in
 	# _STEPS, so the localization scan of scripts/ui is their only other cover.
 	for type: StringName in TutorialController._BUILD_KEYS:

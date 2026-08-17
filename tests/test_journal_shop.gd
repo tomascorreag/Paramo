@@ -356,24 +356,28 @@ func test_an_affordable_click_does_not_flash() -> void:
 	assert_eq(buildings._denied, -1)
 
 
-# --- the "left click to buy" tag -----------------------------------------------
+# --- the mouse-verb tag --------------------------------------------------------
 
 func _tooltip() -> JournalTooltip:
 	return shop._tooltip
 
 
-func test_the_buy_tag_appears_over_an_affordable_entry() -> void:
+func test_the_tag_appears_over_an_affordable_entry() -> void:
 	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	shop.handle_hover(_click_point(buildings, 0))
-	assert_not_null(_tooltip(), "hovering something for sale builds the tag")
+	assert_not_null(_tooltip(), "hovering an entry builds the tag")
 	assert_true(_tooltip().visible)
+	assert_true(_tooltip().buyable, "the ladder is for sale at 20 tokens")
+	assert_eq(_tooltip().price, int(_unlocks.unlock_cost_for(
+			buildings.entry_id_at(0))),
+			"and the tag prints the price try_unlock will actually charge")
 
 
 func test_the_glyph_is_anchored_to_the_ink_not_the_cell() -> void:
 	# A 20-texel ladder centred in a 36-texel cell leaves blank paper inside it,
-	# and entry_rect is grown past the cell again by hit_padding_px. A glyph on
-	# THAT corner sits in the neighbour's column with nothing under it.
+	# and entry_rect is grown past the cell again by hit_padding_px. A tag on
+	# THAT rect sits in the neighbour's column with nothing under it.
 	for i in buildings._swatches.size():
 		var ink := buildings.entry_ink_rect(i)
 		var hit := buildings.entry_rect(i)
@@ -383,53 +387,64 @@ func test_the_glyph_is_anchored_to_the_ink_not_the_cell() -> void:
 				"entry %d: the ink is narrower than the cell it sits in" % i)
 
 
-func test_show_over_tucks_into_the_corner_and_stays_in_bounds() -> void:
-	# The placement rule itself, away from the journal's transform chain: the
-	# glyph's bottom-left overlaps the art's top-right, on whole pixels, never
-	# off the book.
+func test_the_two_lines_straddle_the_art_and_stay_in_bounds() -> void:
+	# The placement rule itself, away from the journal's transform chain: read
+	# line above the art, buy line below it, both centred on it, both bitten a
+	# few texels into it, on whole pixels, never off the book.
 	var tip := JournalTooltip.new()
 	add_child_autofree(tip)
 	var bounds := Rect2(Vector2.ZERO, Vector2(200, 120))
 	var art := Rect2(Vector2(80, 60), Vector2(20, 20))
-	tip.show_over(art, bounds, Palette.P06)
-	assert_eq(tip.position.x, art.end.x - JournalTooltip.OVERLAP_PX,
-			"the glyph's left edge bites into the art's right")
-	assert_eq(tip.position.y + tip.size.y,
+	tip.show_for(art, bounds, Palette.P06, true, 20, true)
+	assert_eq(tip.position.y + JournalTooltip.ROW_PX,
 			art.position.y + JournalTooltip.OVERLAP_PX,
-			"and its bottom edge into the art's top")
+			"the read line's foot bites into the art's top")
+	assert_eq(tip.position.y + tip.size.y - JournalTooltip.ROW_PX,
+			art.end.y - JournalTooltip.OVERLAP_PX,
+			"and the buy line's head into the art's foot")
+	assert_almost_eq(tip.position.x + tip.size.x * 0.5, art.get_center().x, 1.0,
+			"both lines are centred on the picture they name")
 	assert_eq(tip.position.round(), tip.position, "whole pixels only")
 	# The rightmost entry sits near the page edge, and it cannot move to make room.
-	tip.show_over(Rect2(Vector2(196, 60), Vector2(20, 20)), bounds, Palette.P06)
+	tip.show_for(Rect2(Vector2(196, 60), Vector2(20, 20)), bounds, Palette.P06,
+			true, 20, true)
 	assert_lte(tip.position.x + tip.size.x, bounds.end.x, "clamped to the paper")
-	tip.show_over(Rect2(Vector2(80, 2), Vector2(20, 20)), bounds, Palette.P06)
+	tip.show_for(Rect2(Vector2(80, 2), Vector2(20, 20)), bounds, Palette.P06,
+			true, 20, true)
 	assert_gte(tip.position.y, bounds.position.y, "and to its top")
 
 
-func test_the_buy_tag_stays_away_from_what_cannot_be_bought() -> void:
+func test_the_buy_glyph_stays_away_from_what_cannot_be_bought() -> void:
 	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
 	# Unaffordable — the same entry the hover itself already declines to lift.
+	# The tag is still up (it carries the info verb and the price, neither of
+	# which promises anything), but the buy half of it must be gone.
 	shop.handle_hover(_click_point(buildings, 2))
-	assert_true(_tooltip() == null or not _tooltip().visible,
+	assert_true(_tooltip().visible, "the info verb still applies to a fence")
+	assert_false(_tooltip().buyable,
 			"nothing offers to sell the fence at 20 tokens")
+	assert_eq(_tooltip().price, 30, "but it still says what a fence costs")
 	# Bare paper.
 	shop.handle_hover(_click_point(buildings, 0))
+	assert_true(_tooltip().buyable)
 	shop.handle_hover(Vector2(20.0, 20.0))
 	assert_false(_tooltip().visible, "the tag leaves with the pointer")
 
 
-func test_buying_takes_the_tag_down_without_a_mouse_move() -> void:
+func test_buying_takes_the_buy_line_down_without_a_mouse_move() -> void:
 	# The pointer does not move when you click, so nothing else would re-ask —
-	# and "buy" left floating over a thing you now own reads as a failed click.
+	# and a price left floating under a thing you now own reads as a failed click.
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()
 	shop.handle_hover(_click_point(buildings, 0))
-	assert_true(_tooltip().visible)
+	assert_true(_tooltip().buyable)
 	assert_true(shop.handle_click(_click_point(buildings, 0)))
-	assert_false(_tooltip().visible, "an owned entry has nothing left to sell")
+	assert_false(_tooltip().buyable, "an owned entry has nothing left to sell")
+	assert_eq(_tooltip().price, 0, "and nothing left to charge")
 
 
-func test_the_tutorial_gate_takes_the_buy_tag_with_it() -> void:
+func test_the_tutorial_gate_takes_the_tag_with_it() -> void:
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()
 	TutorialGate.restrict_to(0)
@@ -438,7 +453,7 @@ func test_the_tutorial_gate_takes_the_buy_tag_with_it() -> void:
 			"a gated shop offers nothing")
 
 
-func test_the_buy_tag_is_drawn_over_the_pages() -> void:
+func test_the_tag_is_drawn_over_the_pages() -> void:
 	# BookHit sits BEFORE Pages in the scene, so a tag parented to it would be
 	# painted UNDER the paper — invisible, and invisible in a way no geometry
 	# assertion would catch. It goes on BookHit's parent, as the last child.
@@ -454,73 +469,63 @@ func test_the_buy_tag_is_drawn_over_the_pages() -> void:
 			"and after the hit area it belongs to")
 
 
-# --- cost icons ----------------------------------------------------------------
+# --- prices --------------------------------------------------------------------
 
-func test_a_price_is_printed_only_while_its_entry_is_locked() -> void:
+func test_no_price_is_printed_until_something_is_hovered() -> void:
+	# The page is a reference list first: eleven prices printed at once turn it
+	# into a price sheet. The section itself no longer prints any — the price
+	# travels with the click glyph, in the tag.
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()
-	assert_eq(buildings._cost_icons.size(), buildings._swatches.size(),
-			"every entry carries a coin, shown or not")
-	assert_true(buildings._cost_icons[0].visible, "a locked entry prints its price")
+	assert_true(_tooltip() == null or not _tooltip().visible,
+			"an unhovered page prints no prices at all")
+	for section: JournalKnownSet in [buildings, flora]:
+		for child in section.get_children():
+			assert_true(child in section._swatches,
+					"%s: the section owns nothing but swatches now" % section.title)
+
+
+func test_an_owned_entry_prints_no_price_even_hovered() -> void:
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
 	shop.handle_click(_click_point(buildings, 0))
-	assert_false(buildings._cost_icons[0].visible,
-			"an owned entry has no price, so no coin either")
-	assert_true(buildings._cost_icons[1].visible, "the neighbour is still for sale")
+	shop.handle_hover(_click_point(buildings, 0))
+	assert_true(_tooltip().visible, "the info verb outlives the purchase")
+	assert_eq(_tooltip().price, 0, "an owned entry is not free, it is done")
 
 
-func test_a_coin_fades_with_its_own_number() -> void:
-	# 20 tokens: ladder (10) and bridge (20) affordable, fence (30) not. A coin
-	# that stayed bright over a faded price would contradict the price.
+func test_an_unaffordable_entry_still_shows_its_price_on_hover() -> void:
+	# The entry the hover deliberately refuses to LIFT is the one whose price the
+	# player most needs — hiding it would hide the reason for the refusal.
 	ResourceLedger.set_amount(TOKENS, 20.0)
 	shop._refresh_states()
-	var affordable := buildings._cost_icons[0].material as ShaderMaterial
-	assert_almost_eq(float(affordable.get_shader_parameter(&"dim")), 1.0, 0.001,
-			"a price the player can meet prints at full ink")
-	var out_of_reach := buildings._cost_icons[2].material as ShaderMaterial
-	assert_almost_eq(float(out_of_reach.get_shader_parameter(&"dim")),
-			JournalKnownSet.LOCKED_ALPHA, 0.001,
-			"an unaffordable price fades, coin and digits together")
+	shop.handle_hover(_click_point(buildings, 2))
+	assert_false(buildings.reacts_to_hover(2), "the fence does not lift at 20")
+	assert_eq(_tooltip().price, 30, "but it does say what it costs")
+	assert_false(_tooltip()._affordable, "faded, because it cannot be met")
 
 
-func test_a_price_fits_inside_its_own_cell() -> void:
-	# The claim the coin puts under pressure: the ladder's cell is 20 texels and
-	# the group is 8 + 1 + two digits = 17 of them. Retune a price into three
-	# digits or a cell narrower and this is what goes first — and it fails as a
-	# silent overlap with the neighbour's picture, not as an error.
+func test_the_price_comes_from_the_state_the_section_was_given() -> void:
+	# The number on screen and the number try_unlock charges are read from one
+	# place: whatever set_entry_state last wrote.
 	ResourceLedger.set_amount(TOKENS, 0.0)
 	shop._refresh_states()
 	for section: JournalKnownSet in [buildings, flora]:
-		for i in section._swatches.size():
-			var group: float = section.cost_group_width(i) \
-					+ JournalKnownSet.COST_MARGIN_PX
-			assert_lte(group, float(section.cell_size_for(i).x),
-					"%s entry %d: a %d-texel price in a %d-texel cell"
-						% [section.title, i, group, section.cell_size_for(i).x])
+		for i in section.entry_ids.size():
+			assert_eq(section.cost_of(i),
+					int(_unlocks.unlock_cost_for(section.entry_id_at(i))),
+					"%s entry %d: the section is out of step with UnlockState"
+						% [section.title, i])
 
 
-func test_the_coin_sits_beside_its_digits_on_whole_texels() -> void:
-	ResourceLedger.set_amount(TOKENS, 0.0)
+func test_a_refused_click_reddens_the_price_it_could_not_meet() -> void:
+	var id: StringName = buildings.entry_id_at(2)
+	ResourceLedger.set_amount(TOKENS, _unlocks.unlock_cost_for(id) - 1.0)
 	shop._refresh_states()
-	var face: Font = buildings.get_theme_font(&"font", &"Label")
-	for i in buildings._cost_icons.size():
-		var g: TextureRect = buildings._cost_icons[i]
-		var rect := buildings.entry_rect(i)
-		# Whole texels: these sit in the same 1:1 nearest-filtered viewport the
-		# swatches do, where a half texel resamples 8px pixel art into mush.
-		assert_eq(g.position.round(), g.position, "entry %d's coin is off-grid" % i)
-		assert_eq(g.size, Vector2(JournalKnownSet.COST_ICON_PX,
-				JournalKnownSet.COST_ICON_PX), "entry %d's coin is not 8x8" % i)
-		# Left of the digits, and its baseline is theirs — the two are one label.
-		var digits_x: float = rect.end.x - JournalKnownSet.COST_MARGIN_PX \
-				- face.get_string_size(str(int(_unlocks.unlock_cost_for(
-					buildings.entry_id_at(i)))), HORIZONTAL_ALIGNMENT_LEFT, -1,
-					JournalKnownSet.COST_FONT_SIZE).x
-		assert_eq(g.position.x + JournalKnownSet.COST_ICON_PX
-				+ JournalKnownSet.COST_GAP_PX, digits_x,
-				"entry %d's coin must abut its digits" % i)
-		assert_eq(g.position.y + JournalKnownSet.COST_ICON_PX,
-				rect.end.y - JournalKnownSet.COST_MARGIN_PX,
-				"entry %d's coin must sit on the digits' baseline" % i)
+	shop.handle_hover(_click_point(buildings, 2))
+	assert_false(shop.handle_click(_click_point(buildings, 2)))
+	assert_gt(_tooltip()._deny_phase, 0.0,
+			"the price flashes where it now lives, not in the page")
 
 
 func test_without_an_unlock_state_the_page_is_inert() -> void:

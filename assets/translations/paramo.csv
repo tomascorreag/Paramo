@@ -36,3 +36,5 @@ TUTORIAL_ENDPOINT,now click one of the marked cells to finish placing it,ahora h
 TUTORIAL_ENDPOINT_LADDER,now click a marked cell on top of the ledge. that is where the ladder lands,ahora haz clic en una casilla marcada encima del borde. ahí llega la escalera
 TUTORIAL_ENDPOINT_BRIDGE,now click a marked cell across the gap. the bridge spans to it,ahora haz clic en una casilla marcada al otro lado del vacío. el puente llega hasta ahí
 TUTORIAL_ENDPOINT_FENCE,now click a marked cell to end the run. the fence fills everything between,ahora haz clic en una casilla marcada para terminar el tramo. la cerca llena lo que hay en medio
+TUTORIAL_FIRE_FOLLOW,something is burning off the edge of the screen. walk toward the glow,algo se quema fuera de la pantalla. camina hacia el resplandor
+TUTORIAL_FIRE_DOUSE,right click the fire and pick the bucket. every cell you douse spends water,haz clic derecho en el fuego y elige el balde. cada casilla apagada gasta agua

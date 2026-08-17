@@ -101,12 +101,22 @@ to them. Generator, indexing and sim tools are headless.
 - **Compare balance arms seed by seed**, 12+ paired seeds for anything downstream
   of fire. Never price code changes off the sim's wall clock (12% arm drift).
 - **`MAX_CONCURRENT_BURNING` is not a ceiling** — spread bypasses `can_ignite`.
+- **Generated dirt colonises, so the dirt band is no longer a free firebreak** —
+  every walkable dirt cell climbs slowly to a short grass ceiling, and
+  `can_ignite` reads the layer. `natural` on each regrowth record is what keeps
+  bare dirt out of the scar/appeal numbers. See [vegetation](dev-notes/vegetation.md);
+  arm is `no_colonise`.
 - **The run opens just after dawn, with no spontaneous fire and 15 tokens** —
   FTUE concessions with knock-on effects (unlocks are priced per type now —
   ladder/frailejon 10, bridge 20, fence 30 — which moves every balance-sim arm).
   See [ftue](dev-notes/ftue.md) before retuning any of them.
 - **`toggle_journal` is Space, which the language gate also answers** — the
   journal ignores it until the run is ACTIVE *and* the cinematic is gone.
+- **The FTUE lights its own fire, off-screen, and it must stay inside
+  `FireAuraOverlay.REACH`** — the screen-edge glow is the only thing that reports
+  it. It is `contained` (never spreads) and over-fuelled (outlasts the walk),
+  both via optional args on `FireManager.ignite` that nothing else may use.
+  See [ftue](dev-notes/ftue.md).
 - **During the FTUE, a verb does nothing until the step that teaches it** —
   `TutorialGate` (static, four bits) is checked in `ClickToMoveController`,
   `FieldJournal`, `JournalShopInput` and `TileInteractionController`. It defaults

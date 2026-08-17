@@ -121,6 +121,16 @@ const VFX_CONTAINER_GROUP: StringName = &"vfx_container"
 ## cell is dirt forever.
 signal tile_burned(cell: Vector2i, grass_coord: Vector2i, grass_layer: TileMapLayer)
 
+## A fire went out WITHOUT consuming its tile — rain, or a player douse. The
+## counterpart to tile_burned, and deliberately a separate signal: the two leave
+## the cell in opposite states (grass restored vs. dirt), so a listener that
+## cares about one almost never cares about the other.
+##
+## Emitted from the one private _extinguish, so every route out — the rain roll
+## and the public extinguish() the douse action calls — reports identically. The
+## FTUE's fire step advances off this.
+signal tile_extinguished(cell: Vector2i)
+
 
 # --- State -----------------------------------------------------------------
 
@@ -226,10 +236,24 @@ func can_ignite(cell: Vector2i) -> bool:
 ## Light a fire at `cell`: a fresh kindling at age 0, identical to what a
 ## random ignition produces — same spread, same burn, same VFX. Returns true if a
 ## fire actually started. Mirrors `extinguish`.
-func ignite(cell: Vector2i) -> bool:
+##
+## The two optional arguments exist for ONE caller, the FTUE's scripted fire
+## (see dev-notes/ftue.md), and both default to the natural behaviour:
+##
+##   `contained`  the fire never spreads. A fire lit to be walked to and put out
+##                must still be one fire when the player arrives — the tutorial
+##                asks for a single right click, and a front that has crossed
+##                six tiles by then is a different, unwinnable lesson.
+##   `fuel`       overrides the tile's own fuel (`< 0` keeps it). A default tile
+##                burns out in ~10 s and the walk over is longer than that, so
+##                the tutorial fire is given enough fuel to outlast the trip.
+##
+## Neither is reachable from the natural ignition path or from spread — this is
+## the only entry point that can set them.
+func ignite(cell: Vector2i, contained: bool = false, fuel: float = -1.0) -> bool:
 	if not can_ignite(cell):
 		return false
-	_ignite(cell)
+	_ignite(cell, contained, fuel)
 	# _ignite can still bail (no grass source on the tileset, null CellData), so
 	# report what actually happened rather than assuming it took.
 	return _burning.has(cell)
@@ -513,7 +537,13 @@ func _advance_burns(delta: float, rain: float, spread_dt: float = 0.0) -> void:
 			# Char the plant as its tile's fuel is consumed (reaches 1 at burnout).
 			frj.call(&"set_burn_amount", 1.0 - fuel_frac)
 
-		if spread_dt > 0.0 and intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
+		# `contained` is the FTUE's scripted fire and nothing else (see ignite):
+		# it burns and douses exactly like any other, it simply never seeds a
+		# neighbour. Checked here rather than inside _roll_spread so a contained
+		# fire costs nothing per tick instead of walking four neighbours to
+		# refuse them all.
+		if spread_dt > 0.0 and not bool(entry.get("contained", false)) \
+				and intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
 			_roll_spread(cell, intensity, spread_dt, spread_mult)
 
 		if fuel <= 0.0:
@@ -585,7 +615,7 @@ func _roll_ignitions() -> void:
 
 # --- Ignition / completion -------------------------------------------------
 
-func _ignite(cell: Vector2i) -> void:
+func _ignite(cell: Vector2i, contained: bool = false, fuel_override: float = -1.0) -> void:
 	if _burning.has(cell):
 		return
 	var cd = _grid.get_tile(cell)
@@ -630,12 +660,20 @@ func _ignite(cell: Vector2i) -> void:
 		frailejon = occ
 
 	var fuel: float = _fuel_for_cell(cell, cd)
+	if fuel_override > 0.0:
+		fuel = fuel_override
 	stats_ignitions += 1
 	_burning[cell] = {
 		"vfx": vfx,
 		"age": 0.0,
 		"fuel": fuel,
+		# fuel_max is what the dissolve and the flame size are read against, so a
+		# high-fuel tutorial fire looks like a normal one at full burn rather than
+		# like a tile that has barely started.
 		"fuel_max": fuel,
+		# Spread is refused from this cell for as long as it burns. Lives on the
+		# entry rather than in a side table so it cannot outlive the fire.
+		"contained": contained,
 		# This fire's own intensity ceiling, rolled uniformly — some fires stay
 		# small, some grow to full. See FireDynamics.intensity.
 		"max_intensity": rng.randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
@@ -689,6 +727,9 @@ func _extinguish(cell: Vector2i) -> void:
 		frj.call(&"clear_burn_material")
 
 	_burning.erase(cell)
+	# After the erase, so a listener that queries is_burning() from the handler
+	# gets the state the signal is announcing rather than the one before it.
+	tile_extinguished.emit(cell)
 
 
 func _complete_burn(cell: Vector2i) -> void:

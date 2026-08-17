@@ -33,16 +33,16 @@ extends SceneTree
 ##   --full         save the whole 480x270 book instead of the right-page crop
 ##   --locale <id>  render in a specific language (en_GB / es_CO)
 ##   --shop <n>     put an UnlockState in the tree with `n` tokens in the ledger,
-##                  so the RIGHT page prints its prices. Without it the journal
-##                  has no economy and every entry renders owned — i.e. the shop
-##                  is invisible in the only tool that draws the page. Use with
-##                  --full. 20 is the interesting value: it makes the ladder and
-##                  the bridge affordable and the fence not, which is the one
-##                  state where the per-entry fade has anything to say.
+##                  so the RIGHT page can price its entries. Without it the
+##                  journal has no economy and every entry renders owned — i.e.
+##                  the shop is invisible in the only tool that draws the page.
+##                  Use with --full. 20 is the interesting value: it makes the
+##                  ladder and the bridge affordable and the fence not, which is
+##                  the one state where the per-entry fade has anything to say.
 ##   --hover <i>    park the pointer on "known buildings" entry `i` (0 = ladder),
-##                  so the hover lift and the "left click to buy" tag render.
-##                  Needs --shop; the tag only appears over an entry that is for
-##                  sale, which needs an economy to be for sale IN.
+##                  so the hover lift, the PRICE and the mouse-verb glyphs render.
+##                  Needs --shop, and it is the only way to see a price at all:
+##                  the page prints one for the hovered entry and nothing else.
 
 # load()ed, not preload()ed — see the same note in preview_page_warp.gd: a preload
 # resolves before _initialize() installs the autoloads, and field_journal.gd then

@@ -24,15 +24,19 @@ extends Control
 ## JournalKnownSet's business (see HOVER_LIFT_PX there); this node only says where
 ## the pointer is.
 ##
-## An entry that is FOR SALE — locked and affordable — also gets a "left click to
-## buy" tag floating over it (JournalTooltip). It says the one thing the page
-## cannot: the price is printed beside every locked swatch, but nothing on a book
-## says a picture in it is a button.
+## A hovered entry also gets two lines of mouse glyphs (JournalTooltip): left
+## click and the price UNDER it, right click and info OVER it (a stub — nothing
+## is wired to right click yet). They say the one thing the page cannot: the
+## price is what it costs, but nothing on a book says a picture in it is a button
+## or which button. The price travels with the click glyph rather than staying in
+## the page, which is what took it out of the paper's warp blocks and cell widths.
 ##
-## It also runs through the same REFUSALS, which is the other half of that claim:
-## the tutorial gate is asked here as well as in _try_buy, and the section itself
-## declines to react to an entry the player cannot afford. A swatch that lifts is
-## a promise that a click will do something.
+## The BUY glyph runs through the same REFUSALS as the click, which is the other
+## half of that claim: the tutorial gate is asked here as well as in _try_buy, and
+## the section itself declines to react to an entry the player cannot afford. A
+## swatch that lifts under a click glyph is a promise that a click will do
+## something. The info half is not a promise about affording anything, so it shows
+## over owned and unaffordable entries too.
 
 ## The right page's SubViewportContainer, whose local space equals its
 ## viewport's canvas space.
@@ -137,24 +141,46 @@ func handle_click(pr_local: Vector2) -> bool:
 	return false
 
 
-# --- "left click to buy" tag -------------------------------------------------
+# --- the mouse-verb tag ------------------------------------------------------
 
-## Whether the tag has anything to say about this entry: only one that is FOR
-## SALE — locked, and affordable right now. Owned entries have nothing to buy,
-## and an unaffordable one is the case the whole hover path already declines to
-## react to; a tag over it would be the same false promise in words.
+## Whether a LEFT CLICK would do anything here: the entry is locked and
+## affordable right now. Drives the click glyph alone — an owned entry has
+## nothing to buy, and an unaffordable one is the case the whole hover path
+## already declines to react to; a buy glyph over it would be the same false
+## promise in pictures.
 func _is_for_sale(section: JournalKnownSet, index: int) -> bool:
+	return _is_locked(section, index) and _can_afford(section, index)
+
+
+## Whether this entry is still to be bought. False with no economy in the tree,
+## which is what makes a preview or a layout test render everything owned.
+func _is_locked(section: JournalKnownSet, index: int) -> bool:
 	if section == null or index < 0 or _unlocks_node() == null:
 		return false
 	var id: StringName = section.entry_id_at(index)
 	if id == &"":
 		return false
-	return not bool(_unlocks.call(&"is_unlocked", id)) \
-			and bool(_unlocks.call(&"can_afford_unlock", id))
+	return not bool(_unlocks.call(&"is_unlocked", id))
+
+
+func _can_afford(section: JournalKnownSet, index: int) -> bool:
+	if section == null or index < 0 or _unlocks_node() == null:
+		return false
+	var id: StringName = section.entry_id_at(index)
+	return id != &"" and bool(_unlocks.call(&"can_afford_unlock", id))
+
+
+## Whether the tag has anything at all to say: any entry that IS a shop entry.
+## Broader than `_is_for_sale` because the right-click/info half of the tag is
+## about the thing, not about the transaction — an owned frailejon is still
+## something to read about, and a fence you cannot afford yet is the entry a
+## player is most likely to want to read about.
+func _has_verbs(section: JournalKnownSet, index: int) -> bool:
+	return section != null and index >= 0 and section.entry_id_at(index) != &""
 
 
 func _update_tooltip(section: JournalKnownSet, index: int) -> void:
-	if not _is_for_sale(section, index):
+	if not _has_verbs(section, index):
 		if _tooltip != null and is_instance_valid(_tooltip):
 			_tooltip.hide_tip()
 		return
@@ -171,9 +197,30 @@ func _update_tooltip(section: JournalKnownSet, index: int) -> void:
 			* page_right.get_global_transform()
 	var art := Rect2(to_local * (ink.position + offset),
 			to_local.basis_xform(ink.size))
-	# The ink COLOUR comes from the section too, so the glyph and the page's own
+	# The ink COLOUR comes from the section too, so the glyphs and the page's own
 	# lettering are the same palette entry by construction rather than by two edits.
-	tip.show_over(art, Rect2(Vector2.ZERO, parent.size), section.text_color)
+	# So does the PRICE — the section is where the shop state was last written, and
+	# reading it back is what keeps the number on screen equal to the number
+	# try_unlock will charge.
+	var locked: bool = _is_locked(section, index)
+	tip.show_for(art, _tag_bounds(section, parent, to_local, offset),
+			section.text_color, _is_for_sale(section, index),
+			section.cost_of(index) if locked else 0,
+			_can_afford(section, index))
+
+
+# Where the tag is allowed to go: the book, with its TOP raised to the section's
+# own swatch row.
+#
+# The row is what stops the glyphs landing on the heading's rule. A swatch sits a
+# few texels down inside its cell, so a tag hung above the ART alone clears the
+# art and lands squarely on the rule above it, in the same brown — measured, on
+# the fence. Clamped to the cell top instead, it comes to rest on the upper part
+# of the picture, which is where a cursor belongs anyway.
+func _tag_bounds(section: JournalKnownSet, parent: Control, to_local: Transform2D,
+		offset: Vector2) -> Rect2:
+	var top: float = (to_local * (Vector2(0.0, section.header_row_px()) + offset)).y
+	return Rect2(Vector2(0.0, top), Vector2(parent.size.x, parent.size.y - top))
 
 
 # Parented to BookHit's PARENT (BookArt) rather than to BookHit, and that is a
@@ -205,7 +252,12 @@ func _try_buy(section: JournalKnownSet, index: int) -> bool:
 	# Asked BEFORE the attempt, because try_unlock reports the same false for
 	# "too poor" and "nothing happened" and only the first deserves a recoil.
 	if not bool(_unlocks.call(&"can_afford_unlock", id)):
+		# Two halves of one refusal: the swatch recoils where it sits, the price
+		# reddens where IT sits — which is in the tag, not the page, since the
+		# price moved there to travel with the click glyph.
 		section.flash_denied(index)
+		if _tooltip != null and is_instance_valid(_tooltip):
+			_tooltip.flash_denied()
 		return false
 	var bought: bool = bool(_unlocks.call(&"try_unlock", id))
 	# Bought or refused, the presentation may need updating (try_unlock's spend

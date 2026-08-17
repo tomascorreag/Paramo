@@ -25,3 +25,4 @@
 - [x] add a fullscreen toggle to the in-game settings — a button in the pause menu's settings section, labelled with the action it performs (`fullscreen` / `windowed`); it drives `DisplayManager.toggle_fullscreen()` and re-reads the window mode while the menu is open so F11 and the window manager stay in sync. Panel grown 104 → 124px; two new layout guards in `test_locale_manager.gd`.
 - [x] Reduce the damage visitors/player do while walking by 50%.
 - [x] Add small cost icons to the items in the shop.
+- [ ] review the latest commit and current diff for bugfixes, improvements and optimizations.

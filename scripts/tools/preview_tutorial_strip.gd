@@ -24,6 +24,12 @@ extends SceneTree
 ##     rows; the panel has to grow upward to hold them without leaving the crop.
 ##   - The skip button's hold fill must be a crisp whole-pixel column with the
 ##     label still readable through it (last state of each locale).
+##   - The two fire-arc lines carry the same left/right glyph pair as the build
+##     steps, and are the only place in the FTUE where a step asks the player to
+##     look AWAY from the strip — they have to read at a glance.
+##   - The `roam` state renders an EMPTY frame on purpose. That step's whole
+##     content is the strip being gone; a panel showing up in that capture means
+##     the quiet flag stopped being honoured.
 ##
 ## Needs a rendering context — do NOT pass --headless.
 ##
@@ -223,6 +229,12 @@ func _build(locale: String, step: int, bought: StringName) -> void:
 	# _show_step reads _bought_type to pick the build line; there is no shop
 	# here to set it, so inject it first.
 	_tutorial.set(&"_bought_type", bought)
+	# Same for the fire arc: both fire steps skip themselves unless a cell was
+	# actually lit, and there is no world here to light one on. Any cell will do
+	# — the steps only test it against NO_CELL, and nothing in this tool reads it
+	# back (the follow step's polling lives in a _process this tool keeps
+	# stopped).
+	_tutorial.set(&"_fire_cell", Vector2i.ZERO)
 	_tutorial.call(&"_show_step", step)
 	# The strip fades in over 0.25 s and nothing else drives the alpha; jump it.
 	var strip := _tutorial.get_node_or_null(^"StripAnchor/Column/Strip") as Control

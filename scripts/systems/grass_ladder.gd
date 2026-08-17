@@ -54,6 +54,11 @@ var _key_of: Dictionary[Vector2i, String] = {}
 # coord -> its authored grass_tone, for tools and tests that want to report
 # which species a cell is wearing without re-reading the atlas.
 var _tone_of: Dictionary[Vector2i, int] = {}
+# kind -> the tones that have a ladder on it, ascending. Every lookup above is
+# keyed by a coord the caller already has; a cell painted DIRT has none, so
+# colonisation asks the other way round — "what grass could stand here" — and
+# needs the tones enumerable per kind.
+var _tones_by_kind: Dictionary[StringName, Array] = {}
 
 
 func _init(tile_set: TileSet, source_id: int) -> void:
@@ -73,6 +78,12 @@ func _init(tile_set: TileSet, source_id: int) -> void:
 			var key: String = "%s|%d" % [kind, tone]
 			_tone_of[coord] = tone
 			by_key.get_or_add(key, []).append([length, coord])
+			var tones: Array = _tones_by_kind.get_or_add(kind, [])
+			if not tones.has(tone):
+				tones.append(tone)
+
+	for laddered_kind: StringName in _tones_by_kind:
+		(_tones_by_kind[laddered_kind] as Array).sort()
 
 	for key: String in by_key:
 		var entries: Array = by_key[key]
@@ -114,6 +125,31 @@ func rung_count(coord: Vector2i) -> int:
 ## meaningful for comparing two coords: the numbers name species, not an order.
 func tone_of(coord: Vector2i) -> int:
 	return _tone_of.get(coord, 0)
+
+
+## The tones that have a ladder on `kind`, ascending, or empty when the kind is
+## not laddered at all. The entry point for a caller holding no coord — a cell
+## painted DIRT asks "what grass could stand here", which every lookup above
+## cannot answer because they are all keyed by a grass coord the caller already
+## has. The numbers name species; the order carries no meaning beyond being
+## stable, so a caller picking one must pick deterministically itself.
+func tones_for(kind: StringName) -> Array:
+	return _tones_by_kind.get(kind, [])
+
+
+## Rungs in `kind`'s `tone` ladder, 0 when there is no such ladder.
+func rung_count_for(kind: StringName, tone: int) -> int:
+	var coords: Array = _rungs.get("%s|%d" % [kind, tone], [])
+	return coords.size()
+
+
+## The tile `kind`'s `tone` ladder wears at `rung`, clamped to that ladder, or
+## (-1, -1) when the ladder does not exist.
+func coord_for(kind: StringName, tone: int, rung: int) -> Vector2i:
+	var coords: Array = _rungs.get("%s|%d" % [kind, tone], [])
+	if coords.is_empty():
+		return Vector2i(-1, -1)
+	return coords[clampi(rung, 0, coords.size() - 1)]
 
 
 ## The tile `coord`'s ladder wears at `rung`, clamped to the ladder. Returns

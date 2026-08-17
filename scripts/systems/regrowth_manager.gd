@@ -88,6 +88,33 @@ extends Node
 ## Rain is integrated the same way rather than averaged per day, so a downpour
 ## heals the mountain WHILE IT RAINS instead of retroactively at midnight.
 ##
+## ---------------------------------------------------------------------------
+## Colonisation: dirt the mountain never had grass on
+## ---------------------------------------------------------------------------
+##
+## Ground terrain generation painted DIRT also greens, slowly, up to a SHORT
+## ceiling. It is the same record walking the same value, only from 0 upward
+## instead of 1 downward, which is why it needed no second recovery path.
+##
+## Two things make it not-damage-in-reverse, and both matter:
+##
+##   - Every record carries the vegetation the cell is SUPPOSED to have
+##     (`natural`: 1.0 grass-origin, 0.0 dirt-origin), and the deficit and bare
+##     counters measure distance BELOW that rather than below 1.0. Bare dirt is
+##     not a scar, so a pristine map's appeal is unchanged by seeding the whole
+##     dirt band, and a reclaimed cell that burns back to dirt costs nothing —
+##     it is simply where generation left it. Without this, appeal would read
+##     near zero on an untouched mountain.
+##   - The ceiling is a fraction of the cell's ladder (`dirt_colonise_ceiling`),
+##     not the full stand. Terrain generation bands grass by altitude; letting
+##     reclaimed dirt reach the same length would erase that banding over a run.
+##
+## The consequence to know is that this ADDS BURNABLE GROUND. FireManager's
+## `can_ignite` reads the layer, so today's dirt band is a free firebreak, and
+## colonising it hands that area back to fire over the run. Price it in the
+## balance simulator (`dirt_colonise_factor` 0 is the off arm) before treating
+## the fire numbers on this branch as comparable to older ones.
+##
 ## Each cell also carries its own recovery MULTIPLIER, drawn once when it is
 ## first damaged. That is what keeps a burn scar healing patchily now that
 ## recovery is continuous: without it every cell burned on the same day heals on
@@ -96,6 +123,11 @@ extends Node
 
 const GROUP: StringName = &"regrowth"
 const SOURCE_GRASS: int = 0
+
+# Face neighbours in grid space, for reading which grass a dirt cell borders.
+const _FACE_DIRS: Array[Vector2i] = [
+	Vector2i(0, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, 1),
+]
 
 ## Fraction of a cell's grass restored per completed day with zero rain.
 ## 0.15 ≈ a drought burn takes most of a 6-day season, matching the expected
@@ -141,6 +173,23 @@ const SOURCE_GRASS: int = 0
 ## how much grass a day returns. That is exactly why it is safe to expose.
 @export var sweep_seconds: float = 4.0
 
+## How fast grass COLONISES ground that generation painted dirt, as a fraction
+## of the recovery rate a burn scar gets. Reclaiming ground the mountain never
+## had is not the same event as a scar closing over, and reads wrong at the same
+## speed: at 1.0 the whole dirt band greens inside a season and the biome banding
+## stops being legible. At 0.25 a cell needs ~15 dry game-days to show its first
+## blade and ~27 to reach its ceiling — visible across a run, not within a
+## season. 0 turns colonisation off entirely (the knob to isolate it in the sim).
+@export_range(0.0, 1.0, 0.05) var dirt_colonise_factor: float = 0.25
+
+## How far up its ladder reclaimed dirt may grow, as a fraction of the ladder's
+## height. Colonised ground is capped SHORT on purpose: at 1.0 a run ends with
+## the dirt band indistinguishable from the grass generation authored, and the
+## altitude banding the terrain generator works to produce is erased by a system
+## that is supposed to be a slow background process. At 0.5 the reclaimed band
+## reads as green but visibly thinner than the stands around it.
+@export_range(0.0, 1.0, 0.05) var dirt_colonise_ceiling: float = 0.5
+
 ## Vegetation at or below which a cell is painted dirt...
 @export var bare_threshold: float = 0.15
 ## ...and at or above which it is painted grass again. Must exceed
@@ -156,7 +205,7 @@ const SOURCE_GRASS: int = 0
 @export var grass_step_hysteresis: float = 0.03
 
 # cell -> {"coord": Vector2i, "layer": TileMapLayer, "kind": StringName,
-#          "veg": float, "rate": float, "bare": bool,
+#          "natural": float, "veg": float, "rate": float, "bare": bool,
 #          "top": int, "rung": int, "d": float, "i": float}
 # "coord" is the variant TERRAIN GENERATION chose, "top" its rung on that
 # variant's grass ladder (the cell's maximum length) and "rung" the length it is
@@ -191,6 +240,21 @@ var _bare: int = 0
 var _days: float = 0.0
 var _rain_days: float = 0.0
 
+# cell -> the grass coord colonisation is walking that cell TOWARD, for every
+# cell terrain generation painted dirt. Static: written once per world, read
+# forever after.
+#
+# The header argues hard against a second ledger, and this is not one — it
+# answers a different question. `_veg` answers "how much grass is on this cell",
+# which is state that moves; this answers "what did generation put here", which
+# is immutable for the life of the world and is the reason a cell that burns
+# back to dirt must NOT be recorded as damage. Keeping it out of `_veg` is also
+# what lets a fully colonised cell leave the sweep: the record can be dropped
+# and rebuilt from here, so the ledger stays proportional to what is CHANGING
+# rather than growing to the size of the dirt band and staying there.
+var _dirt_origin: Dictionary[Vector2i, Vector2i] = {}
+var _dirt_seeded: bool = false
+
 var _day_night: Node = null
 var _world_hooked: bool = false
 
@@ -201,6 +265,13 @@ var _world_hooked: bool = false
 # the wrong ladders.
 var _ladder: GrassLadder = null
 var _ladder_tile_set: TileSet = null
+
+# The grass source's kind → coord table, cached on the same terms as the ladder
+# above. Only colonisation needs it, and only for the kinds GrassLadder has
+# nothing to say about (a slope has one grass variant, so no ladder is built for
+# it and `coord_at` has no key to look up).
+var _grass_index: TileKindIndex = null
+var _grass_index_tile_set: TileSet = null
 
 # Recovery's own RNG stream (per-cell rate draws, dirt-variant picks). Randomly
 # seeded for the game; the balance simulator seeds it per run for determinism.
@@ -233,14 +304,16 @@ static func appeal_factor(non_natural: float, total_cells: int) -> float:
 	return 1.0 - minf(1.0, maxf(non_natural, 0.0) / float(total_cells))
 
 
-## Cells currently painted dirt. The headline "how scarred is the mountain"
-## number; vegetation_deficit is the precise one.
+## Cells STRIPPED to dirt. The headline "how scarred is the mountain" number;
+## vegetation_deficit is the precise one. Ground generation painted dirt is not
+## counted however green or bare it currently is — it is not a scar.
 func bare_count() -> int:
 	return _bare
 
 
-## Total grass missing, in cells. A fully bare cell contributes 1.0, a cell at
-## half vegetation contributes 0.5.
+## Total grass missing, in cells, measured against what each cell NATURALLY
+## carries. A fully stripped grass cell contributes 1.0, one at half vegetation
+## 0.5, and a dirt-origin cell 0.0 at any stage of colonisation.
 func vegetation_deficit() -> float:
 	return _deficit
 
@@ -249,7 +322,7 @@ func vegetation_deficit() -> float:
 
 func _set_veg(rec: Dictionary, value: float) -> void:
 	var clamped: float = clampf(value, 0.0, 1.0)
-	_deficit += float(rec["veg"]) - clamped
+	_deficit += _deficit_of(rec, clamped) - _deficit_of(rec, float(rec["veg"]))
 	rec["veg"] = clamped
 
 
@@ -257,15 +330,31 @@ func _set_bare(rec: Dictionary, value: bool) -> void:
 	if bool(rec["bare"]) == value:
 		return
 	rec["bare"] = value
+	# A cell whose NATURAL state is dirt is not scarred by being dirt. bare_count
+	# is the "how damaged is the mountain" headline; counting the generated dirt
+	# band in it would make an untouched map read as heavily scarred.
+	if float(rec["natural"]) <= 0.0:
+		return
 	_bare += 1 if value else -1
+
+
+# What `rec` contributes to the deficit at vegetation `veg`: the distance BELOW
+# its natural state, never above it. For a grass-origin cell (natural 1.0) that
+# is the old `1 - veg`. For a colonising dirt cell (natural 0.0) it is always
+# zero — dirt is where generation put it, so bare dirt is not missing grass and
+# grass grown on top of it is not a surplus. This is what keeps appeal_factor's
+# "fraction of the mountain still in its natural state" reading true: without
+# it, seeding the dirt band would drop appeal to near zero on a pristine map.
+func _deficit_of(rec: Dictionary, veg: float) -> float:
+	return maxf(float(rec["natural"]) - veg, 0.0)
 
 
 func _erase(cell: Vector2i) -> void:
 	var rec: Dictionary = _veg.get(cell, {})
 	if rec.is_empty():
 		return
-	_deficit -= 1.0 - float(rec["veg"])
-	if bool(rec["bare"]):
+	_deficit -= _deficit_of(rec, float(rec["veg"]))
+	if bool(rec["bare"]) and float(rec["natural"]) > 0.0:
 		_bare -= 1
 	_veg.erase(cell)
 	# Swap-remove: order carries no meaning (the sweep only needs to visit every
@@ -277,9 +366,11 @@ func _erase(cell: Vector2i) -> void:
 		_order.resize(_order.size() - 1)
 
 
-## 0 (bare) .. 1 (untouched grass). Untracked cells are undamaged by
+## 0 (bare) .. 1 (grass at its ceiling). Untracked cells are undamaged by
 ## definition, which includes water and stone — callers that care about those
-## should be asking the layer, not this.
+## should be asking the layer, not this. Note the ceiling is the CELL's: a fully
+## colonised dirt cell reads 1.0 while wearing half the grass of the stand next
+## to it, because it has all the grass it is ever going to have.
 func vegetation_at(cell: Vector2i) -> float:
 	var rec: Dictionary = _veg.get(cell, {})
 	return 1.0 if rec.is_empty() else float(rec["veg"])
@@ -355,6 +446,7 @@ func tick(delta: float) -> void:
 		return
 	if TimeManager.paused or TimeManager.seconds_per_game_day <= 0.0:
 		return
+	_seed_dirt_once()
 	var game_day_delta: float = \
 			delta * TimeManager.time_scale / TimeManager.seconds_per_game_day
 	_days += game_day_delta
@@ -427,7 +519,15 @@ func _recover_cell(cell: Vector2i) -> bool:
 	var avg_rain: float = clampf(i_delta / d_delta, 0.0, 1.0)
 	var rate: float = recovery_per_day(
 			avg_rain, base_recovery_per_day, rain_recovery_bonus)
-	_set_veg(rec, float(rec["veg"]) + rate * d_delta * float(rec["rate"]))
+	var mult: float = float(rec["rate"])
+	# Reclaiming ground that was never grass is the slow version of the same
+	# process. Applied here rather than baked into the cell's multiplier at seed
+	# time so the knob stays live — the whole dirt band is seeded in one pass at
+	# world start, and a factor folded in there could only be changed by
+	# regenerating the world.
+	if float(rec["natural"]) <= 0.0:
+		mult *= dirt_colonise_factor
+	_set_veg(rec, float(rec["veg"]) + rate * d_delta * mult)
 	_refresh_paint(cell, rec)
 	# Fully recovered and repainted: stop tracking, so the ledger stays
 	# proportional to the damage rather than growing all run.
@@ -437,14 +537,120 @@ func _recover_cell(cell: Vector2i) -> bool:
 	return true
 
 
+# --- Colonisation -----------------------------------------------------------
+
+# Enter every cell terrain generation painted DIRT into the ledger once, so it
+# starts climbing toward the grass that could stand on it.
+#
+# Lazy rather than driven off `generation_finished`, because HAND-AUTHORED maps
+# never emit it — there is no ProceduralWorld on them at all — and they have a
+# dirt band like any other. Deferring to the first tick that finds a grid covers
+# both, and costs one boolean per frame after.
+#
+# (`generation_finished` would otherwise be safe to seed from: ProceduralWorld
+# emits it after the pathfinder rebuild, so the grid is already fresh. `_wipe`
+# is hung off it for exactly that reason and simply re-arms this.)
+#
+# One pass over the grid bounds per world. A grid that cannot be enumerated (the
+# test fixtures' stub, which answers get_tile and nothing else) is marked seeded
+# and skipped — colonisation is a whole-map process and has nothing to say about
+# a map of three hand-placed cells.
+func _seed_dirt_once() -> void:
+	if _dirt_seeded:
+		return
+	var grid: Object = FireManager.grid()
+	if grid == null:
+		return
+	_dirt_seeded = true
+	if dirt_colonise_factor <= 0.0 or not grid.has_method(&"bounds"):
+		return
+	var b: Rect2i = grid.bounds()
+	for y in range(b.position.y, b.end.y):
+		for x in range(b.position.x, b.end.x):
+			_begin_colonising(Vector2i(x, y), grid)
+
+
+# Record one cell as dirt-origin and start it climbing, if it is dirt the player
+# can stand on. Non-walkable dirt is skipped: it is underwater fill, cliff-back
+# stacking and wall faces, none of which is ground the mountain could revegetate
+# and all of which would put grass on a vertical surface.
+func _begin_colonising(cell: Vector2i, grid: Object) -> void:
+	var cd = grid.get_tile(cell)
+	if cd == null or cd.layer == null or not cd.walkable:
+		return
+	var layer: TileMapLayer = cd.layer
+	if layer.get_cell_source_id(cell) != FireManager.SOURCE_DIRT:
+		return
+	var target: Vector2i = _colonise_target(layer, cd.tile_kind, cell, grid)
+	if target.x < 0:
+		return
+	_dirt_origin[cell] = target
+	_begin_tracking(cell, layer, target, cd.tile_kind, 0.0)
+
+
+# The grass coord a dirt cell grows TOWARD — its ceiling, stored the same way a
+# grass cell's generated variant is, so every existing paint and rung rule
+# applies to it unchanged.
+#
+# Tone comes from a grass face neighbour when there is one, so reclaimed ground
+# joins the stand next to it rather than introducing a species the slope has
+# never carried; with no grassy neighbour it is a stable hash of the cell, which
+# keeps the choice deterministic across a simulator replay without drawing from
+# an RNG stream fire also reads.
+#
+# A kind with no ladder at all (slopes, stairs, walls) falls back to its single
+# grass variant, so sloped dirt still greens — it simply has one length to do it
+# in, exactly as a generated grass slope has one length to lose.
+func _colonise_target(layer: TileMapLayer, kind: StringName, cell: Vector2i,
+		grid: Object) -> Vector2i:
+	var ladder: GrassLadder = _ladder_for(layer)
+	var tones: Array = ladder.tones_for(kind)
+	if tones.is_empty():
+		var idx: TileKindIndex = _grass_index_for(layer)
+		return idx.coord(kind) if idx.has(kind) else Vector2i(-1, -1)
+	var tone: int = _tone_for(cell, grid, ladder, tones)
+	var rungs: int = ladder.rung_count_for(kind, tone)
+	var rung: int = int(floor(float(rungs - 1) * dirt_colonise_ceiling))
+	return ladder.coord_for(kind, tone, rung)
+
+
+func _tone_for(cell: Vector2i, grid: Object, ladder: GrassLadder,
+		tones: Array) -> int:
+	for d: Vector2i in _FACE_DIRS:
+		var n = grid.get_tile(cell + d)
+		if n == null or n.layer == null:
+			continue
+		var nl: TileMapLayer = n.layer
+		if nl.get_cell_source_id(cell + d) != SOURCE_GRASS:
+			continue
+		var tone: int = ladder.tone_of(nl.get_cell_atlas_coords(cell + d))
+		if tones.has(tone):
+			return tone
+	return tones[posmod(hash(cell), tones.size())]
+
+
+func _grass_index_for(layer: TileMapLayer) -> TileKindIndex:
+	var ts: TileSet = layer.tile_set if layer != null else null
+	if _grass_index == null or ts != _grass_index_tile_set:
+		_grass_index_tile_set = ts
+		_grass_index = TileKindIndex.new(ts, SOURCE_GRASS)
+	return _grass_index
+
+
 # --- Damage -----------------------------------------------------------------
 
 # Start tracking an undamaged cell, capturing what it takes to put it back:
 # the exact grass variant it was wearing and the layer it is painted on. Only
 # grass qualifies — everything else has no grass to lose.
+#
+# `natural` is the vegetation this cell is SUPPOSED to carry: 1.0 for a cell
+# generation painted grass, 0.0 for one it painted dirt. It is what the deficit
+# and bare counters measure against (see _deficit_of), and a cell already known
+# to be dirt-origin overrides the argument — a reclaimed cell that is trampled
+# or burned back must not start counting as damage the moment it is re-tracked.
 func _begin_tracking(cell: Vector2i, layer: TileMapLayer = null,
-		coord: Vector2i = Vector2i(-1, -1)) -> Dictionary:
-	var kind: StringName = &"FLAT"
+		coord: Vector2i = Vector2i(-1, -1), kind: StringName = &"FLAT",
+		natural: float = 1.0) -> Dictionary:
 	if layer == null:
 		var grid: Object = FireManager.grid()
 		if grid == null:
@@ -457,6 +663,11 @@ func _begin_tracking(cell: Vector2i, layer: TileMapLayer = null,
 			return {}
 		coord = layer.get_cell_atlas_coords(cell)
 		kind = cd.tile_kind
+	# After the lookup, so the origin's ceiling wins over whatever the cell
+	# happens to be wearing right now.
+	if _dirt_origin.has(cell):
+		natural = 0.0
+		coord = _dirt_origin[cell]
 	if coord.x < 0:
 		return {}
 	# The variant generation chose IS the cell's longest grass, so its rung is
@@ -465,16 +676,22 @@ func _begin_tracking(cell: Vector2i, layer: TileMapLayer = null,
 	# whatever length the wear has left, and reading the ceiling off that would
 	# ratchet the cell shorter every time it was re-tracked.
 	var top: int = _ladder_for(layer).top_rung(coord)
+	# A dirt-origin cell starts from nothing and climbs; a grass one starts full
+	# and falls. Both are the SAME record walking the same value in opposite
+	# directions, which is why colonisation needed no second ledger and no second
+	# recovery path — only a starting point and a natural state.
+	var colonising: bool = natural <= 0.0
 	var rec: Dictionary = {
 		"coord": coord,
 		"layer": layer,
 		"kind": kind,
-		"veg": 1.0,
+		"natural": natural,
+		"veg": 0.0 if colonising else 1.0,
 		"top": top,
-		"rung": top,
+		"rung": 0 if colonising else top,
 		# Drawn once, never re-rolled — see the header.
 		"rate": rng.randf_range(1.0 - recovery_rate_spread, 1.0 + recovery_rate_spread),
-		"bare": false,
+		"bare": colonising,
 		# Recovery is integrated from HERE, so a cell damaged mid-interval is not
 		# credited for the part of it that happened before the damage.
 		"d": _days,
@@ -601,6 +818,11 @@ func _wipe() -> void:
 	_cursor = 0
 	_deficit = 0.0
 	_bare = 0
+	# The new world paints its own dirt somewhere else entirely; keeping the old
+	# map's origins would both mislabel fresh grass as reclaimed ground and stop
+	# the new dirt from ever being seeded.
+	_dirt_origin.clear()
+	_dirt_seeded = false
 	# The clocks are NOT reset: they are monotonic, and every record that could
 	# reference an old reading has just been cleared. Zeroing them would be
 	# harmless today and a retroactive-healing bug the day something survives a

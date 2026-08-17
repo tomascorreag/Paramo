@@ -19,7 +19,10 @@ concessions in systems it depends on.
 | 6 | `TUTORIAL_CLOSE_JOURNAL` | `FieldJournal.closed` |
 | 7 | `TUTORIAL_BUILD_*` | `TraversalPlacementController.placement_began`, or `UnlockState.placement_paid` |
 | 8 | `TUTORIAL_ENDPOINT_*` | `UnlockState.placement_paid` (skipped unless a placement is open) |
-| 9 | `NARRATIVE_CLOSING` | dwell, or any key/click |
+| 9 | *(no copy — the strip is gone)* | a fixed `_ROAM_SECONDS` (12) hold |
+| 10 | `TUTORIAL_FIRE_FOLLOW` | **polled**: the fire's cell entering the frame |
+| 11 | `TUTORIAL_FIRE_DOUSE` | `FireManager.tile_extinguished`, or `tile_burned` on that cell |
+| 12 | `NARRATIVE_CLOSING` | dwell, or any key/click |
 
 **No line leaves the screen inside `_MIN_ON_SCREEN` (2.5s)**, however fast it is
 satisfied. Several steps can be completed by an action already in flight — a
@@ -128,9 +131,127 @@ asserts it (after filtering the narrative out): the shop step is only doable
 inside the journal the step before it opened, and the build step is only doable
 with the tool the shop step bought, in a world the close step got back to — and
 the second-click step is only doable inside the placement the build step opened.
+The fire arc runs last because it is the only part that needs the player already
+able to walk away, and inside it the order is the whole lesson: the strip has to
+be gone before the fire starts (or the player learns that fires are announced),
+and the fire has to be found before it can be put out (or the aura teaches
+nothing).
 
-Every step carries a **hold to skip tutorial** button in its own row under the
-panel, centred, with `_SKIP_GAP` (5px) of clear air between the two — they are
+## The fire arc (steps 9-11)
+
+Steps 1-8 describe the game. The arc is the FTUE **acting on the world**: it
+goes quiet, lets a fire start where the player cannot see it, and teaches the
+last verb by making them go and put it out.
+
+It exists because the douse is the one thing in the slice a player can lose the
+run to without ever having been shown it, and because the game already carries
+an off-screen fire indicator — `FireAuraOverlay`, a warm glow baked into the
+screen edge in the bearing of any fire outside the frame — that nothing in the
+run ever introduces. The arc is one scripted meeting with it.
+
+### The quiet beat
+
+Step 9 has **no copy at all**, and that is its content. `"quiet": true` fades the
+strip *and the skip button* away and leaves them away for 12 s. An FTUE that
+never lets go teaches the player to wait for the next line rather than to look at
+the world — and the aura only works on a player who has stopped watching the
+bottom of the screen. It is also what buys the arc its distance: the fire is lit
+relative to where the player wandered to, not to where the build step left them.
+
+`_arm_step_timer` is the narrative dwell's timer, factored out. Both are bound to
+the step INDEX for the same reason.
+
+### Where the fire is lit
+
+`_pick_fire_cell` ranks on **one number**: how far beyond the edge of the screen
+a cell sits, in screen-heights, signed — the same metric `FireAuraOverlay`
+shapes its glow with (`_cell_offscreen_distance` is its `sd`, computed the same
+way, corners included). Candidates must be
+
+- **reachable** — from `Pathfinder.reachable_from(player.current_cell)`, so the
+  answer can never be a fire across a ravine the player cannot walk to,
+- **burnable** — `FireManager.can_ignite`, so never water, rock or dirt,
+- at least `_FIRE_MIN_CELLS` (4) away, a guard against a camera state that makes
+  a neighbour read as off-screen,
+
+and the winner is the one closest to `_FIRE_TARGET_OFFSCREEN` (0.35) inside the
+band [0.10, 0.60].
+
+**0.60 is the load-bearing number: the aura's `REACH` is 0.9, past which a fire
+contributes nothing to the strip at all.** A fire lit beyond it is a line telling
+the player to follow a glow that is not being drawn. `test_tutorial.gd` asserts
+the max stays under `FireAuraOverlay.REACH`.
+
+If the band is empty (a wide window, a player standing at the edge of the
+mountain) the search **widens to the farthest burnable reachable cell there is**,
+even an on-screen one. If that finds nothing either, `_fire_cell` stays `NO_CELL`
+and both fire steps skip themselves — `"fire_only"`, the same mechanism
+`"placement_only"` uses — and the FTUE closes exactly as it did before the arc
+existed.
+
+**MEASURED 2026-08-17** (`level1`, 686 reachable cells, 1920×1080 → 360×202
+logical): the pick took 2.9 ms plus a **27 ms cold `reachable_from`**. That flood
+fill is not new — `tile_interaction_controller.gd:250` pays the same one on every
+right-click from a cell it hasn't cached, so this is the hitch normal play
+already has, moved into a fade where nothing is expected of the player. It lands
+once.
+
+### Two concessions in FireManager
+
+Both are optional arguments on the public `ignite(cell, contained, fuel)`,
+unreachable from the natural ignition path and from spread:
+
+- **`contained`** — the entry carries `"contained": true` and `_advance_burns`
+  skips its spread roll. A fire lit to be walked to must still be ONE fire when
+  the player arrives; the step asks for a single right click, and a front that
+  has crossed six tiles by then is a different and unwinnable lesson. It lives on
+  the burn entry rather than in a side table so it cannot outlive the fire.
+- **`fuel`** — 30 against `FireDynamics.FUEL_DEFAULT`'s 1.0. A default tile burns
+  out in ~9 s and the walk over is longer than that. 30 is ~4.5 minutes: not a
+  timer the player can feel, which is the point. `fuel_max` takes the same value,
+  so the flame still looks like a fire at full burn rather than a tile that has
+  barely started.
+
+A tutorial fire left burning by a skip is harmless by construction — it never
+spreads, and it chars its own tile and stops.
+
+### The polled step
+
+`fire_follow` is the FTUE's **one** polled completion, and it is the exception
+that proves the rule: "the fire is on screen now" is not an event any system
+emits, it is a relationship between a camera that moves continuously and a cell
+that does not. `_tick_fire_follow` reads it off the viewport's canvas transform
+(not off a camera node — the free-camera debug mode swaps which one is current),
+with `_FIRE_ONSCREEN_INSET` (0.12) of margin, because a flame half off the edge
+has been found in the sense that matters.
+
+The same tick covers the fire going out from under the step: `_fire_cell` is
+cleared and the arc drops rather than asking the player to walk to a fire that
+isn't burning.
+
+### The douse
+
+`FireManager` gained **`tile_extinguished(cell)`**, emitted from the one private
+`_extinguish` — so the player's bucket, rain and every other route report
+identically, and `ActionExtinguishFire` needed no change at all (it already calls
+the public `extinguish`). It is the counterpart to `tile_burned` and deliberately
+a separate signal: the two leave the cell in opposite states, grass restored
+versus dirt.
+
+The step takes **any** extinguish, not only the scripted cell's — a player who
+found a second fire and doused that instead has learned the verb, and refusing to
+advance would be pedantry. `tile_burned` is wired too (that one IS matched
+against `_fire_cell`): the fire cannot burn out inside four minutes, but a step
+whose only exit is an action on an object that can cease to exist is a strip that
+hangs.
+
+No new `TutorialGate` bit. Dousing goes through the tile action menu, which
+`BUILD` opened three steps earlier — there is nothing left to withhold.
+
+Every step that shows a panel carries a **hold to skip tutorial** button in its
+own row under it (the quiet beat shows neither — for those seconds there is no
+tutorial on screen to end), centred, with `_SKIP_GAP` (5px) of clear air between
+the two — they are
 separate objects (one is the tutorial talking, the other is a control that ends
 it) and touching edges read as one widget. It ends the whole FTUE; the tutorial
 runs on every run rather than once, and the skip is what makes that acceptable.
@@ -249,10 +370,15 @@ than skipping down to something cheaper.
 
 ## Why it is built the way it is
 
-**Advancing is signal-driven, never polled.** Each instruction step names the
-signal that proves the player did the thing, so there is no "close enough"
-heuristic and no timeout. The narrative steps are the exception and the reason
-the exception is safe: they teach nothing, so nothing is gated on a timer. Three of the five use signals added for it: `FieldJournal.opened`/`closed`, and
+**Advancing is signal-driven, with two documented exceptions.** Each instruction
+step names the signal that proves the player did the thing, so there is no "close
+enough" heuristic and no timeout. The narrative and quiet steps advance on a
+timer, and are safe for the same reason: they ask for nothing, so nothing the
+player does is being guessed at. The one genuinely polled step is `fire_follow`,
+because what it waits for is not an event (see the fire arc above);
+`test_tutorial.gd` requires every step to appear in either `STEP_SIGNALS` or
+`UNSIGNALLED_STEPS`, so a new step that advances on nothing at all fails there
+instead of hanging the strip in play. Three of the five use signals added for it: `FieldJournal.opened`/`closed`, and
 `UnlockState.placement_paid(type, count)` — the latter emitted inside
 `try_pay_placements`, which is the ONE place every build funnels through
 (frailejones go via TileInteractionController, traversals via
@@ -318,6 +444,16 @@ three per-type second-click lines, and one
 state of the skip button mid-hold. Needs a rendering context — **no
 `--headless`**.
 
+The `roam` state renders an **empty frame on purpose** — that step's whole
+content is the strip being gone, and a panel appearing in that capture means the
+quiet flag stopped being honoured. The two fire states need `_fire_cell` injected
+the way `_bought_type` and the `_FakePlacement` stub are: both fire steps skip
+themselves unless a cell was lit, and there is no world here to light one on.
+This is also why `_step_applies` tests `_fire_cell` alone and **not** whether the
+fire is still burning — a live world query there would make the step
+unrenderable. The "fire went out during the hand-off" case is handled in
+`_connect_step_signal` instead, deferred and guarded on `_running`.
+
 ```bash
 G="../Godot_v4.6.1-stable_win64.exe/Godot_v4.6.1-stable_win64_console.exe"
 $G --path . --script res://scripts/tools/preview_tutorial_strip.gd -- --out preview_out/
@@ -352,6 +488,12 @@ hold them, and all of it stays inside the crop. Accents render (`páramo`,
 button's label reads through it. With the button moved below the panel, the
 longest label in the project's UI ("mantén para saltar el tutorial") still
 centres under a 200px strip without widening it or leaving the screen.
+
+**MEASURED 2026-08-17 (fire arc):** `TUTORIAL_FIRE_FOLLOW` and
+`TUTORIAL_FIRE_DOUSE` each wrap to two rows in both locales, frame clear, accents
+rendering (`pantalla`, `resplandor`). The `roam` state captures an empty frame in
+both locales, which is the pass condition. The two lines carry the left/right
+glyph pair, matching the build steps.
 
 **MEASURED 2026-08-14 (second click):** the rewritten `TUTORIAL_BUILD_LADDER`
 (which now also names the ring pick) wraps to three rows in Spanish and two in
