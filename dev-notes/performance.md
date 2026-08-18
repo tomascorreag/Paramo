@@ -201,15 +201,31 @@ Four files: `profile_web.gd` (harness), `web_profile_boot.gd` (on
 (calibrated fullscreen load), `scripts/tools/run_web_profile.py` (serve + launch
 + collect).
 
+**Export the "Web Profile" preset, not "Web"** (changed 2026-08-17). On web the
+flags come from the URL, which on the deployed site is public input — anyone
+could have opened the live game at `?profile`. `web_profile_boot.gd` now requires
+`OS.has_feature("profiling")`, and only the "Web Profile" preset carries it.
+
+That preset is otherwise byte-for-byte the same configuration — same renderer,
+same `variant/thread_support`, same **release** templates — because the whole
+premise of this tool is that it measures the shipped build. Gating on
+`OS.is_debug_build()` instead would have quietly swapped the subject of every
+measurement here. It exports to `build/web-profile/`, not `docs/`, so a profiling
+pck can never be committed through the tracked `docs/index.pck`.
+
 ```bash
-# 1. unattended (the normal way) — export first, the runner needs docs/index.pck
-... --headless --export-release "Web"
+# 1. unattended (the normal way) — export first, the runner needs the pck.
+#    mkdir is not optional: Godot does not create an export's target folder and
+#    fails with "Target folder does not exist or is inaccessible".
+mkdir -p build/web-profile
+... --headless --export-release "Web Profile"
 python scripts/tools/run_web_profile.py --out /tmp/webprof.txt
 python scripts/tools/run_web_profile.py --browser edge --fires 80 --visitors 12
 python scripts/tools/run_web_profile.py --headless --keep-open --timeout 400
 
-# 2. by hand (same build, same URL)
-cd docs && python -m http.server 8765      # the fetch/PWA need http, not file://
+# 2. by hand (same build, same URL). The runner copies docs/music/ into the
+#    export dir for you; by hand you get 404s on the two music <script> tags.
+cd build/web-profile && python -m http.server 8765   # the fetch/PWA need http
 #  http://localhost:8765/?profile  (&fires=80&visitors=12&ysort=0)
 
 # 3. desktop, same entry point — for validating the HARNESS, not for numbers

@@ -6,6 +6,8 @@
 [ext_resource type="Script" uid="uid://cye4auxn1pnj0" path="res://scripts/systems/player_light_controller.gd" id="4_plc"]
 [ext_resource type="Texture2D" uid="uid://54pqqxno36uy" path="res://assets/sprites/characters/campesino.png" id="5"]
 [ext_resource type="Script" uid="uid://cpa8c2rrndmjj" path="res://scripts/systems/footstep_audio.gd" id="6_fsa"]
+[ext_resource type="Texture2D" uid="uid://cbqgxgdory6xm" path="res://assets/sprites/characters/campesino_night.png" id="7_night"]
+[ext_resource type="Texture2D" uid="uid://dcgvtmv8qkm55" path="res://assets/sprites/characters/base_night.png" id="8_night_shadow"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_shadow_mat"]
 shader = ExtResource("3")
@@ -38,6 +40,8 @@ script = ExtResource("2")
 step_duration = 0.6
 lantern_activate_time = 0.8
 lantern_deactivate_time = 0.2
+night_sprite_texture = ExtResource("7_night")
+night_shadow_texture = ExtResource("8_night_shadow")
 
 [node name="Shadow" type="Sprite2D" parent="." unique_id=1361787262]
 y_sort_enabled = true

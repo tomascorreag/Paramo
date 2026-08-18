@@ -5,7 +5,7 @@ extends CanvasLayer
 ## Holds the season/weather gauge (a disc showing through a slot cut in the left
 ## page, PageSlit) and the run calendar beneath it (RunCalendar). Opened by the HUD
 ## journal button, the `toggle_journal` action
-## (J), and closed by that action or `pause` (Esc). Opening freezes the game with
+## (Space), and closed by that action or `pause` (Esc). Opening freezes the game with
 ## get_tree().paused; this layer runs PROCESS_MODE_ALWAYS so its slide animation and
 ## input keep working while everything else is frozen (same trick as PauseMenu).
 ##
@@ -16,6 +16,12 @@ extends CanvasLayer
 ## `position` from its anchors, so a position tween fights the layout; the offsets
 ## slide it vertically while keeping the horizontal anchoring and resolution
 ## independence intact. A dim scrim fades alongside the slide.
+
+## Emitted the frame the book starts rising / dropping, not when the slide ends —
+## a listener that wants "the player asked for the journal" must not wait 0.22 s
+## for the animation. The FTUE hint strip advances off these.
+signal opened
+signal closed
 
 const _OPEN_DURATION: float = 0.22
 const _CLOSE_DURATION: float = 0.14
@@ -80,8 +86,24 @@ func _process(_delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# J toggles from either state.
+	# Space toggles from either state.
 	if event.is_action_pressed(&"toggle_journal"):
+		# ...but not before the run exists. `toggle_journal` is Space, and the
+		# title screen's language gate commits on ui_accept, which Space also
+		# fires: without this guard, picking a language with the keyboard also
+		# throws the journal open over the opening cinematic. Anything that
+		# consumes the event here would ALSO eat the gate's own key, so this
+		# returns without handling it rather than swallowing it.
+		# The cinematic keeps playing AFTER start_run (begun fires as it starts),
+		# so the phase check alone still leaves Space opening the book over the
+		# title. Both conditions, or neither is enough.
+		if SeasonManager.phase != SeasonManager.Phase.ACTIVE \
+				or not get_tree().get_nodes_in_group(&"title_intro").is_empty():
+			return
+		# ...and not before the FTUE has said what the book is. Same
+		# no-consume rule: the key belongs to whatever else wants it.
+		if not TutorialGate.allows(TutorialGate.Action.JOURNAL):
+			return
 		get_viewport().set_input_as_handled()
 		toggle()
 		return
@@ -116,6 +138,7 @@ func open() -> void:
 	_open = true
 	visible = true
 	get_tree().paused = true
+	opened.emit()
 	# Re-park stale offsets: if the window was resized while closed, the
 	# stored park offset may no longer clear the bottom edge and the book
 	# would pop in mid-rise.
@@ -136,6 +159,7 @@ func close() -> void:
 	if not _open:
 		return
 	_open = false
+	closed.emit()
 	var h := _park_offset()
 	if _tween and _tween.is_valid():
 		_tween.kill()

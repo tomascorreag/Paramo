@@ -155,7 +155,10 @@ func on_season_boundary(unlock_state: Node, day: int) -> void:
 	for type: StringName in policy.unlock_priority:
 		if bool(unlock_state.call(&"is_unlocked", type)):
 			continue
-		if not bool(unlock_state.call(&"can_afford_unlock")):
+		# Priced per type now. Still a `break`, not a `continue`: the policy is
+		# strict priority order, so being unable to afford the next wanted verb
+		# means saving for it, not buying a cheaper one further down the list.
+		if not bool(unlock_state.call(&"can_afford_unlock", type)):
 			break
 		if policy.decision_noise > 0.0 and rng.randf() < policy.decision_noise:
 			continue

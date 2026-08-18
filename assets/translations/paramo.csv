@@ -19,3 +19,22 @@ LOADING_PAINTING,drawing the world…,dibujando el mundo…
 LOADING_PLANTING,planting vegetation…,sembrando vegetación…
 SEASON_DRY,dry,seca
 SEASON_WET,wet,lluvia
+UI_SKIP_TUTORIAL,hold to skip tutorial,mantén para saltar el tutorial
+NARRATIVE_WELCOME,Welcome to the páramo. This is our most sacred land. Its water feeds a whole valley.,Te damos la bienvenida al páramo. Esta tierra y su agua son sagradas.
+NARRATIVE_CHARGE,You have been sent to protect it. Fire reaches this ridge. So do cattle and careless visitors.,Te han enviado a protegerlo. El fuego y los visitantes descuidados dañan nuestro ecosistema.
+NARRATIVE_CLOSING,The páramo is in your hands now. Walk it. Listen to it. Keep it alive.,El páramo queda en tus manos. Recórrelo. Escúchalo. Mantenlo vivo.
+TUTORIAL_MOVE,click the ground to walk there,haz clic en el suelo para caminar
+TUTORIAL_JOURNAL,press space to open your field journal,pulsa espacio para abrir tu cuaderno de campo
+TUTORIAL_CLOSE_JOURNAL,press space again to close the journal,pulsa espacio otra vez para cerrar el cuaderno
+TUTORIAL_SHOP,buy a tool on the right page. the ladder is cheapest,compra una herramienta en la página derecha.
+TUTORIAL_BUILD,right click a tile beside you to build it,haz clic derecho en una casilla junto a ti para construir
+TUTORIAL_BUILD_LADDER,a ladder climbs a two-block ledge. right click the ground at its foot and pick the ladder from the ring,una escalera sube un borde de dos bloques. haz clic derecho en el suelo a su pie y elige la escalera del anillo
+TUTORIAL_BUILD_BRIDGE,a bridge carries a path over a gap. right click the ground at its edge,un puente lleva un camino sobre un vacío. haz clic derecho en el suelo en su borde
+TUTORIAL_BUILD_FENCE,a fence blocks the cells it stands on. right click the ground to start a run,una cerca bloquea las casillas donde se levanta. haz clic derecho en el suelo para empezar un tramo
+TUTORIAL_BUILD_FRAILEJON,planting costs water as well as tokens. right click open ground to sow a frailejon,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un frailejón
+TUTORIAL_ENDPOINT,now click one of the marked cells to finish placing it,ahora haz clic en una de las casillas marcadas para terminar
+TUTORIAL_ENDPOINT_LADDER,now click a marked cell on top of the ledge. that is where the ladder lands,ahora haz clic en una casilla marcada encima del borde. ahí llega la escalera
+TUTORIAL_ENDPOINT_BRIDGE,now click a marked cell across the gap. the bridge spans to it,ahora haz clic en una casilla marcada al otro lado del vacío. el puente llega hasta ahí
+TUTORIAL_ENDPOINT_FENCE,now click a marked cell to end the run. the fence fills everything between,ahora haz clic en una casilla marcada para terminar el tramo. la cerca llena lo que hay en medio
+TUTORIAL_FIRE_FOLLOW,something is burning off the edge of the screen. walk toward the glow,algo se quema fuera de la pantalla. camina hacia el resplandor
+TUTORIAL_FIRE_DOUSE,right click the fire and pick the bucket. every cell you douse spends water,haz clic derecho en el fuego y elige el balde. cada casilla apagada gasta agua

@@ -20,6 +20,9 @@ const TOAST := 120         ## inspect/info messages (was 100)
 const RADIAL_MENU := 130   ## right-click action wheel + dim overlay (was 101)
 const JOURNAL := 140       ## field journal modal (season gauge + run info). Pauses the
                            ## game; below PAUSE so the pause modal can still cover it.
+const TUTORIAL := 150      ## FTUE hint strip + cue outline. ABOVE the journal: one of its
+                           ## steps points AT the open journal's shop page, so it has to
+                           ## draw over it. Below PAUSE.
 const TITLE := 200         ## opening cinematic + language gate (was 210). BELOW
                            ## LOADING: the gate's opaque curtain is up from frame 0,
                            ## and the loading UI must stay readable over it.

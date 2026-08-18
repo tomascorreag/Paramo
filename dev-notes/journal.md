@@ -41,6 +41,50 @@ failed.
 - `row_block_px` quantises from the Content rect's top, so page text must start
   at a **multiple** of it below that top, or every line straddles two blocks.
   `tests/test_journal_pages.gd` guards this.
+- **The seams are real, and measured.** `audit_page_blocks.gd` replays the
+  shader's own arithmetic: on both pages, at block 18 and amplitude 5, **every**
+  block boundary steps across ~50% of the page's columns — the spine half, x
+  0..~120 of 156. The one exception is y=108, at 18%, because it sits where the
+  weighting crosses zero. A seam is a certainty for anything drawn inboard of the
+  outer third, not a risk to be weighed.
+- **The contract is about INK, not about node tops** (`JournalBlocks`). A run of
+  height `h` at top `y` must touch no more blocks than its height forces:
+  `ceil(h/block)`. Everything else follows — a run shorter than a block gets
+  `block - h` texels of freedom in where it starts; a run **taller** than a block
+  cannot avoid seams at all, so the goal is to cross the fewest, which it does
+  anywhere in a `ceil(h/block) * block` window; a run exactly as tall as its block
+  (Tiny5-16's 18-row line box) has none and must start on a boundary.
+  This replaced "the header must be a whole number of blocks", a proxy that was
+  **wrong in both directions**: it forbade the 6 other phases a 30-row fence
+  legally has, and it never inspected a swatch, so art straddling three blocks
+  passed. Measured ink: ladder 21, bridge 24, fence 30, frailejón 23.
+- **The known sets sit one block higher than they used to** (`header_gap_px` -12,
+  row top 24), and the cells were cut 36 → 30 to allow it. Both are needed: at a
+  row top of 24 the fence's 30 rows of ink land on phase 9 when centred in a
+  36-texel cell, which is three blocks. Cutting the cell to the fence's own ink
+  zeroes its centring offset and puts it back on phase 6, the last legal one.
+  **Cut every cell in the row, not just the binding one** — the arts are centred
+  per cell, so shrinking one alone lifts that swatch off the row's shared line.
+  The reclaimed 18 texels stay between the two known sets rather than closing the
+  page up: section tops must be multiples of the block, so inter-section air
+  quantises to 18 and there is nothing between "cramped" and "generous".
+- **`header_gap_px` is a request, not the answer.** `header_row_px()` snaps it to
+  the nearest legal row top (ties resolve **upward** — a negative gap is a request
+  to tighten), floored at the heading's own rule so content can never print
+  through it. Authoring an impossible gap is therefore not a build failure, it is
+  a no-op with an Inspector warning; `test_journal_pages.gd` sweeps all 73 values
+  of the range on every section and asserts each one still renders clean.
+- **That floor must include the rule's WOBBLE.** `JournalPen.rule` displaces whole
+  segments up to `wobble_px` off true, so the line inks `2 * wobble` rows more
+  than its thickness. The old floor counted thickness only and was one row short.
+- **`JournalTitle.Underline` chooses what a gap of 0 means**, not where the rule
+  is drawn (that is the same row either way). `OWN_BLOCK` gives the rule a block
+  and costs two; `SHARE_ROW` charges one and puts the rule in the top of the
+  content's own first block. Deliberately **not** an "auto that picks the tighter":
+  the page's rhythm must not move because a swatch was repainted a few texels
+  shorter. Worth a whole block on a known set whose cell is near its ink; worth
+  nothing on `JournalResources`, where a 16px glyph and an 18-row line box leave
+  no rows to share and the snap pushes the row straight back down.
 - A line must **not** sit flush against a block's top edge: the shader translates
   each block rigidly and the seam duplicates or drops the row next to it — flush
   at the top, that is the row every ascender and digit uses. Tiny5 at 8 has room
@@ -105,7 +149,21 @@ lived) and `PageSlit` (the slot the season wheel shows through). The tool drives
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full            # whole 480x270 book
 ... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full --locale es_CO
+... --script res://scripts/tools/preview_run_calendar.gd -- --out /tmp/cal --full --shop 20 --hover 0  # the shop, live
 ```
+
+`--hover <i>` parks the pointer on "known buildings" entry `i` by calling
+`JournalShopInput.handle_hover` directly — hover is resolved by arithmetic, not
+by a real cursor, so the lift, the ink-up, the price and the verb glyphs can all
+be rendered without one. Needs `--shop`, and it is now **the only way to see a
+price at all**: an unhovered page prints none.
+
+`--shop <n>` puts an `UnlockState` in the tree and stocks the ledger with `n`
+tokens. Without it there is no economy, so the right page renders every entry
+owned and can print no price whatever the pointer does — the shop is invisible in
+the only tool that draws it. 20 is the state worth looking at: ladder (10) and bridge (20)
+affordable, fence (30) not, which is the only arrangement where the per-entry
+fade has anything to say.
 
 Render both locales after touching copy — the journal is where a longer
 translation shows up as a *layout* fault rather than as odd wording.
@@ -197,6 +255,14 @@ the player can put on the mountain, printed in brown ink. Render with `--full`.
 - A 32px swatch spans two 18px warp blocks, so it *can* shear by a texel across
   its middle. Measured on the real page: not visible at this amplitude. Don't
   "fix" it by shrinking the art — a 32px sprite cannot avoid a seam on an 18px grid.
+  What shrinking the **cell** buys is different and real: the swatch is centred by
+  its ink, so a tighter cell moves the art's phase and changes which row tops the
+  whole section may take. `audit_page_blocks.gd` prints the list.
+- **The binding entry is the one with the most ink, not the biggest cell.** A
+  section's legal row tops are the intersection across its entries, so "known
+  buildings" is set by the fence (30 rows, 6 texels of slack) while the ladder's
+  21 rows would have allowed 15. Shortening the fence's art is the only thing that
+  widens that section's freedom.
 - **A swatch's hit rect is what is drawn, not the cell it was allotted.**
   `_rebuild` centres art at its own size and never scales it, so a cell smaller
   than the art leaves most of the picture visible but dead ("hover only works
@@ -209,9 +275,97 @@ the player can put on the mountain, printed in brown ink. Render with `--full`.
   clicks by pure arithmetic — page Controls stay mouse-IGNORE and the SubViewports
   keep `gui_disable_input`; nothing is forwarded. A locked entry (`UnlockState`)
   fades via the ink shader's `dim` uniform (the shader overwrites COLOR, so
-  `self_modulate` is silently ignored) with the cost printed beside it. Contents
+  `self_modulate` is silently ignored). Contents
   are authored in the `.tscn`; `set_known` remains the hook for a discovery
   system (the shop tracks purchase, not discovery).
+- **An entry the player cannot afford does not react to hover**, and neither does
+  anything while `TutorialGate` withholds `SHOP`. The lift and the ink-up both
+  say "this is available"; saying it over a price the player cannot meet turns
+  the refusal into a surprise at click time, when the price in the tag was
+  already the reason. `_hovered` still tracks the pointer — the input node resolves that
+  and the two must not disagree about where the cursor is; what changes is
+  whether the entry answers (`JournalKnownSet.reacts_to_hover`). Affording it
+  mid-hover wakes it up without a mouse move, because the ledger's
+  `resource_changed` runs the same refresh. OWNED entries still react: they are
+  not blocked, they are done, and the section is a reference list as well as a
+  shop. The click-time recoil (`flash_denied`) is unchanged — hover is
+  affordance, a click is intent, and only intent earns a refusal.
+- **NOTHING IS PRICED UNTIL IT IS POINTED AT, and the price is not in the page.**
+  Every price printed at once turned a reference page into a price list — eleven
+  small numbers competing with eleven pictures, on a spread whose whole argument
+  is that it is a book. The price now belongs to the verb that pays it: it is
+  drawn by `JournalTooltip`, beside the click glyph, only for the hovered entry.
+  `JournalKnownSet` keeps the *state* (`set_entry_state` → locked / cost /
+  affordable, read back with `cost_of`) because the swatch's own fade runs off it,
+  but it draws no text and owns no coin. An entry the player cannot afford still
+  shows its price even though it does not lift: it is the entry whose price
+  matters most, and hiding it would hide the reason for the refusal.
+- **A hovered entry gets two lines of mouse verbs** (`JournalTooltip`, code-built
+  by `JournalShopInput`):
+
+  ```
+        [right click] [info]      over the art — read about it (a STUB)
+             ( art )
+        [left click] [coin] 20    under the art — buy it, for this much
+  ```
+
+  Nothing on a book says a picture in it is a button, and a price alone does not
+  say which button. The buy line follows the same refusals as the click
+  (`_is_for_sale`), so it never promises a purchase that would be denied; the info
+  line is not a promise about money, so it stays up over owned and unaffordable
+  entries. Buying drops the buy line without a mouse move, since the pointer does
+  not move when you click and nothing else would re-ask.
+- **Moving the price out of the page dropped three constraints it never earned.**
+  In the cell it had to fit 20 texels, sit clear of both seams of a warp block,
+  and be a child `TextureRect` to get its own `dim`. Outside the paper it is a
+  `draw_texture` + `draw_string` in a node that is not warped and not clipped, so
+  the cell-fit test and the block-phase reasoning for prices are both gone.
+- **Bare glyphs in the page's own brown — no panel, no frame, no word.** The
+  journal is a diegetic object and a framed UI tag over the paper reads as the
+  game interrupting the book. They also need no translation: the verb is the glyph
+  and the price is a number. The mice and the info disc are white masks, so
+  drawing them in the ink colour is the whole recolour, and that colour comes from
+  the section's own `text_color` — glyphs and page ink are the same palette entry
+  by construction. NOT the `journal_ink` shader: that overwrites `COLOR` and would
+  map a flat white mask to one ramp stop whatever the page is set to.
+- **The coin keeps its own gold; only its alpha follows the price.** It is the one
+  thing in the tag that is not a white mask, and the gold is what makes it read as
+  the same currency as the supplies count a few rows above it. Tinting it with the
+  page ink (the first attempt) rendered a brown disc that read as a hole. The
+  denial red is the one case that overrides the art — a refusal has to read at a
+  glance.
+- **Both lines are centred on the art, clamped into `_tag_bounds`.** Two measured
+  constraints, not preferences. Hung off the entry's corner (which is what a
+  single glyph did) a multi-glyph line floats over the NEXT entry's column — seen
+  on the ladder, whose line reached across the bridge. And a swatch sits a few
+  texels down inside its cell, so a line placed above the ART lands squarely on
+  the heading's rule, in the same brown: `JournalShopInput._tag_bounds` raises the
+  allowed top to `header_row_px()`, which parks the read line on the upper part of
+  the picture. `OVERLAP_PX` is what keeps each line reading as a cursor resting on
+  the picture rather than a loose object beside it.
+- **The refusal has two halves in two places now.** The swatch recoils where it
+  sits (`JournalKnownSet.flash_denied`) and the price reddens where *it* sits
+  (`JournalTooltip.flash_denied`, driven from `_try_buy`). The tooltip sets full
+  red synchronously before starting its tween — a tween writes its start value a
+  frame later, and a refusal has to answer the click that caused it.
+- **The info glyph was painted into the UX atlas at (32,144)**, beside the two
+  mice and in their idiom: a 9x9 white silhouette with the letterform knocked out
+  of it, the way the mice knock out the pressed button.
+  `assets/sprites/UX/icons/info.tres` cuts it out. Editing `icons.png` needs a
+  `--headless --import` before a headless run sees the new pixels.
+- **Anchored to `entry_ink_rect`, not `entry_rect`.** The latter is the HIT rect:
+  it covers the whole cell and is grown by `hit_padding_px` again on top, so a tag
+  placed on it drifts off the picture it names.
+- **It is NOT inside the page, and cannot be.** Everything under the page's
+  SubViewport goes through `page_warp.gdshader` and is clipped to the paper; a
+  glyph drawn there would shear across a warp block and be cut off at the page
+  edge. It floats over the book instead. The book and the page are 1:1, so 8px
+  type in the tag is the same 8px type the page sets.
+- **Parented to BookHit's PARENT, not to BookHit.** `BookHit` sits BEFORE `Pages`
+  in `field_journal.tscn`, so anything under it is painted UNDER the paper —
+  invisible, in a way no geometry assertion catches. Appended to `BookArt` it is
+  the last child and therefore on top.
+
 - **Swatches are laid out and centred by their ink, not their texture**, and each
   entry can carry its own cell size (`cell_sizes`, falling back to `cell_size`).
   These are atlas cut-outs that don't fill their cells: a ladder inks cols 16..29

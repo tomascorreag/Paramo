@@ -2,8 +2,9 @@ class_name UnlockState
 extends Node
 
 ## Which placeable types (bridge, ladder, fence, frailejon) the player has bought
-## this run, and the prices. Everything starts LOCKED: 20 tokens unlocks a type
-## for the rest of the run (bought in the journal's shop pages), and every
+## this run, and the prices. Everything starts LOCKED: a per-type price (see
+## `unlock_costs`) unlocks it for the rest of the run (bought in the journal's
+## shop pages, which print each entry's own price), and every
 ## placement is then charged BY THE TILE — 1 token per cell the thing spans,
 ## charged at commit by the placement controllers and refunded if the build
 ## fails.
@@ -34,8 +35,25 @@ const GROUP: StringName = &"unlocks"
 const TOKENS: StringName = &"tokens"
 const WATER: StringName = &"water"
 
-## One-time price to unlock a type. One perfect day's visitors, so the opening
-## move is "survive a day, buy a verb" rather than a wait.
+## One-time price per type, cheapest verb first. The ladder is the entry-level
+## move (one cell, fixes one wall), the bridge spans, and the fence is the
+## crowd-control tool a player only wants once they understand visitors — so the
+## price ladder doubles as a soft ordering of the verbs.
+##
+## The frailejon is priced WITH the ladder rather than above it because it is the
+## only build that needs no terrain feature to be legal (a ladder needs an
+## altitude step, a bridge a gap): at the run's opening balance it has to be
+## affordable, or a player whose starting cell has no wall nearby cannot build
+## anything at all.
+@export var unlock_costs: Dictionary[StringName, float] = {
+	&"ladder": 10.0,
+	&"frailejon": 10.0,
+	&"bridge": 20.0,
+	&"fence": 30.0,
+}
+
+## Price for a type with no `unlock_costs` entry. A new placeable is priced by
+## being listed above; this is what it costs until someone does.
 @export var unlock_cost: float = 20.0
 ## Tokens per TILE a placement spans. The only placement rate there is.
 @export var placement_cost_per_tile: float = 1.0
@@ -46,6 +64,14 @@ const WATER: StringName = &"water"
 @export var water_cost_types: Array[StringName] = [&"frailejon"]
 
 signal unlock_changed(type: StringName)
+## A placement was actually PAID FOR — every build funnels through
+## try_pay_placements, so this is the one place that sees "the player built
+## something" regardless of which controller did it (frailejon goes through
+## TileInteractionController, the traversals through
+## TraversalPlacementController). Emitted at charge time, before the thing is
+## instanced; a build that then fails is followed by refund_placements, which
+## does NOT emit. The FTUE's build step listens here.
+signal placement_paid(type: StringName, count: int)
 
 var _unlocked: Dictionary = {}
 
@@ -59,8 +85,16 @@ func is_unlocked(type: StringName) -> bool:
 	return _unlocked.has(type)
 
 
-func can_afford_unlock() -> bool:
-	return ResourceLedger.has(TOKENS, unlock_cost)
+## What `type` costs to unlock. The fallback covers anything unpriced.
+func unlock_cost_for(type: StringName) -> float:
+	return float(unlock_costs.get(type, unlock_cost))
+
+
+## Prices differ per type, so this asks about ONE of them. The no-argument form
+## answers for the fallback price, which is only meaningful to a caller that has
+## no type in hand.
+func can_afford_unlock(type: StringName = &"") -> bool:
+	return ResourceLedger.has(TOKENS, unlock_cost_for(type))
 
 
 ## "Could the player pay for `count` tiles of `type` right now?" — both
@@ -86,7 +120,7 @@ func water_cost(type: StringName, count: int = 1) -> float:
 func try_unlock(type: StringName) -> bool:
 	if is_unlocked(type):
 		return false
-	if not ResourceLedger.try_spend(TOKENS, unlock_cost,
+	if not ResourceLedger.try_spend(TOKENS, unlock_cost_for(type),
 			StringName("unlock_" + String(type))):
 		return false
 	_unlocked[type] = true
@@ -127,6 +161,7 @@ func try_pay_placements(type: StringName, count: int) -> bool:
 	if water_due > 0.0 and not ResourceLedger.try_spend(WATER, water_due, source):
 		ResourceLedger.add(TOKENS, tokens_due, source)
 		return false
+	placement_paid.emit(type, count)
 	return true
 
 

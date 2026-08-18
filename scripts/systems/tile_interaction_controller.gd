@@ -148,6 +148,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# The action menu is the door to every placement, so gating it here is the
+	# whole of "no building before the FTUE's build step". Below the brake above
+	# on purpose: stopping a walk is part of the movement the FTUE has already
+	# taught by then. Not consumed, for the same reason as click-to-move.
+	if not TutorialGate.allows(TutorialGate.Action.BUILD):
+		return
+
 	var global_pos := _event_global_position(mb)
 	# Resolve the cell under the cursor with the general interaction rule: the
 	# topmost cell that is walkable OR has an available action — so water /

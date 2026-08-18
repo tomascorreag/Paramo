@@ -20,6 +20,15 @@ extends Node
 const GROUP_NAME: StringName = &"traversal_placement_controller"
 
 
+## The second click opened: `kind` is awaiting its endpoint.
+signal placement_began(kind: StringName)
+## The second click closed. `built` separates a finished structure from an
+## abandoned one, which nothing else can: `cancel()` is the single teardown for
+## success, cancellation and rejection alike, so a listener watching it alone
+## would see a completed ladder and a right-click escape as the same event.
+signal placement_ended(kind: StringName, built: bool)
+
+
 enum Mode { IDLE, AWAITING_ENDPOINT }
 
 
@@ -45,6 +54,9 @@ var _preview_placer: StructurePlacer
 var _preview_cells: Array[Dictionary] = []
 var _preview_hover_cell: Vector2i = Pathfinder.NO_CELL
 var _preview_valid: bool = false
+## Whether the open placement got as far as being charged for. Read by cancel()
+## to tell a finished structure from an abandoned one.
+var _paid_this_placement: bool = false
 var _blocked_cells: Dictionary = {}
 var _tile_interaction: TileInteractionController
 var _player: Player
@@ -93,8 +105,10 @@ func begin(origin: Vector2i, kind: StringName) -> void:
 	_origin_cell = origin
 	_traversal_kind = kind
 	_mode = Mode.AWAITING_ENDPOINT
+	_paid_this_placement = false
 	_preview_hover_cell = Pathfinder.NO_CELL
 	_blocked_cells = _gather_blocked_cells()
+	placement_began.emit(kind)
 	if ux_overlay:
 		var candidates: Array[Vector2i] = []
 		var is_valid_endpoint := Callable()
@@ -174,6 +188,12 @@ func _gather_blocked_cells() -> Dictionary:
 
 
 func cancel() -> void:
+	# cancel() is also the success teardown and is called defensively from paths
+	# that were never placing, so the signal is raised only for a placement that
+	# was actually open, and carries whether it got built.
+	var was_placing: bool = _mode == Mode.AWAITING_ENDPOINT
+	var ended_kind: StringName = _traversal_kind
+	var was_paid: bool = _paid_this_placement
 	_clear_preview()
 	if structure_layer_manager != null:
 		structure_layer_manager.reset_preview_tint()
@@ -182,8 +202,11 @@ func cancel() -> void:
 	_preview_hover_cell = Pathfinder.NO_CELL
 	_preview_valid = false
 	_blocked_cells = {}
+	_paid_this_placement = false
 	if ux_overlay:
 		ux_overlay.exit_placement_mode()
+	if was_placing:
+		placement_ended.emit(ended_kind, was_paid)
 
 
 func is_placing() -> bool:
@@ -622,7 +645,10 @@ func _pay_placements(type: StringName, count: int) -> bool:
 	if _unlocks == null or not is_instance_valid(_unlocks):
 		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
 	if _unlocks != null and _unlocks.has_method(&"try_pay_placements"):
-		return bool(_unlocks.call(&"try_pay_placements", type, count))
+		_paid_this_placement = bool(_unlocks.call(&"try_pay_placements", type, count))
+		return _paid_this_placement
+	# No UnlockState (bare test scenes, tools): free, and still a build.
+	_paid_this_placement = true
 	return true
 
 

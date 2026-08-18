@@ -5,9 +5,17 @@
     python scripts/tools/run_web_profile.py --headless --fires 80
     python scripts/tools/run_web_profile.py --browser edge --keep-open
 
-Serves docs/ over http, opens the exported build at `?profile`, waits for the
-page to POST its own report back, prints it, and cleans up. Exit code 0 if a
-report arrived, 1 otherwise.
+Export first — the PROFILING preset, not the shipped one:
+
+    godot --path . --headless --export-release "Web Profile"
+
+That preset is identical to "Web" except for custom_features="profiling", which
+web_profile_boot.gd requires before it will read the URL query. The shipped build
+deliberately has no such feature, so `?profile` does nothing on the live site.
+
+Serves build/web-profile/ over http (--dir to override), opens the exported build
+at `?profile`, waits for the page to POST its own report back, prints it, and
+cleans up. Exit code 0 if a report arrived, 1 otherwise.
 
 WHY THE PAGE REPORTS ITSELF instead of being scraped. Driving a browser from
 outside means CDP: a debugging port, target discovery, a WebSocket client, and
@@ -39,6 +47,14 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DOCS = os.path.join(ROOT, "docs")
+# The "Web Profile" preset exports here, not to docs/. That preset is the only
+# one carrying custom_features="profiling", which web_profile_boot.gd now
+# requires before it will read the URL query — the shipped "Web" build ignores
+# ?profile entirely, so serving docs/ would just boot the game and time out.
+DEFAULT_SERVE_DIR = os.path.join(ROOT, "build", "web-profile")
+
+# Set from --dir in main(); Handler reads it at construction time.
+_serve = {"dir": DEFAULT_SERVE_DIR}
 
 BROWSERS = {
     "chrome": [
@@ -55,10 +71,10 @@ _report = {"payload": None}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    """Serves docs/, and collects the one POST the page makes when it finishes."""
+    """Serves the export dir, and collects the one POST the page makes when done."""
 
     def __init__(self, *a, **kw):
-        super().__init__(*a, directory=DOCS, **kw)
+        super().__init__(*a, directory=_serve["dir"], **kw)
 
     def do_POST(self):
         if self.path != "/__profile":
@@ -156,12 +172,35 @@ def main():
                          'for ANY comparison across two runs: the map is '
                          'procedural and regenerates per launch.')
     ap.add_argument("--out", default="", help="also write the report here")
+    ap.add_argument("--dir", default=DEFAULT_SERVE_DIR,
+                    help="export directory to serve (default: build/web-profile, "
+                         'where the "Web Profile" preset writes)')
     args = ap.parse_args()
 
-    if not os.path.exists(os.path.join(DOCS, "index.pck")):
-        print("no docs/index.pck — export first:", file=sys.stderr)
-        print('  godot --path . --headless --export-release "Web"', file=sys.stderr)
+    _serve["dir"] = os.path.abspath(args.dir)
+
+    if not os.path.exists(os.path.join(_serve["dir"], "index.pck")):
+        print(f"no index.pck in {_serve['dir']} — export first:", file=sys.stderr)
+        print("  mkdir -p build/web-profile   # Godot will not create it",
+              file=sys.stderr)
+        print('  godot --path . --headless --export-release "Web Profile"',
+              file=sys.stderr)
+        print("The 'Web' preset will NOT work: it lacks the 'profiling' feature,",
+              file=sys.stderr)
+        print("so web_profile_boot.gd ignores ?profile there.", file=sys.stderr)
         return 1
+
+    # Godot does not bundle the music/* static assets the head_include points at
+    # — deploy.yml copies them from docs/music/ into the export output, and this
+    # does the same so the profiled page is the deployed page. Without it the two
+    # <script defer> tags 404 and the console fills with noise that has nothing to
+    # do with the measurement.
+    music_dst = os.path.join(_serve["dir"], "music")
+    if os.path.isdir(os.path.join(DOCS, "music")):
+        shutil.copytree(os.path.join(DOCS, "music"), music_dst, dirs_exist_ok=True)
+        dev_page = os.path.join(music_dst, "dev-music.html")
+        if os.path.exists(dev_page):
+            os.remove(dev_page)
 
     exe = find_browser(args.browser)
     if exe is None:

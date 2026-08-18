@@ -24,3 +24,5 @@
 - [x] Make grass tile degradation more of a continuous thing, with grass growing longer over time or shorter with degradation until it's gone. The max grass length should be the one that is currently assigned randomly during terrian generation, and the grass type should be maintained throughout (i.e. there are two tones of grass atm, which should be maintained).
 - [x] add a fullscreen toggle to the in-game settings — a button in the pause menu's settings section, labelled with the action it performs (`fullscreen` / `windowed`); it drives `DisplayManager.toggle_fullscreen()` and re-reads the window mode while the menu is open so F11 and the window manager stay in sync. Panel grown 104 → 124px; two new layout guards in `test_locale_manager.gd`.
 - [x] Reduce the damage visitors/player do while walking by 50%.
+- [x] Add small cost icons to the items in the shop.
+- [x] review the latest commit and current diff for bugfixes, improvements and optimizations.
