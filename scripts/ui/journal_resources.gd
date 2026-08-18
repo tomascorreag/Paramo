@@ -79,19 +79,35 @@ extends Control
 		block_px = value
 		queue_redraw()
 
-## Air between the title's rule and the glyph/count row, in texels, on top of the
-## two whole blocks the heading costs. Negative pulls the row UP into the heading's
-## second block, where the rule sits `header_underline_offset_px` rows down and the
-## rest is blank paper.
+## Air between the heading and the glyph/count row, in texels. Negative pulls the
+## row UP into the heading, where the rule sits `header_underline_offset_px` rows
+## down and the rest is blank paper.
 ##
-## KEEP IT A MULTIPLE OF `block_px` IF YOU CAN: the row's top is `header_row_px()`,
-## and Tiny5-16 fills its 18-row block exactly, so a top off the block grid puts
-## ink on a warp seam and the shader duplicates or drops that scanline.
-## `section_height_px` follows this, so a negative gap also shortens the section.
+## A REQUEST, NOT THE ANSWER — `header_row_px()` snaps it to the nearest legal row
+## top, exactly as JournalKnownSet does. THIS SECTION HAS ALMOST NO ROOM TO SPEND,
+## and that is arithmetic rather than caution: Tiny5-16's line box is 18 rows in an
+## 18-row block, so the count has zero slack and pins the row to a block boundary
+## whatever the 16px glyph beside it could have tolerated. Every value that is not
+## a multiple of `block_px` therefore resolves back to one. It is still worth typing
+## a negative here — it moves the row a whole block up if the rule leaves space,
+## which it does not at the authored sizes. audit_page_blocks.gd prints the proof.
 @export_range(-36, 36) var header_gap_px: int = 0:
 	set(value):
 		header_gap_px = value
 		queue_redraw()
+		update_configuration_warnings()
+
+## Whether the rule gets a block of its own or shares the count row's first block.
+## SHARE_ROW buys nothing here at the authored sizes — a 16px glyph inset by one and
+## an 18-row line box leave no rows for a rule, so the snap pushes the row straight
+## back down to where OWN_BLOCK would have put it. Exposed anyway because that is a
+## consequence of the type sizes rather than of the section: shrink the count face
+## and sharing starts to pay.
+@export var header_underline_mode: JournalTitle.Underline = JournalTitle.Underline.OWN_BLOCK:
+	set(value):
+		header_underline_mode = value
+		queue_redraw()
+		update_configuration_warnings()
 
 ## Lead-in from this node's left edge, on the 4-texel column grid the page's
 ## `col_block_px` snaps to. Same value JournalKnownSet insets its swatches by, so
@@ -170,6 +186,11 @@ const _ICON_INSET_PX: int = 1
 ## Air between a glyph and its count.
 const _GAP_PX: int = 4
 
+## Wobble amplitude of the heading's rule — see JournalKnownSet's copy: the floor
+## `header_row_px` snaps against is computed from it, so it cannot be left to
+## JournalTitle.draw's default.
+const _RULE_WOBBLE_PX: int = 1
+
 var _ink: JournalInkLayer = null
 
 
@@ -185,16 +206,82 @@ func _ready() -> void:
 	ResourceLedger.resource_changed.connect(_on_resource_changed)
 
 
-## Where the glyph/count row starts: the heading, the block its rule sits in, plus
-## `header_gap_px`. At the default gap of 0 that is a multiple of `block_px`, which
-## is what keeps everything below this section off the warp seams.
+## Where the glyph/count row starts: the heading's cost plus `header_gap_px`,
+## snapped to the nearest row top that keeps the glyph and the count off avoidable
+## warp seams and clear of the heading's own rule.
 func header_row_px() -> int:
-	var rows := JournalTitle.row_px(active_header_font(), header_font_size, block_px) \
-			+ header_gap_px
-	# Floor at the row just under the rule, so a negative gap cannot print the
-	# counts through the heading's own underline.
-	return maxi(rows, maxi(1, block_px) + header_underline_offset_px
-			+ JournalTitle.UNDERLINE_THICK_PX)
+	return JournalBlocks.snap_top(requested_header_row_px(), content_ink_runs(),
+			block_px, JournalTitle.rule_floor(underline_y(), _RULE_WOBBLE_PX))
+
+
+## The row top `header_gap_px` asked for, before the snap. The gap between this and
+## `header_row_px()` is what the block grid charged this section.
+func requested_header_row_px() -> int:
+	var underlined: bool = header_underline_mode == JournalTitle.Underline.OWN_BLOCK
+	return JournalTitle.row_px(active_header_font(), header_font_size, block_px,
+			underlined) + header_gap_px
+
+
+## Height of the title's own block(s), before any rule.
+func title_block_px() -> int:
+	return JournalTitle.row_px(active_header_font(), header_font_size, block_px, false)
+
+
+## The row the heading's rule is drawn at.
+func underline_y() -> int:
+	return title_block_px() + header_underline_offset_px
+
+
+## The row's ink as JournalBlocks runs, relative to the row's top: the glyph, and
+## the count's line box beside it.
+##
+## The COUNT is measured by its line box rather than by the ink of whichever digits
+## happen to be on the page. A count is 0..999 and changes every few seconds; laying
+## the page out around the ink of "12" would re-phase the row the moment it hit
+## "100". The box is the honest constant, and it is also what pins this section.
+func content_ink_runs() -> Array[Vector2i]:
+	var out: Array[Vector2i] = [Vector2i(_ICON_INSET_PX, _ICON_PX)]
+	var face := active_font()
+	if face != null:
+		out.append(Vector2i(0, int(ceilf(face.get_height(font_size)))))
+	return out
+
+
+## Every run of ink this section draws, in local space, labelled. What
+## tests/test_journal_pages.gd and audit_page_blocks.gd check the warp contract on.
+func ink_runs() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var t := JournalTitle.ink_run(active_header_font(), header_font_size)
+	out.append({"name": "title", "top": t.x, "height": t.y})
+	var r := JournalTitle.rule_ink(underline_y(), _RULE_WOBBLE_PX)
+	out.append({"name": "rule", "top": r.x, "height": r.y})
+	var top: int = header_row_px()
+	var names: PackedStringArray = ["glyphs", "counts"]
+	var index: int = -1
+	for run: Vector2i in content_ink_runs():
+		index += 1
+		out.append({
+			"name": names[index] if index < names.size() else "row %d" % index,
+			"top": top + run.x,
+			"height": run.y,
+		})
+	return out
+
+
+func _get_configuration_warnings() -> PackedStringArray:
+	var out := PackedStringArray()
+	var resolved: int = header_row_px()
+	var asked: int = requested_header_row_px()
+	if resolved != asked:
+		out.append(("header_gap_px %d puts the supplies row at %d, which straddles a "
+			+ "warp seam. Drawing at %d (gap %d). Run audit_page_blocks.gd for the "
+			+ "legal tops.") % [header_gap_px, asked, resolved,
+				resolved - (asked - header_gap_px)])
+	for run: Dictionary in ink_runs():
+		if not JournalBlocks.is_clean(run["top"], run["height"], block_px):
+			out.append("%s inks %d rows at %d and crosses an avoidable seam"
+				% [run["name"], run["height"], run["top"]])
+	return out
 
 
 func active_header_font() -> Font:
@@ -235,11 +322,11 @@ func _column_x(i: int) -> int:
 
 
 func _draw() -> void:
-	# The rule gets a block of its own here: what sits under this heading is a 16px
-	# glyph row filling its block, with nothing to spare to share.
+	# The rule's row does not depend on the underline mode — what the mode changes is
+	# whether a block is charged for it. Here nothing can share: a 16px glyph row and
+	# an 18-row line box leave no space under the rule.
 	JournalTitle.draw(self, active_header_font(), header_font_size, title,
-		int(size.x), text_color,
-		maxi(1, block_px) + header_underline_offset_px)
+		int(size.x), text_color, underline_y(), _RULE_WOBBLE_PX)
 	var face := active_font()
 	if face == null:
 		return

@@ -287,13 +287,22 @@ func test_resources_are_printed_on_the_right_page() -> void:
 
 
 func test_resources_row_sits_inside_one_warp_block() -> void:
-	# The row is glyph over count; split across a block seam, the shader would shear
-	# the glyph away from its number.
+	# The row is glyph beside count; split across a block seam, the shader would
+	# shear the glyph away from its number.
+	#
+	# Unlike the known sets this section has no freedom to spend, and the reason is
+	# worth stating: Tiny5-16's line box is 18 rows in an 18-row block, so the count
+	# has ZERO slack and pins the row to a boundary however much the 16px glyph
+	# beside it could have tolerated. Here the ink check and the old whole-blocks
+	# proxy happen to coincide — that is a property of the type sizes, not of the
+	# contract, so it is asserted through the same helper as everywhere else.
 	var block: int = int(_page("PageRight").row_block_px)
 	var res := _resources()
 	assert_eq(res.block_px, block, "the section must quantise like its page")
 	assert_eq(int(res.position.y) % block, 0, "the section must start on a block")
-	assert_eq(res.header_row_px() % block, 0, "the heading must be whole blocks")
+	_assert_ink_is_clean(res, block)
+	assert_eq(res.header_row_px() % block, 0,
+		"an 18-row line box leaves the counts nowhere but a block boundary")
 	assert_eq(
 		res.section_height_px(), res.header_row_px() + block,
 		"the supplies row must be exactly one block tall")
@@ -402,8 +411,14 @@ func test_known_set_tile_kinds_resolve_through_the_tileset() -> void:
 
 
 func test_known_sets_are_in_phase_with_the_row_blocks() -> void:
-	# Same contract as the calendar: the warp translates each block rigidly, so a
-	# section starting off the grid puts every title and swatch across a seam.
+	# The warp translates each block rigidly and steps at the boundary between two,
+	# so ink laid across a seam has a scanline duplicated or dropped through it.
+	#
+	# Asserted on the INK, not on the node tops. The rule used to be "header_row_px
+	# must be a whole number of blocks", which was a proxy — sufficient, never
+	# necessary — and wrong both ways: it forbade the six other phases a 30-row
+	# fence can legally take in its 36-row window, and it never looked at a swatch
+	# at all, so art straddling three blocks passed. See JournalBlocks.
 	var block: float = _page("PageRight").row_block_px
 	for s: JournalKnownSet in _sections():
 		assert_eq(
@@ -412,12 +427,48 @@ func test_known_sets_are_in_phase_with_the_row_blocks() -> void:
 		assert_eq(
 			float(s.block_px), block,
 			"%s: block_px must track the page it is printed on" % s.title)
-		assert_eq(
-			fmod(float(s.cell_size.y), block), 0.0,
-			"%s: swatch cell height must be a multiple of row_block_px" % s.title)
-		assert_eq(
-			s.header_row_px() % int(block), 0,
-			"%s: the title row must be a whole block" % s.title)
+		_assert_ink_is_clean(s, int(block))
+
+
+func test_a_section_never_renders_an_illegal_header_gap() -> void:
+	# The guarantee that makes header_gap_px free to author: whatever is typed, the
+	# section resolves it to something that renders clean. Swept rather than spot
+	# checked — the failure this replaces was a single authored value (-12) that no
+	# amount of reading the layout by eye caught.
+	var block: int = int(_page("PageRight").row_block_px)
+	for s: JournalKnownSet in _sections():
+		var authored: int = s.header_gap_px
+		for gap: int in range(-36, 37):
+			s.header_gap_px = gap
+			_assert_ink_is_clean(s, block, " at gap %d" % gap)
+			assert_gte(
+				s.header_row_px(),
+				JournalTitle.rule_floor(s.underline_y()),
+				"%s: gap %d prints the swatches through the heading's own rule"
+					% [s.title, gap])
+		s.header_gap_px = authored
+
+	var res := _resources()
+	var authored_res: int = res.header_gap_px
+	for gap: int in range(-36, 37):
+		res.header_gap_px = gap
+		_assert_ink_is_clean(res, block, " at gap %d" % gap)
+	res.header_gap_px = authored_res
+
+
+# Every run of ink a section draws must cross no more seams than its own height
+# forces it to. One helper because it is the SAME contract for every section — the
+# sections differ only in what they ink.
+func _assert_ink_is_clean(section: Control, block: int, context: String = "") -> void:
+	for run: Dictionary in section.call(&"ink_runs"):
+		var top: int = run["top"]
+		var h: int = run["height"]
+		assert_true(
+			JournalBlocks.is_clean(top, h, block),
+			"%s: %s inks %d rows at %d, spanning %d blocks where %d would do%s"
+				% [section.name, run["name"], h, top,
+					JournalBlocks.spans(top, h, block),
+					JournalBlocks.min_spans(h, block), context])
 
 
 func test_known_set_swatches_carry_the_ink_material() -> void:

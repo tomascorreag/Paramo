@@ -104,10 +104,14 @@ extends Control
 		_rebuild()
 
 @export_group("Layout")
-## Footprint of one swatch. The Y must be a multiple of `block_px` or a swatch
-## straddles two warp blocks and gets a scanline duplicated through it; 36 is two
-## blocks, which holds the 32px tile art with a texel of air top and bottom so no
-## ink sits on a seam. The X is free — it only has to fit the page.
+## Footprint of one swatch. The Y is what the art is CENTRED in, so it sets both
+## how much air a swatch gets and — through that centring — which warp phases the
+## row can legally take (JournalBlocks). It does NOT have to be a multiple of
+## `block_px`: what a seam damages is ink, and the measured ink of these swatches is
+## 21..30 texels. Shrinking a cell toward its tallest art is how the section buys
+## room to move up — the journal's are 30, down from 36, which is what lets the
+## known sets sit a block higher. audit_page_blocks.gd prints the trade.
+## The X is free — it only has to fit the page.
 @export var cell_size: Vector2i = Vector2i(40, 36):
 	set(value):
 		cell_size = value
@@ -123,10 +127,11 @@ extends Control
 ## abut, so a wider cell pushes everything after it along rather than overlapping
 ## it — `entry_rect` sums the widths before it instead of multiplying.
 ##
-## The same warp-block rule applies to every Y here as to `cell_size`'s: a height
-## that is not a multiple of `block_px` straddles two blocks and gets a scanline
-## duplicated through the art. Varying the height also moves that entry's art
-## within the row, since each swatch is centred in its OWN cell.
+## Varying the height moves that entry's art within the row, since each swatch is
+## centred in its OWN cell — so it also changes that entry's warp phase, and the
+## section's legal row tops are the intersection across every entry. The BINDING
+## entry is whichever has the tallest ink: measured here, the fence at 30 texels
+## against the ladder's 21.
 @export var cell_sizes: Array[Vector2i] = []:
 	set(value):
 		cell_sizes = value
@@ -140,22 +145,38 @@ extends Control
 		block_px = value
 		_rebuild()
 
-## Air between the title's rule and the swatch row, in texels, on top of the two
-## whole blocks the heading costs. Negative pulls the row UP into the heading's
-## second block — which is where the visible hole is: the rule sits
-## `header_underline_offset_px` rows into that block and the remaining ~14 rows of
-## it are blank paper the swatches used to start after.
+## Air between the heading and the swatch row, in texels. Negative pulls the row
+## UP into the heading — which is where the visible hole is: the rule sits
+## `header_underline_offset_px` rows into its block and the rest of that block is
+## blank paper the swatches used to start after.
 ##
-## KEEP IT A MULTIPLE OF `block_px` IF YOU CAN. The swatch row's top is
-## `header_row_px()`, and a row whose top is not on a block boundary straddles two
-## warp bands, so the seam duplicates or drops a scanline through the ART, not just
-## through blank paper. Off-multiple values are allowed because a small nudge is
-## sometimes worth the seam risk on a swatch with slack at that row — but check it
-## with preview_run_calendar.gd rather than by eye, and clear the ink of the seam.
+## A REQUEST, NOT THE ANSWER. Any value is legal to type. `header_row_px()` resolves
+## it to the nearest row top that keeps every swatch's INK off a seam it does not
+## have to cross (JournalBlocks), never going above the heading's own rule, and
+## ties resolve upward because a negative gap is a request to tighten. The
+## Inspector reports the correction; audit_page_blocks.gd prints the full list of
+## legal tops and the slack behind them.
+##
+## So the freedom here is real but uneven, and it is set by the ART: a 30-texel
+## fence in a 36-texel window can start at 7 of the 18 phases, a 21-texel ladder at
+## 16 of them, and the section gets the intersection. Asking for more than the ink
+## allows is not an error — it just resolves to the nearest thing that renders.
 @export_range(-36, 36) var header_gap_px: int = 0:
 	set(value):
 		header_gap_px = value
 		_rebuild()
+		update_configuration_warnings()
+
+## Whether the heading's rule gets a block of its own or shares the swatch row's
+## first block — i.e. whether a `header_gap_px` of 0 means two blocks of heading or
+## one. SHARE_ROW is worth a whole block wherever the swatch ink can clear the rule
+## and still land clean; the snap says whether it can, and audit_page_blocks.gd
+## prints the answer without having to author it first.
+@export var header_underline_mode: JournalTitle.Underline = JournalTitle.Underline.OWN_BLOCK:
+	set(value):
+		header_underline_mode = value
+		_rebuild()
+		update_configuration_warnings()
 
 ## Extra texels around a swatch that still count as pointing at it. On top of
 ## `entry_rect`'s own rule that the whole DRAWN swatch is hittable, which is the
@@ -212,6 +233,12 @@ extends Control
 ## Swatches are laid out from this node's left edge with this much lead-in, on the
 ## 4-texel column grid the page's `col_block_px` snaps to.
 const _LEFT_INSET_PX: int = 8
+
+## Wobble amplitude of the heading's rule. Named rather than left to
+## JournalTitle.draw's default because `header_row_px`'s floor is computed from it:
+## the rule inks `2 * this` rows more than its thickness, and a floor that misses
+## them lets a tightened swatch row print through the top of its own rule.
+const _RULE_WOBBLE_PX: int = 1
 
 ## How far a hovered swatch lifts off the paper, in texels.
 ##
@@ -274,19 +301,105 @@ func _ready() -> void:
 	_rebuild()
 
 
-## Where the swatch row starts: the title row rounded UP to a whole block, PLUS the
-## block holding its rule, PLUS `header_gap_px`. At the default gap of 0 everything
-## below is in phase with the page whatever face the title ends up using; see
-## JournalTitle for why the rule needs a block of its own, and `header_gap_px` for
-## what a gap off the block grid costs.
+## Where the swatch row starts. The heading's cost plus `header_gap_px`, RESOLVED:
+## the request is snapped to the nearest row top that keeps every swatch's ink off
+## an avoidable seam and clears the heading's own rule. See `header_gap_px`.
+##
+## Not cached. It reads the swatch textures to get their ink, and those change with
+## `tile_kinds`, `textures`, `cell_sizes` and the tileset — a cache here would be a
+## fifth thing to invalidate. The ink rects behind it are cached statically, so the
+## cost is arithmetic over a handful of entries.
 func header_row_px() -> int:
-	var rows := JournalTitle.row_px(active_header_font(), header_font_size, block_px) \
-			+ header_gap_px
-	# Floor at the row just under the rule: a gap negative enough to reach it would
-	# print the swatches THROUGH the heading's own underline, which is never what
-	# tightening the spacing meant.
-	return maxi(rows, maxi(1, block_px) + header_underline_offset_px
-			+ JournalTitle.UNDERLINE_THICK_PX)
+	return JournalBlocks.snap_top(requested_header_row_px(), content_ink_runs(),
+			block_px, JournalTitle.rule_floor(underline_y(), _RULE_WOBBLE_PX))
+
+
+## What `header_gap_px` would give if the page had no warp — the number the author
+## typed, before the snap. Reported in the Inspector beside the resolved one, and
+## the difference is what the block grid cost this section.
+##
+## The floor is NOT applied here: a gap negative enough to reach into the rule's
+## block is a legitimate request (that block is mostly blank paper), and it is the
+## snap that stops it short of the rule's own ink.
+func requested_header_row_px() -> int:
+	var underlined: bool = header_underline_mode == JournalTitle.Underline.OWN_BLOCK
+	return JournalTitle.row_px(active_header_font(), header_font_size, block_px,
+			underlined) + header_gap_px
+
+
+## Height of the title's own block(s), before any rule. Derived from the face, so a
+## two-block title face cannot end up with its rule drawn through its own descenders
+## — which `maxi(1, block_px)` used to allow.
+func title_block_px() -> int:
+	return JournalTitle.row_px(active_header_font(), header_font_size, block_px, false)
+
+
+## The row the heading's rule is drawn at. In SHARE_ROW this lands in the swatch
+## row's own first block; in OWN_BLOCK, in the block kept for it. Same expression
+## either way — what the mode changes is what the section charges itself for it.
+func underline_y() -> int:
+	return title_block_px() + header_underline_offset_px
+
+
+## Each swatch's ink as a JournalBlocks run, relative to the swatch row's top.
+## Offsets come from the same centring `_rebuild` applies, so the two cannot
+## disagree about where the art will land.
+func content_ink_runs() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var index: int = -1
+	for tex: Texture2D in swatch_textures():
+		index += 1
+		out.append(swatch_ink_run(index, tex))
+	return out
+
+
+## One swatch's (offset from the row's top, inked height).
+func swatch_ink_run(index: int, tex: Texture2D) -> Vector2i:
+	var cell := cell_size_for(index)
+	var ink := _ink_rect(tex)
+	# The row's top is a whole texel, so it factors out of the floor _rebuild does.
+	var off: int = int(floorf((float(cell.y) - ink.size.y) * 0.5 - ink.position.y)) \
+			+ int(ink.position.y)
+	return Vector2i(off, int(ink.size.y))
+
+
+## Every run of ink this section draws, in its own local space, labelled. The
+## surface tests/test_journal_pages.gd and audit_page_blocks.gd check the warp
+## contract against — the drawn pixels, not the nodes holding them.
+func ink_runs() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var t := JournalTitle.ink_run(active_header_font(), header_font_size)
+	out.append({"name": "title", "top": t.x, "height": t.y})
+	var r := JournalTitle.rule_ink(underline_y(), _RULE_WOBBLE_PX)
+	out.append({"name": "rule", "top": r.x, "height": r.y})
+	var top: int = header_row_px()
+	var index: int = -1
+	for tex: Texture2D in swatch_textures():
+		index += 1
+		var run := swatch_ink_run(index, tex)
+		var id: StringName = entry_id_at(index)
+		out.append({
+			"name": "swatch %s" % (id if id != &"" else str(index)),
+			"top": top + run.x,
+			"height": run.y,
+		})
+	return out
+
+
+func _get_configuration_warnings() -> PackedStringArray:
+	var out := PackedStringArray()
+	var resolved: int = header_row_px()
+	var asked: int = requested_header_row_px()
+	if resolved != asked:
+		out.append(("header_gap_px %d puts the swatch row at %d, which straddles a "
+			+ "warp seam. Drawing at %d (gap %d). Run audit_page_blocks.gd for the "
+			+ "legal tops.") % [header_gap_px, asked, resolved,
+				resolved - (asked - header_gap_px)])
+	for run: Dictionary in ink_runs():
+		if not JournalBlocks.is_clean(run["top"], run["height"], block_px):
+			out.append("%s inks %d rows at %d and crosses an avoidable seam"
+				% [run["name"], run["height"], run["top"]])
+	return out
 
 
 ## The title face actually used: the export if set, else the theme's Label font.
@@ -621,9 +734,7 @@ func _rebuild() -> void:
 
 
 func _draw() -> void:
-	# The rule gets a block of its own here, unlike the calendar's — what sits under
-	# this heading is a 36-texel swatch row, not 8px body copy, so there is nothing
-	# to share a block with.
+	# The rule's row is the same in both underline modes — what SHARE_ROW changes is
+	# whether the section charges itself a block for it, not where it is drawn.
 	JournalTitle.draw(self, active_header_font(), header_font_size, title,
-		int(size.x), text_color,
-		maxi(1, block_px) + header_underline_offset_px)
+		int(size.x), text_color, underline_y(), _RULE_WOBBLE_PX)

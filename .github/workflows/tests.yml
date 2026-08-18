@@ -17,13 +17,23 @@ concurrency:
 jobs:
   gut:
     runs-on: ubuntu-24.04
+    # This workflow runs on `pull_request`, so a fork's code executes here.
+    # GitHub already forces a read-only token for fork PRs, but spelling it out
+    # means the guarantee comes from this file rather than from a repo setting
+    # someone can change.
+    permissions:
+      contents: read
     container:
-      image: barichello/godot-ci:4.6.1 # must match Godot version in CLAUDE.md / project.godot
+      # Tag must match the Godot version in CLAUDE.md / project.godot; the digest
+      # pins WHICH build of that tag, since a tag can be repointed at any time.
+      image: barichello/godot-ci:4.6.1@sha256:f7593b4b88a572d976979b699052c67512e91fb4b99bfb43e8f4969a9312e069
     env:
       GODOT_VERSION: "4.6.1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # Pinned to a commit, not a tag: a tag is mutable, so `@v7` would let
+        # whoever controls that repo change what runs here.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Same template shuffle as deploy.yml — the image ships them under /root
       # and Godot looks under the invoking user's home.

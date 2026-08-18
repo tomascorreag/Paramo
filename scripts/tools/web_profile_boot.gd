@@ -13,11 +13,32 @@ extends Node2D
 ## This is the one game-facing file the profiler touches. Keep it inert: an
 ## unflagged boot must not load the shader, the script, or anything else — a
 ## measurement tool that costs the player a frame has defeated itself.
+##
+## WEB BUILDS NEED THE "profiling" FEATURE (added 2026-08-17). On web the flags
+## come from the URL, which on the deployed build is PUBLIC input — anyone could
+## open the live site at ?profile and spin up the harness in their own tab. The
+## "Web Profile" export preset carries custom_features="profiling"; the shipped
+## "Web" preset does not, so there `?profile` reads as an ordinary boot.
+##
+## Gating on OS.is_debug_build() instead would have been wrong: the whole point of
+## this harness is that it measures a RELEASE build (see dev-notes/performance.md),
+## and a debug export's frame cost says nothing about the shipped one.
+##
+## Desktop is deliberately NOT gated. Its flags come from the command line, which
+## is not a public surface — anyone who can pass `-- --profile` can already run
+## any script in the project. Custom features are a property of an export preset,
+## and there is no desktop preset to hang one on.
+##
+## Export with:  mkdir -p build/web-profile
+##               godot --path . --headless --export-release "Web Profile"
+## (Godot will not create the target folder itself.)
 
 const PROFILER := "res://scripts/tools/profile_web.gd"
 
 
 func _ready() -> void:
+	if OS.has_feature("web") and not OS.has_feature("profiling"):
+		return
 	var q: Dictionary = _query()
 	if not q.has("profile"):
 		return

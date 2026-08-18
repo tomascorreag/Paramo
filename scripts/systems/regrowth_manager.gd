@@ -163,15 +163,23 @@ const _FACE_DIRS: Array[Vector2i] = [
 ##
 ## Recovery USED to be applied in one pass at each midnight, which made grass
 ## return in a single step 240 real seconds wide — a scar sat unchanged all day
-## and then jumped. It is a continuous process, so it now runs continuously; a
-## second is far below the eye's threshold for "the mountain is healing" and far
-## above the cost of a sweep.
+## and then jumped. It is a continuous process, so it now runs continuously.
 ##
 ## It is NOT a rate. Recovery per day is authored by base_recovery_per_day and
 ## rain_recovery_bonus, and each cell integrates against a monotonic clock, so
 ## changing this changes only how smoothly and how often the value moves — never
-## how much grass a day returns. That is exactly why it is safe to expose.
-@export var sweep_seconds: float = 4.0
+## how much grass a day returns. That is exactly why it is safe to expose, and
+## tests/test_regrowth_manager.gd's cadence-independence test is what keeps it
+## safe: if that ever fails, this has silently become a balance knob.
+##
+## 4 -> 8 (2026-08-17), which halves the per-frame slice. The window is bounded
+## at the top by the SLOWEST thing the sweep is responsible for, and that is a
+## rung change: only the recovery repaint waits on the sweep, since trample and
+## burn repaint at the event. A rung takes game-days to earn, so 8 real seconds
+## of latency on it is invisible. Note the saving is small — regrowth_manager
+## measured 15.1 us/frame on level1 under profile_systems.gd, 7th of 24 systems
+## and 0.09% of a 60 fps frame, with the dirt band seeded.
+@export var sweep_seconds: float = 8.0
 
 ## How fast grass COLONISES ground that generation painted dirt, as a fraction
 ## of the recovery rate a burn scar gets. Reclaiming ground the mountain never

@@ -65,6 +65,7 @@ headless run sees them.
 | `benchmark_rain.gd` / `benchmark_fire.gd` | Price a shader edit (the **ratio** is the number) | [vfx](dev-notes/vfx.md) |
 | `preview_fire_blobs.gd` / `preview_fire_aura.gd` | Look at procedural fire / the off-screen aura | [vfx](dev-notes/vfx.md) |
 | `preview_page_warp.gd` | **Measure** journal page-warp error per column | [journal](dev-notes/journal.md) |
+| `audit_page_blocks.gd` | Where the journal's warp seams are, what each section inks, and **how far a heading may move**. `--gap <n>` prices a tightening before authoring it | [journal](dev-notes/journal.md) |
 | `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette | [journal](dev-notes/journal.md) |
 | `preview_run_calendar.gd` | Journal pages in 4 run states, both locales | [journal](dev-notes/journal.md) |
 | `preview_language_gate.gd` | Title-screen language boxes in 4 states | [journal](dev-notes/journal.md) |
@@ -78,7 +79,7 @@ headless run sees them.
 | `profile_scene.gd` | Frame time / draw calls for a scene | [perf](dev-notes/performance.md) |
 | `profile_systems.gd` | Rank every system on a **loaded** map | [perf](dev-notes/performance.md) |
 | `profile_day_boundary.gd` | Find the one frame that stutters | [perf](dev-notes/performance.md) |
-| `profile_web.gd` + `run_web_profile.py` | **Where the web frame goes** | [perf](dev-notes/performance.md) |
+| `profile_web.gd` + `run_web_profile.py` | **Where the web frame goes.** Needs the `"Web Profile"` export preset, not `"Web"` | [perf](dev-notes/performance.md) |
 | `benchmark_pathfinder.gd` / `benchmark_visitors.gd` | Price routing / the visitor system | [perf](dev-notes/performance.md) |
 | `sim/balance_sim.gd` | Monte Carlo balance runs. **Run after any balance change.** | [sim](dev-notes/balance-sim.md) |
 
@@ -106,6 +107,13 @@ to them. Generator, indexing and sim tools are headless.
   `can_ignite` reads the layer. `natural` on each regrowth record is what keeps
   bare dirt out of the scar/appeal numbers. See [vegetation](dev-notes/vegetation.md);
   arm is `no_colonise`.
+- **The journal's warp-block rule is about INK, not about node tops** — a run of
+  height `h` must span `ceil(h/block)` blocks and no more, which is what
+  `JournalBlocks` states and every section snaps against. `header_gap_px` is a
+  *request*: any value is legal to author and resolves to the nearest row top that
+  renders clean. Measure with `audit_page_blocks.gd` before re-laying-out a page;
+  the freedom is set by the tallest **ink**, not by the cell around it. See
+  [journal](dev-notes/journal.md).
 - **The run opens just after dawn, with no spontaneous fire and 15 tokens** —
   FTUE concessions with knock-on effects (unlocks are priced per type now —
   ladder/frailejon 10, bridge 20, fence 30 — which moves every balance-sim arm).
@@ -372,7 +380,11 @@ Name files by the **semantic glyph**, not the action (`trash.tres`,
 Playable at **https://tomascorreag.github.io/Paramo/**.
 
 Single-threaded web export, Compatibility (GLES3/WebGL2) renderer.
-`export_presets.cfg` defines the "Web" preset (tracked in git):
+`export_presets.cfg` (tracked in git) defines two presets: **"Web"**, which is
+what ships, and **"Web Profile"**, identical except for
+`custom_features="profiling"` and an export path of `build/web-profile/`. Keep
+them in lockstep — the profiler's numbers only mean something while the two
+configurations match. Everything below describes "Web":
 
 - **Thread support disabled** — drops the SharedArrayBuffer / cross-origin
   isolation requirement, so the build boots on the widest set of browsers (no
@@ -381,8 +393,10 @@ Single-threaded web export, Compatibility (GLES3/WebGL2) renderer.
   Re-enabling them needs server-set COOP/COEP headers, which GitHub Pages cannot
   provide. `ProceduralWorld._generate_grid_async` gates its `WorkerThreadPool`
   path on `OS.has_feature("threads")`, falling back to inline generation.
-- **PWA enabled**, `ensure_cross_origin_isolation_headers = false` — leaving COEP
-  off also lets cross-origin resources (the Strudel CDN percussion) load.
+- **PWA enabled**, `ensure_cross_origin_isolation_headers = false`. This used to
+  be load-bearing for the music (COEP off let the Strudel CDN percussion through);
+  since every sample is vendored, nothing cross-origin is left to block. It stays
+  off because turning it on would need COOP/COEP headers GitHub Pages cannot set.
 - **VRAM texture compression flags are inert** — every texture imports Lossless
   (`compress/mode=0`), correct for nearest-filter pixel art.
 - **`exclude_filter`** drops `addons/gut/*` (~1.7 MB), `tests/*`,
@@ -392,8 +406,12 @@ Single-threaded web export, Compatibility (GLES3/WebGL2) renderer.
   manifest), `preview_out/*` (local preview-tool renders, gitignored) and
   `sim_out/*`, plus `.gutconfig.json`. **Measured: 693 → 671 stored files,
   1,659,036 → 1,521,048 bytes of `index.pck`, −8.3%**, all of it build output
-  and local scratch. Anything a tool writes under `res://` needs a line here as
-  well as in `.gitignore` — Godot imports it whether git tracks it or not.
+  and local scratch. `build/*` joined them 2026-08-17, when the "Web Profile"
+  preset started writing there and **14 of its own icon/manifest files came back
+  in the next pck** — the same trap, one directory over. Anything a tool writes
+  under `res://` needs a line here as well as in `.gitignore` — Godot imports it
+  whether git tracks it or not, and a fresh CI checkout will not reproduce it.
+  Keep the filter identical across both presets.
   Do **not** add `scripts/tools/*` — `gameplay_base.tscn` /
   `procedural_base.tscn` / `frailejon.tscn` load runtime scripts from there.
 - **Do not audit the pck with `strings`.** `.godot/uid_cache.bin` ships inside
@@ -447,8 +465,15 @@ interaction and loops.
 - **CI parity:** `deploy.yml` exports to `build/web/` and its "Bundle music
   assets" step copies the `head_include` static assets from `docs/music/` into the
   export output, dropping the dev-only `dev-music.html`.
-- **Percussion caveat:** drum packs load cross-origin from the Strudel CDN
-  (dev-only); the vendored `gm_*` soundfont layers always play.
+- **Nothing is fetched from a third party at play time** (2026-08-17). Drum
+  samples (`docs/music/samples/`, uzu-drumkit, public domain) and soundfonts
+  (`docs/music/soundfonts/`, FluidR3, MIT) are both vendored and same-origin.
+  Adding any CDN fetch back is a licensing decision — read
+  `THIRD-PARTY-NOTICES.md` first, including its **Removed** section.
+- **The song pins its soundfont variant with `.n()`** — `n` indexes the engine's
+  per-instrument variant list, and index 0 is JCLive, whose licence could not be
+  established. Dropping an `.n()` call silently reverts to it. Indices are
+  per-instrument; see `docs/music/soundfonts/README.md`.
 
 ## GDScript Style
 

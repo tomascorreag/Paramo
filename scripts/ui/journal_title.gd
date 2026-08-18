@@ -30,6 +30,28 @@ extends RefCounted
 ## room for a rule inside the title's own block, so it goes in the top rows of the
 ## next one. That is also why it cannot simply be drawn a few pixels under the
 ## baseline and forgotten about.
+##
+## WHOSE BLOCK THAT IS is the caller's choice, and it is worth a block of paper.
+## The rule is DRAWN at the same row either way — what `Underline` changes is what a
+## section charges itself for it, and so what a `header_gap_px` of 0 means.
+
+## What a heading costs, i.e. where its content starts when the gap is 0.
+##
+## Deliberately NOT an "auto" that picks the tighter: the mode is the authored
+## default rhythm of the page and must not move because a swatch was repainted a
+## few texels shorter. Physics is the snap's job (JournalBlocks); this is taste's.
+enum Underline {
+	## The rule gets a block to itself: a heading is two blocks, and content starts
+	## under both. What a section whose content fills its own block has to do —
+	## JournalResources' 16px glyph beside an 18-row Tiny5 line leaves nothing for a
+	## rule to share with.
+	OWN_BLOCK,
+	## The heading is charged ONE block and the rule sits in the top rows of the
+	## content's own first block, the content clearing it below. Worth a whole block
+	## of paper, and only legal when the content's ink still lands clean after
+	## clearing the rule — which is the snap's business, not this flag's.
+	SHARE_ROW,
+}
 
 ## Rows the title's ink is pushed down inside its own block. See point 2 above.
 const INK_INSET_PX: int = 1
@@ -57,6 +79,29 @@ static func row_px(font: Font, size: int, block: int, underlined: bool = true) -
 	var h: float = font.get_height(size) if font != null else float(size)
 	var rows: int = int(ceilf(h / float(b))) * b
 	return rows + (b if underlined else 0)
+
+
+## The title's own ink as a JournalBlocks run — (offset from the heading's top,
+## inked height). The inset is part of the run, not something applied to it: what
+## a seam damages is where the ink IS.
+static func ink_run(font: Font, size: int) -> Vector2i:
+	var h: float = font.get_height(size) if font != null else float(size)
+	return Vector2i(INK_INSET_PX, int(ceilf(h)))
+
+
+## The rule's ink as a run, WOBBLE INCLUDED. `JournalPen.rule` displaces whole
+## segments up to `wobble_px` off true, so the line inks `2 * wobble` rows more
+## than its own thickness and a floor computed from the thickness alone is one
+## short — which is how content ends up printed through the top of its own rule.
+static func rule_ink(underline_y: int, wobble_px: int = 1) -> Vector2i:
+	var w: int = maxi(0, wobble_px)
+	return Vector2i(underline_y - w, UNDERLINE_THICK_PX + 2 * w)
+
+
+## The first row a section's content may use without touching its own rule.
+static func rule_floor(underline_y: int, wobble_px: int = 1) -> int:
+	var ink := rule_ink(underline_y, wobble_px)
+	return ink.x + ink.y
 
 
 ## Draws `key` (a TRANSLATION KEY, resolved here — see point 3) centred across

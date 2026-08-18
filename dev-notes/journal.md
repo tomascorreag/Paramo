@@ -41,6 +41,50 @@ failed.
 - `row_block_px` quantises from the Content rect's top, so page text must start
   at a **multiple** of it below that top, or every line straddles two blocks.
   `tests/test_journal_pages.gd` guards this.
+- **The seams are real, and measured.** `audit_page_blocks.gd` replays the
+  shader's own arithmetic: on both pages, at block 18 and amplitude 5, **every**
+  block boundary steps across ~50% of the page's columns — the spine half, x
+  0..~120 of 156. The one exception is y=108, at 18%, because it sits where the
+  weighting crosses zero. A seam is a certainty for anything drawn inboard of the
+  outer third, not a risk to be weighed.
+- **The contract is about INK, not about node tops** (`JournalBlocks`). A run of
+  height `h` at top `y` must touch no more blocks than its height forces:
+  `ceil(h/block)`. Everything else follows — a run shorter than a block gets
+  `block - h` texels of freedom in where it starts; a run **taller** than a block
+  cannot avoid seams at all, so the goal is to cross the fewest, which it does
+  anywhere in a `ceil(h/block) * block` window; a run exactly as tall as its block
+  (Tiny5-16's 18-row line box) has none and must start on a boundary.
+  This replaced "the header must be a whole number of blocks", a proxy that was
+  **wrong in both directions**: it forbade the 6 other phases a 30-row fence
+  legally has, and it never inspected a swatch, so art straddling three blocks
+  passed. Measured ink: ladder 21, bridge 24, fence 30, frailejón 23.
+- **The known sets sit one block higher than they used to** (`header_gap_px` -12,
+  row top 24), and the cells were cut 36 → 30 to allow it. Both are needed: at a
+  row top of 24 the fence's 30 rows of ink land on phase 9 when centred in a
+  36-texel cell, which is three blocks. Cutting the cell to the fence's own ink
+  zeroes its centring offset and puts it back on phase 6, the last legal one.
+  **Cut every cell in the row, not just the binding one** — the arts are centred
+  per cell, so shrinking one alone lifts that swatch off the row's shared line.
+  The reclaimed 18 texels stay between the two known sets rather than closing the
+  page up: section tops must be multiples of the block, so inter-section air
+  quantises to 18 and there is nothing between "cramped" and "generous".
+- **`header_gap_px` is a request, not the answer.** `header_row_px()` snaps it to
+  the nearest legal row top (ties resolve **upward** — a negative gap is a request
+  to tighten), floored at the heading's own rule so content can never print
+  through it. Authoring an impossible gap is therefore not a build failure, it is
+  a no-op with an Inspector warning; `test_journal_pages.gd` sweeps all 73 values
+  of the range on every section and asserts each one still renders clean.
+- **That floor must include the rule's WOBBLE.** `JournalPen.rule` displaces whole
+  segments up to `wobble_px` off true, so the line inks `2 * wobble` rows more
+  than its thickness. The old floor counted thickness only and was one row short.
+- **`JournalTitle.Underline` chooses what a gap of 0 means**, not where the rule
+  is drawn (that is the same row either way). `OWN_BLOCK` gives the rule a block
+  and costs two; `SHARE_ROW` charges one and puts the rule in the top of the
+  content's own first block. Deliberately **not** an "auto that picks the tighter":
+  the page's rhythm must not move because a swatch was repainted a few texels
+  shorter. Worth a whole block on a known set whose cell is near its ink; worth
+  nothing on `JournalResources`, where a 16px glyph and an 18-row line box leave
+  no rows to share and the snap pushes the row straight back down.
 - A line must **not** sit flush against a block's top edge: the shader translates
   each block rigidly and the seam duplicates or drops the row next to it — flush
   at the top, that is the row every ascender and digit uses. Tiny5 at 8 has room
@@ -211,6 +255,14 @@ the player can put on the mountain, printed in brown ink. Render with `--full`.
 - A 32px swatch spans two 18px warp blocks, so it *can* shear by a texel across
   its middle. Measured on the real page: not visible at this amplitude. Don't
   "fix" it by shrinking the art — a 32px sprite cannot avoid a seam on an 18px grid.
+  What shrinking the **cell** buys is different and real: the swatch is centred by
+  its ink, so a tighter cell moves the art's phase and changes which row tops the
+  whole section may take. `audit_page_blocks.gd` prints the list.
+- **The binding entry is the one with the most ink, not the biggest cell.** A
+  section's legal row tops are the intersection across its entries, so "known
+  buildings" is set by the fence (30 rows, 6 texels of slack) while the ladder's
+  21 rows would have allowed 15. Shortening the fence's art is the only thing that
+  widens that section's freedom.
 - **A swatch's hit rect is what is drawn, not the cell it was allotted.**
   `_rebuild` centres art at its own size and never scales it, so a cell smaller
   than the art leaves most of the picture visible but dead ("hover only works

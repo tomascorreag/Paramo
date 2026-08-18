@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Paramo — bombo &amp; flute audition</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #ddd; padding: 2rem 2rem 6rem; line-height: 1.5; max-width: 60rem; }
+    h1 { font-size: 1.1rem; }
+    h2 { font-size: 1rem; margin-top: 2rem; border-bottom: 1px solid #333; padding-bottom: .3rem; }
+    button { font: inherit; padding: .45rem .7rem; background: #2a2a2a; color: #fff; border: 1px solid #444; cursor: pointer; text-align: left; }
+    button:hover { background: #383838; }
+    button.on { background: #3a5a3a; border-color: #6a9a6a; }
+    button:disabled { opacity: .4; cursor: default; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .4rem; }
+    .hint { color: #888; }
+    .k { color: #8ab; }
+    code { color: #cda; }
+    .bar { position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a1a; border-top: 1px solid #333; padding: .7rem 2rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .cur { color: #cda; }
+    .err { color: #e66; }
+    label { color: #aaa; }
+    .note { background: #1b1b1b; border-left: 3px solid #555; padding: .5rem .8rem; margin: .8rem 0; color: #aaa; }
+  </style>
+</head>
+<body>
+  <h1>Paramo · bombo &amp; flute audition</h1>
+
+  <p class="hint">Every candidate below is already vendored and openly licensed —
+     drums from <a href="https://github.com/tidalcycles/uzu-drumkit" style="color:#8ab">uzu-drumkit</a>
+     (Unlicense), instruments from FluidR3 (MIT). Nothing here reaches a CDN.</p>
+
+  <div class="note">
+    <b>Solo</b> plays the layer alone on loop. <b>In the mix</b> plays the whole
+    arrangement with that one layer swapped, which is the only way to judge
+    whether a kick actually holds the bottom under the guitar. Both loop until
+    you press stop or pick another.
+  </div>
+
+  <p><button id="enable">▶ Click to enable audio</button>
+     <span class="hint">(browsers block audio until you interact)</span></p>
+
+  <h2>Bombo — the low kick on every beat</h2>
+  <p class="hint">Current: <code>sound("bd")</code> index 0 at speed 0.9.
+     <b>speed</b> is the main lever — below 1.0 it pitches the sample down and
+     stretches it, which is what turns a drum-kit kick into something more like a
+     struck bombo. Set it, then compare samples at that speed.</p>
+  <p>
+    <label>speed <input id="speed" type="range" min="0.5" max="1.1" step="0.05" value="0.9" style="vertical-align:middle"></label>
+    <span class="k" id="speedval">0.90</span>
+    <span class="hint">— lower = deeper &amp; longer</span>
+  </p>
+  <div class="grid" id="bombo"></div>
+
+  <h2>Flute — the melody</h2>
+  <p class="hint">Current: <code>gm_pan_flute</code> <code>.n(1)</code>. All are
+     FluidR3 GM programs, so the licence story is identical for every one — pick
+     on sound alone. A huayno melody is idiomatically a quena (notched flute) or
+     siku (panpipes), so the breathier programs are worth a listen even though
+     the score says pan flute.</p>
+  <div class="grid" id="flute"></div>
+
+  <div class="bar">
+    <button id="stop">■ stop</button>
+    <span>playing: <span class="cur" id="playing">—</span></span>
+    <span class="err" id="error"></span>
+  </div>
+
+<script src="strudel/web-sf-1.3.0.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // Candidate sets. Each entry is {label, code} where code is a fragment spliced
+  // into the real song, so what you hear is the arrangement, not an approximation.
+  var BOMBO = [
+    { label: 'bd 0 — current',      key: 'bd', n: 0 },
+    { label: 'bd 1 — mot4i',        key: 'bd', n: 1 },
+    { label: 'bd 2 — mot4i',        key: 'bd', n: 2 },
+    { label: 'bd 3 — mot4i',        key: 'bd', n: 3 },
+    { label: 'bd 4 — switchangel',  key: 'bd', n: 4 },
+    { label: 'bd 5 — switchangel',  key: 'bd', n: 5 },
+    { label: 'bd 6 — switchangel',  key: 'bd', n: 6 },
+    { label: 'bd 7 — switchangel (long)', key: 'bd', n: 7 },
+    { label: 'lt — low tom',        key: 'lt', n: 0 },
+    { label: 'mt — mid tom',        key: 'mt', n: 0 },
+    { label: 'ht — high tom',       key: 'ht', n: 0 },
+    { label: 'tb — tabla-ish',      key: 'tb', n: 0 },
+    { label: 'cb — perc',           key: 'cb', n: 0 },
+    { label: 'misc 0',              key: 'misc', n: 0 },
+    { label: 'misc 2',              key: 'misc', n: 2 },
+    { label: 'misc 3',              key: 'misc', n: 3 },
+  ];
+
+  var FLUTE = [
+    { label: 'pan flute .n(1) — current', inst: 'gm_pan_flute',    n: 1 },
+    { label: 'pan flute .n(6) — alt',     inst: 'gm_pan_flute',    n: 6 },
+    { label: 'flute .n(2)',               inst: 'gm_flute',        n: 2 },
+    { label: 'flute .n(4) — alt',         inst: 'gm_flute',        n: 4 },
+    { label: 'recorder .n(3)',            inst: 'gm_recorder',     n: 3 },
+    { label: 'shakuhachi .n(3) — breathy', inst: 'gm_shakuhachi',  n: 3 },
+    { label: 'shakuhachi .n(1) — alt',    inst: 'gm_shakuhachi',   n: 1 },
+    { label: 'ocarina .n(0)',             inst: 'gm_ocarina',      n: 0 },
+    { label: 'blown bottle .n(0)',        inst: 'gm_blown_bottle', n: 0 },
+    { label: 'whistle .n(0)',             inst: 'gm_whistle',      n: 0 },
+  ];
+
+  var repl = null, song = null, current = null, activeBtn = null;
+
+  function err(m) { document.getElementById('error').textContent = m ? ('— ' + m) : ''; }
+  function say(m) { document.getElementById('playing').textContent = m; }
+
+  // Boot the engine with exactly the assets the game uses, plus the audition-only
+  // manifest that adds the drum keys the song does not currently play.
+  var initRet = window.initStrudel({
+    prebake: function () {
+      window.setSoundfontUrl('soundfonts');
+      window.registerSoundfonts();
+      return Promise.allSettled([
+        window.strudel.samples('samples/uzu-audition.json', 'samples/uzu-drumkit/',
+                               { tag: 'drum-machines' }),
+      ]);
+    },
+  });
+
+  var songRet = fetch('ojos_azules.strudel.js').then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching the song');
+    return r.text();
+  });
+
+  Promise.all([Promise.resolve(initRet), songRet]).then(function (v) {
+    repl = v[0]; song = v[1];
+    say('ready — pick a candidate');
+  }).catch(function (e) {
+    err('init failed: ' + e.message + ' (serve docs/ over http, not file://)');
+  });
+
+  function resume() {
+    try {
+      var g = (window.strudel && window.strudel.getAudioContext) || window.getAudioContext;
+      var ctx = (typeof g === 'function') ? g() : null;
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    } catch (e) { /* initStrudel's own click handler also resumes */ }
+  }
+
+  function speed() { return parseFloat(document.getElementById('speed').value); }
+
+  // --- code builders ---------------------------------------------------------
+  // The song is the source of truth. For "in the mix" we splice ONE call in the
+  // real file rather than rebuilding the arrangement here, so a candidate is
+  // heard against the actual gains, room and cross-rhythms.
+
+  function bomboLine(c) {
+    return 'sound("' + c.key + '").n(' + c.n + ').fast(11)';
+  }
+
+  function mixBombo(c) {
+    var s = song.replace('const bombo = sound("bd").fast(11)',
+                         'const bombo = ' + bomboLine(c));
+    return s.replace('.speed(0.9)', '.speed(' + speed() + ')');
+  }
+
+  function soloBombo(c) {
+    return bomboLine(c) + '.speed(' + speed() + ')' +
+           '.gain(rand.range(0.3, 0.5)).room(0.2)';
+  }
+
+  function mixFlute(c) {
+    return song.replace('.sound("gm_pan_flute").n(1)',
+                        '.sound("' + c.inst + '").n(' + c.n + ')');
+  }
+
+  function soloFlute(c) {
+    // The song's melody, alone: strip the final stack() and play just that layer.
+    return mixFlute(c).replace(/stack\(\s*[^()]*?\s*\)\s*;?\s*$/, 'melody');
+  }
+
+  function play(code, label, btn) {
+    if (!repl) { err('engine not ready yet'); return; }
+    try {
+      resume();
+      repl.evaluate(code);
+      say(label);
+      err('');
+      if (activeBtn) activeBtn.classList.remove('on');
+      activeBtn = btn; btn.classList.add('on');
+      current = { code: code, label: label, btn: btn };
+    } catch (e) {
+      err('evaluate failed: ' + e.message);
+    }
+  }
+
+  function addRow(host, label, onSolo, onMix) {
+    var wrap = document.createElement('div');
+    var solo = document.createElement('button');
+    solo.textContent = '♪ ' + label;
+    solo.style.width = '100%';
+    solo.onclick = function () { onSolo(solo); };
+    var mix = document.createElement('button');
+    mix.textContent = '⧉ in the mix';
+    mix.style.width = '100%';
+    mix.style.marginTop = '.2rem';
+    mix.style.fontSize = '.85em';
+    mix.onclick = function () { onMix(mix); };
+    wrap.appendChild(solo); wrap.appendChild(mix);
+    host.appendChild(wrap);
+  }
+
+  var bhost = document.getElementById('bombo');
+  BOMBO.forEach(function (c) {
+    addRow(bhost, c.label,
+      function (b) { play(soloBombo(c), 'bombo solo · ' + c.label + ' @ ' + speed().toFixed(2), b); },
+      function (b) { play(mixBombo(c), 'bombo in mix · ' + c.label + ' @ ' + speed().toFixed(2), b); });
+  });
+
+  var fhost = document.getElementById('flute');
+  FLUTE.forEach(function (c) {
+    addRow(fhost, c.label,
+      function (b) { play(soloFlute(c), 'flute solo · ' + c.label, b); },
+      function (b) { play(mixFlute(c), 'flute in mix · ' + c.label, b); });
+  });
+
+  document.getElementById('speed').oninput = function () {
+    document.getElementById('speedval').textContent = speed().toFixed(2);
+    // Re-evaluate live so the slider is audible while a bombo candidate loops.
+    if (current && current.label.indexOf('bombo') === 0) current.btn.click();
+  };
+
+  document.getElementById('enable').onclick = function () {
+    resume();
+    say(repl ? 'ready — pick a candidate' : 'still loading…');
+  };
+
+  document.getElementById('stop').onclick = function () {
+    try { if (repl) repl.stop(); } catch (e) { /* nothing playing */ }
+    if (activeBtn) activeBtn.classList.remove('on');
+    activeBtn = null; current = null;
+    say('stopped');
+  };
+})();
+</script>
+</body>
+</html>
