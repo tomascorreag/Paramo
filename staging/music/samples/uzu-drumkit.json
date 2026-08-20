@@ -1,0 +1,35 @@
+{
+  "bd": [
+    "bd/10_bd_switchangel.wav",
+    "bd/11_bd_mot4i.wav",
+    "bd/12_bd_mot4i.wav",
+    "bd/13_bd_mot4i.wav",
+    "bd/14_bd_switchangel.wav",
+    "bd/15_bd_switchangel.wav",
+    "bd/16_bd_switchangel.wav",
+    "bd/17_bd_switchangel.wav"
+  ],
+  "sd": [
+    "sd/10_sd_switchangel-bounce-2.wav",
+    "sd/11_sd_switchangel_3.wav",
+    "sd/12_sd_switchangel_2.wav",
+    "sd/13_sd_switchangel_2.wav",
+    "sd/14_sd.wav"
+  ],
+  "cr": [
+    "cr/10_cr_switchangel.wav",
+    "cr/11_cr_mot4i.wav"
+  ],
+  "oh": [
+    "oh/10_oh_switchangel.wav",
+    "oh/11_oh_switchangel.wav",
+    "oh/12_oh_switchangel.wav",
+    "oh/13_oh_switchangel.wav"
+  ],
+  "rd": [
+    "rd/10_rd_switchangel.wav"
+  ],
+  "sh": [
+    "sh/10_sh_switchangel.wav"
+  ]
+}
