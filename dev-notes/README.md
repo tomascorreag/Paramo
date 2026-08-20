@@ -18,6 +18,7 @@ Every command assumes the project root as cwd and this executable:
 | [vfx.md](vfx.md) | Rain shader, blob fire, off-screen fire aura |
 | [journal.md](journal.md) | Field journal: page warp, calendar, known sets/shop, language gate |
 | [tiles.md](tiles.md) | Tile ink measurement, fences |
+| [ui.md](ui.md) | Screen-space chrome: the pause modal and its about/licence view |
 | [ftue.md](ftue.md) | Opening day: start time, first-day fire grace, the tutorial strip |
 | [visitors.md](visitors.md) | Visitor sheets, recolour, parties, routing behaviour |
 | [vegetation.md](vegetation.md) | Regrowth/trample: one value per cell |

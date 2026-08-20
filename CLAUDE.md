@@ -70,6 +70,7 @@ headless run sees them.
 | `preview_run_calendar.gd` | Journal pages in 4 run states, both locales | [journal](dev-notes/journal.md) |
 | `preview_language_gate.gd` | Title-screen language boxes in 4 states | [journal](dev-notes/journal.md) |
 | `preview_tutorial_strip.gd` | FTUE hint strip, 4 steps x both locales | [ftue](dev-notes/ftue.md) |
+| `preview_pause_menu.gd` | Pause modal: 3 views x both locales | [ui](dev-notes/ui.md) |
 | `measure_tile_ink.gd` | Where a tile's art lands on its cell, in texels | [tiles](dev-notes/tiles.md) |
 | `preview_fence.gd` | A built fence run, in context | [tiles](dev-notes/tiles.md) |
 | `preview_grass_wear.gd` | A wear ramp across real terrain; audits generated grass rungs | [vegetation](dev-notes/vegetation.md) |
@@ -120,6 +121,10 @@ to them. Generator, indexing and sim tools are headless.
   See [ftue](dev-notes/ftue.md) before retuning any of them.
 - **`toggle_journal` is Space, which the language gate also answers** — the
   journal ignores it until the run is ACTIVE *and* the cinematic is gone.
+- **The pause panel does not grow to its content** — `Margin` is anchored to the
+  panel rect, so `custom_minimum_size` IS the content box and the **tallest** of
+  its three views sets it. About is currently the tallest, at 128px of 130.
+  `test_locale_manager.gd` prints both numbers. See [ui](dev-notes/ui.md).
 - **The FTUE lights its own fire, off-screen, and it must stay inside
   `FireAuraOverlay.REACH`** — the screen-edge glow is the only thing that reports
   it. It is `contained` (never spreads) and over-fuelled (outlasts the walk),

@@ -26,3 +26,6 @@
 - [x] Reduce the damage visitors/player do while walking by 50%.
 - [x] Add small cost icons to the items in the shop.
 - [x] review the latest commit and current diff for bugfixes, improvements and optimizations.
+- [ ] define very clearly the goal aesthetic experience of the player. Put simply: WHY are they  having fun?
+- [x] add language toggle to settings.
+- [x] Add about section to settings, include links to repo licenses and such. — a third view in the pause modal (`about` row in the settings column): author line, the repo URL as plain text, and three `OS.shell_open` links to the repo, `LICENSE` and `THIRD-PARTY-NOTICES.md`. Panel grown 124 → 150px, since about is now the tallest view; new `preview_pause_menu.gd` and five guards in `test_locale_manager.gd`. See [ui](dev-notes/ui.md).
