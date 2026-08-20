@@ -42,6 +42,7 @@
 [ext_resource type="Script" path="res://scripts/systems/visitor_flow.gd" id="40_visitors"]
 [ext_resource type="Script" path="res://scripts/systems/unlock_state.gd" id="41_unlocks"]
 [ext_resource type="Script" uid="uid://bt42lm88iefif" path="res://scripts/systems/visitor_spawner.gd" id="42_vspawn"]
+[ext_resource type="Script" path="res://scripts/ui/tutorial_controller.gd" id="43_tutorial"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -299,7 +300,7 @@ flash_duration = 0.1
 anim_fps = 12.0
 pan_offset_px = 450.0
 start_delay = 2.0
-day_time_of_day = 0.4
+day_time_of_day = 0.29
 curtain_fade_in = 4.0
 title_fade_in_delay = 3.5
 hold_duration = 3.0
@@ -307,3 +308,10 @@ hold_duration = 3.0
 [node name="PauseMenu" parent="." instance=ExtResource("33_pause")]
 
 [node name="FieldJournal" parent="." instance=ExtResource("36_journal")]
+
+; FTUE hint strip. Empty node — the whole UI is built in code from the step
+; table in tutorial_controller.gd. Its `layer` is set in _ready (UILayers.TUTORIAL),
+; not authored, because nothing here is scene-authored. Uncheck `enabled` on a
+; map to ship it without the tutorial.
+[node name="Tutorial" type="CanvasLayer" parent="."]
+script = ExtResource("43_tutorial")

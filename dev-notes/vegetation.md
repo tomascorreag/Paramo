@@ -115,6 +115,69 @@ Needs a rendering context.
 ... --script res://scripts/tools/preview_grass_wear.gd -- --out /tmp/grass --len 14 --scene res://scenes/maps/level1.tscn
 ```
 
+## Dirt colonises too (2026-08-17)
+
+Ground terrain generation painted **dirt** is no longer permanent. Every
+walkable dirt cell is seeded into the ledger at vegetation 0 and climbs, slowly,
+to a **short** ceiling — the same record walking the same value, only upward.
+No second recovery path exists and none was needed.
+
+- **Every record now carries `natural`** — the vegetation the cell is *supposed*
+  to have (1.0 grass-origin, 0.0 dirt-origin) — and `bare_count` /
+  `vegetation_deficit` measure the distance **below** it, not below 1.0. Without
+  that, seeding the dirt band would count several hundred cells as missing grass
+  and drop a **pristine** map's appeal to near zero at load. It also means a
+  reclaimed cell that burns costs nothing: fire returned it to where generation
+  left it. Anything reading `vegetation_at` should know 1.0 now means "as much
+  grass as this cell will ever have", which for reclaimed dirt is half a stand.
+- **The ceiling is a fraction of the ladder** (`dirt_colonise_ceiling` 0.5), not
+  the full stand, because the generator bands grass by altitude and letting
+  reclaimed dirt reach full length erases that banding over a run. The target
+  coord is stored exactly where a grass cell's generated variant is stored, so
+  every rung, hysteresis and paint rule applies to it unchanged.
+- **Tone comes from a grass face neighbour**, falling back to `hash(cell)` over
+  the kind's tones — deterministic, and it does not draw from an RNG stream fire
+  also reads (the mistake `pick_dirt_coord`'s `stream` argument exists to
+  prevent). `GrassLadder` gained `tones_for` / `rung_count_for` / `coord_for`,
+  the first lookups on it not keyed by a coord the caller already holds — a dirt
+  cell has none.
+- **`_dirt_origin` is a second dictionary and is deliberately not a second
+  ledger.** `_veg` answers "how much grass is here" (state that moves);
+  `_dirt_origin` answers "what did generation put here" (immutable for the life
+  of the world). Keeping them apart is what lets a finished cell **leave** the
+  sweep — the record is rebuilt from the origin map if the cell is trampled or
+  burned later — so the ledger stays proportional to what is changing instead of
+  growing to the size of the dirt band and staying there all run.
+- **Seeding is lazy, on the first tick that finds a grid**, not on
+  `generation_finished`: that signal says the tiles are painted, not that
+  `TileGrid` has been rebuilt from them, and the pass needs each cell's layer and
+  kind. It also covers hand-authored maps, which never emit it.
+- **Non-walkable dirt is skipped** — underwater fill, cliff backing and wall
+  faces are all dirt, and grass on a vertical face is the visible failure.
+- **It is a balance change, and the reason is fire, not grass.**
+  `FireManager.can_ignite` reads the layer, so the dirt band was a free
+  firebreak and colonisation hands that area back to fire over a run. Arm:
+  `no_colonise` (`dirt_colonise_factor` 0) against `defaults`, paired by
+  `--seed0` — and read the trampling section below first, because it is the same
+  mechanism seen from the other side.
+  **MEASURED, 12 paired seeds (`--seed0 4000`): the feared escalation did not
+  appear.** `fires_ignited` +28 (t=0.5), `charred_end` −66 (t=−1.6),
+  `tokens_final` +1.0 (t=0.6), `visitors_walked` +0.5 — all noise. The only
+  movement is *toward* health: `grass_frac_min` +0.018 (t=2.1, higher in 9/12)
+  and `appeal_min` +0.016 (t=1.8). Note `grass_frac` is computed from
+  `vegetation_deficit`, to which a dirt-origin cell contributes nothing, so that
+  is not colonised ground counting itself — it is colonised ground **absorbing
+  ignitions that would otherwise have taken real grass**, the trampling
+  firebreak result in reverse. Two caveats before leaning on it: 12 seeds
+  against fire's variance cannot rule out a moderate effect, and colonisation
+  does not reach grass until ~day 15, so a 60-day run only exposes the last two
+  thirds of itself to it. Re-measure once fire is retuned.
+- Rate is `dirt_colonise_factor` (0.25) × the scar-recovery rate: ~15 dry
+  game-days to the first blade, ~27 to the ceiling. Visible across a run, not
+  within a season. It also means **feet win**: 0.18 a crossing against 0.0375 a
+  day gained, so a route walked daily never closes, with no rule anywhere saying
+  so.
+
 ## Rate model and thresholds
 
 - The per-day **rate** model (not a per-day coin flip) is what lets a scar climb

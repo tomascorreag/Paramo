@@ -47,12 +47,31 @@ class GridStub:
 	func cell_count() -> int:
 		return cells.size()
 
+	# The colonisation pass walks the grid's bounds once to find every cell
+	# generation painted dirt. Derived from the placed cells rather than fixed,
+	# so the pass runs over exactly the fixture in front of it — including in
+	# the tests below that place no dirt at all, which is the cheapest way to
+	# keep proving that seeding leaves the damage path alone.
+	func bounds() -> Rect2i:
+		var r := Rect2i()
+		var first: bool = true
+		for cell: Vector2i in cells:
+			if first:
+				r = Rect2i(cell, Vector2i.ONE)
+				first = false
+			else:
+				r = r.expand(cell).expand(cell + Vector2i.ONE)
+		return r
+
 
 class TileStub:
 	extends RefCounted
 
 	var layer: TileMapLayer = null
 	var tile_kind: StringName = &"FLAT"
+	# Only dirt the player can stand on colonises; underwater fill and cliff
+	# backing are dirt too and must not sprout grass on a vertical face.
+	var walkable: bool = true
 
 
 # The longest rung of each shipped tone, so the ladder tests below start with
@@ -149,6 +168,32 @@ func _put_grass_variant(cell: Vector2i, coord: Vector2i) -> void:
 	tile.layer = _layer
 	_grid.cells[cell] = tile
 	FireManager._grid = _grid
+
+
+# Paint `cell` as ground terrain generation left DIRT — the state colonisation
+# starts from. Uses a dirt variant the atlas really paints, for the same reason
+# _put_grass does.
+#
+# FULL_CUBE, not TileStub's default FLAT: that is the kind TerrainPainter gives
+# every flat ground cell, and it is the only one the grass ladders are authored
+# on. With FLAT the cell takes the unladdered path and every length assertion
+# below passes without testing anything.
+const _GROUND_KIND: StringName = &"FULL_CUBE"
+
+
+func _put_dirt(cell: Vector2i, walkable: bool = true) -> void:
+	var coord: Vector2i = FireManager.pick_dirt_coord(_layer.tile_set, _GROUND_KIND)
+	_layer.set_cell(cell, FireManager.SOURCE_DIRT, coord, 0)
+	var tile := TileStub.new()
+	tile.layer = _layer
+	tile.tile_kind = _GROUND_KIND
+	tile.walkable = walkable
+	_grid.cells[cell] = tile
+	FireManager._grid = _grid
+
+
+func _is_grass(cell: Vector2i) -> bool:
+	return _layer.get_cell_source_id(cell) == RegrowthManager.SOURCE_GRASS
 
 
 func _ladder() -> GrassLadder:
@@ -751,3 +796,131 @@ func test_time_spent_burning_is_not_banked_and_paid_out_later() -> void:
 	_advance_days(0.1)
 	assert_almost_eq(_regrowth.vegetation_at(cell), 0.05, 0.0001,
 			"only the time since the fire went out counts")
+
+
+# --- colonisation: dirt the mountain never had grass on ----------------------
+
+
+func test_ground_generated_as_dirt_grows_grass() -> void:
+	# The whole feature: a cell terrain generation painted dirt is not a
+	# permanent hole in the mountain, it is ground grass has not reached yet.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+	assert_false(_is_grass(cell), "generation left it dirt")
+
+	# 0.55 / (0.15 * 0.25) ~= 15 days to cross regrow_threshold.
+	_advance_days(20.0)
+	assert_true(_is_grass(cell), "and grass has since colonised it")
+	assert_false(_regrowth.is_bare(cell))
+
+
+func test_reclaimed_dirt_never_grows_as_tall_as_the_stand_beside_it() -> void:
+	# Terrain generation bands grass by altitude. Letting colonised ground reach
+	# the full stand would erase that banding over a run, so the ceiling is a
+	# FRACTION of the ladder — the reclaimed band reads green but visibly thin.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+	_advance_days(60.0)  # far past full
+
+	var painted: Vector2i = _layer.get_cell_atlas_coords(cell)
+	var ladder: GrassLadder = _ladder()
+	assert_gt(ladder.rung_count(painted), 1,
+			"FLAT must be laddered or this test proves nothing")
+	assert_lt(ladder.top_rung(painted), ladder.rung_count(painted) - 1,
+			"reclaimed dirt must stop short of its ladder's top rung")
+
+
+func test_reclaimed_dirt_stops_climbing() -> void:
+	# It reaches its ceiling and is dropped from the sweep — the ledger must
+	# stay proportional to what is CHANGING, or the whole dirt band would sit in
+	# it for the rest of the run.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+	_advance_days(60.0)
+	var painted: Vector2i = _layer.get_cell_atlas_coords(cell)
+
+	_advance_days(60.0)
+	assert_eq(_layer.get_cell_atlas_coords(cell), painted,
+			"nothing left to grow into")
+	assert_false(_regrowth._veg.has(cell), "and nothing left to sweep")
+
+
+func test_bare_dirt_is_not_a_scar() -> void:
+	# Appeal is "the fraction of the mountain still in its NATURAL state", and
+	# dirt is natural. Counting the seeded dirt band as missing grass would drop
+	# a pristine mountain's appeal to near zero the moment the world loaded.
+	for x in 5:
+		_put_dirt(Vector2i(x, 0))
+	_advance_days(0.5)
+
+	assert_eq(_regrowth.bare_count(), 0, "generated dirt is not a scar")
+	assert_eq(_regrowth.vegetation_deficit(), 0.0, "and no grass is missing")
+	assert_eq(_regrowth.get_appeal_factor(), 1.0, "so the mountain reads pristine")
+
+
+func test_reclaimed_ground_that_burns_costs_nothing() -> void:
+	# Fire takes it back to the state generation left it in. Charging appeal for
+	# that would make colonisation a LIABILITY — every cell it greened would be
+	# a new way to lose points that the player never gained anything for.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+	_advance_days(60.0)
+	assert_true(_is_grass(cell))
+
+	_burn_out(cell)
+	assert_eq(_regrowth.bare_count(), 0)
+	assert_eq(_regrowth.vegetation_deficit(), 0.0)
+
+	_advance_days(60.0)
+	assert_true(_is_grass(cell), "and it colonises again from scratch")
+
+
+func test_colonising_is_slower_than_a_scar_closing_over() -> void:
+	# Reclaiming ground the mountain never had is not the same event as a burn
+	# scar closing, and must not read at the same speed.
+	var scar := Vector2i(1, 1)
+	var dirt := Vector2i(3, 3)
+	_put_grass(scar)
+	_burn_out(scar)
+	_put_dirt(dirt)
+
+	_advance_days(1.0)
+	assert_almost_eq(
+			_regrowth.vegetation_at(dirt),
+			_regrowth.vegetation_at(scar) * _regrowth.dirt_colonise_factor,
+			0.0001, "colonisation is the recovery rate scaled by the factor")
+
+
+func test_colonisation_is_off_at_zero() -> void:
+	# The knob for isolating it in the balance simulator — and at zero it must
+	# cost nothing, not merely move nothing.
+	_regrowth.dirt_colonise_factor = 0.0
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+
+	_advance_days(60.0)
+	assert_false(_is_grass(cell))
+	assert_eq(_regrowth._veg.size(), 0, "and nothing is tracked at all")
+
+
+func test_only_ground_you_can_stand_on_colonises() -> void:
+	# Underwater fill, cliff backing and wall faces are dirt too. Grass on a
+	# vertical face would be the visible failure.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell, false)
+
+	_advance_days(60.0)
+	assert_false(_is_grass(cell))
+
+
+func test_feet_hold_a_route_across_dirt_open() -> void:
+	# Colonisation and trampling are the same value moving in opposite
+	# directions, so a route walked often enough simply never closes — with no
+	# rule anywhere saying so.
+	var cell := Vector2i(2, 2)
+	_put_dirt(cell)
+	for _day in 30:
+		_advance_days(1.0)
+		_regrowth.trample(cell)  # 0.18 a day against 0.0375 gained
+
+	assert_false(_is_grass(cell), "traffic outruns colonisation")

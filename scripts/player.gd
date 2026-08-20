@@ -46,6 +46,11 @@ const WALK_CONTACT_FRAMES: Array[int] = [2, 5]
 @export var lantern_activate_time: float = 0.75
 ## Time of day [0..1] when lantern turns off (e.g., 0.28 = dawn).
 @export var lantern_deactivate_time: float = 0.28
+## Character sheet drawn while the lantern is lit (the campesino holding it).
+## Must share the authored day sheet's layout — the swap keeps `frame`.
+@export var night_sprite_texture: Texture2D
+## Matching night silhouette for the ground shadow.
+@export var night_shadow_texture: Texture2D
 
 # --- Held item -------------------------------------------------------------
 #
@@ -90,6 +95,14 @@ var _shadow_cutoff_target: float = 1000.0
 # is a real cell a map could start the player on.
 var _shadow_cutoff_cell: Vector2i = Pathfinder.NO_CELL
 var _shadow_cutoff_sign: int = 0
+
+# Day sheets, read off the bound sprites in _ready rather than exported a second
+# time: the scene already names them, and two @exports for the same art is two
+# places to forget. `_lantern_art_lit` is the last state pushed, so the per-frame
+# poll in _update_lantern only touches the textures on an actual edge.
+var _day_sprite_texture: Texture2D
+var _day_shadow_texture: Texture2D
+var _lantern_art_lit: bool = false
 
 var _time_manager: Node # TimeManager autoload
 var _regrowth: Node # RegrowthManager, found lazily by group
@@ -167,6 +180,11 @@ func _ready() -> void:
 	# Bound even when there is no pathfinder: bind is what reparents the shadow
 	# out of this node (so it y-sorts against tiles on its own) and reads the
 	# authored sprite/shadow baselines, and none of that depends on a graph.
+	# Before bind: bind REPARENTS the shadow out of this node, so `$Shadow` stops
+	# resolving the moment it returns.
+	_day_sprite_texture = ($Sprite2D as Sprite2D).texture
+	_day_shadow_texture = ($Shadow as Sprite2D).texture
+
 	bind(_pathfinder, $Sprite2D as Sprite2D, $Shadow as Sprite2D)
 
 	var shadow_mat := get_shadow_material()
@@ -471,6 +489,28 @@ func _update_lantern() -> void:
 		_light.activate()
 	else:
 		_light.deactivate()
+	# Keyed on the LIGHT, not on held_item(): activate/deactivate fade over
+	# transition_duration, and `enabled` spans exactly that fade. Swapping off
+	# held_item() instead would pull the lantern out of the character's hand at
+	# dawn while its glow was still fading — a light with no source for a second.
+	_apply_lantern_art(_light.is_lit())
+
+
+# Swap the character + shadow sheets between the day and lantern-lit variants.
+# The night sheets share the day sheets' frame layout, so `frame`, `hframes` and
+# the facing row all survive untouched — only the pixels change.
+func _apply_lantern_art(lit: bool) -> void:
+	if lit == _lantern_art_lit:
+		return
+	_lantern_art_lit = lit
+	if _sprite != null:
+		var sprite_tex := night_sprite_texture if lit else _day_sprite_texture
+		if sprite_tex != null:
+			_sprite.texture = sprite_tex
+	if is_instance_valid(_shadow):
+		var shadow_tex := night_shadow_texture if lit else _day_shadow_texture
+		if shadow_tex != null:
+			_shadow.texture = shadow_tex
 
 
 # ----------------------------------------------------------------------------

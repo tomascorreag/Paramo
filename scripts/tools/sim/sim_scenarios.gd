@@ -42,6 +42,14 @@ const SCENARIOS: Dictionary = {
 	"no_trample": {
 		"balance": {"RegrowthManager": {"trample_per_step": 0.0}},
 	},
+	# Ground generation painted dirt stays dirt. The A/B partner for "defaults"
+	# that prices COLONISATION, and the reason it needs one is fire, not grass:
+	# can_ignite reads the layer, so every cell colonisation greens is a cell
+	# that could not burn before and now can. Compare fires_ignited and
+	# charred_end seed by seed.
+	"no_colonise": {
+		"balance": {"RegrowthManager": {"dirt_colonise_factor": 0.0}},
+	},
 	# The crowd wears the ground but the player does not — isolates the bot's
 	# own tracks, which are concentrated (it walks to fires, repeatedly, from
 	# wherever it happens to be) rather than spread like tourist routes.

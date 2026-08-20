@@ -32,6 +32,17 @@ extends SceneTree
 ##   --out <dir>    output directory (default: user://)
 ##   --full         save the whole 480x270 book instead of the right-page crop
 ##   --locale <id>  render in a specific language (en_GB / es_CO)
+##   --shop <n>     put an UnlockState in the tree with `n` tokens in the ledger,
+##                  so the RIGHT page can price its entries. Without it the
+##                  journal has no economy and every entry renders owned — i.e.
+##                  the shop is invisible in the only tool that draws the page.
+##                  Use with --full. 20 is the interesting value: it makes the
+##                  ladder and the bridge affordable and the fence not, which is
+##                  the one state where the per-entry fade has anything to say.
+##   --hover <i>    park the pointer on "known buildings" entry `i` (0 = ladder),
+##                  so the hover lift, the PRICE and the mouse-verb glyphs render.
+##                  Needs --shop, and it is the only way to see a price at all:
+##                  the page prints one for the hovered entry and nothing else.
 
 # load()ed, not preload()ed — see the same note in preview_page_warp.gd: a preload
 # resolves before _initialize() installs the autoloads, and field_journal.gd then
@@ -60,6 +71,10 @@ const STATES: Array[Array] = [
 var _out_dir: String = "user://"
 var _full: bool = false
 var _locale: String = ""
+## Tokens to stock the ledger with, or < 0 for "no economy in the tree".
+var _shop_tokens: float = -1.0
+## Which "known buildings" entry to park the pointer on, or < 0 for none.
+var _hover_entry: int = -1
 var _vp: SubViewport
 var _journal: CanvasLayer
 var _frames: int = 0
@@ -83,6 +98,12 @@ func _initialize() -> void:
 			"--locale":
 				if i + 1 < argv.size():
 					_locale = argv[i + 1]
+			"--shop":
+				if i + 1 < argv.size():
+					_shop_tokens = maxf(0.0, float(argv[i + 1]))
+			"--hover":
+				if i + 1 < argv.size():
+					_hover_entry = int(argv[i + 1])
 	if not _out_dir.ends_with("/"):
 		_out_dir += "/"
 	DirAccess.make_dir_recursive_absolute(_out_dir)
@@ -103,6 +124,7 @@ func _initialize() -> void:
 	bg_layer.add_child(bg)
 
 	_install_autoloads()
+	_install_shop()
 
 	var packed := load(JOURNAL_PATH) as PackedScene
 	if packed == null:
@@ -139,10 +161,37 @@ func _install_autoloads() -> void:
 		root.add_child(node)
 
 
+# UnlockState is SCENE-scoped, not an autoload — gameplay_base.tscn carries it,
+# and this tool loads the journal alone. JournalShopInput finds it by group, so
+# parenting it to the tool's root is enough; without one the page renders every
+# entry owned and the prices this tool exists to look at never print.
+func _install_shop() -> void:
+	if _shop_tokens < 0.0:
+		return
+	var scr := load("res://scripts/systems/unlock_state.gd") as Script
+	if scr == null:
+		push_warning("preview_run_calendar: could not load unlock_state.gd")
+		return
+	var node := Node.new()
+	node.set_script(scr)
+	node.name = "UnlockState"
+	root.add_child(node)
+
+
+# On the first FRAME, not in _initialize: the shop reads the balance through
+# ResourceLedger, whose own _ready has to have run, and JournalShopInput defers
+# its first refresh to the same point.
+func _stock_ledger() -> void:
+	if _shop_tokens < 0.0 or not root.has_node(^"ResourceLedger"):
+		return
+	root.get_node(^"ResourceLedger").call(&"set_amount", &"tokens", _shop_tokens)
+
+
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 1:
 		_apply_locale()
+		_stock_ledger()
 		_open_instantly(_journal)
 		# 4 days a season x 6 seasons = a 4-wide, 6-tall grid (the shipped
 		# shape). days_per_season is derived, so retune it through days_per_year.
@@ -164,6 +213,8 @@ func _process(_delta: float) -> bool:
 	match t % 3:
 		0:
 			_write_state(STATES[index])
+		1:
+			_apply_hover()
 		2:
 			_capture(STATES[index][0])
 	return false
@@ -244,6 +295,23 @@ func _open_instantly(journal: CanvasLayer) -> void:
 	book.offset_top = 0.0
 	book.offset_bottom = 0.0
 	(journal.get_node("Dim") as ColorRect).modulate.a = 0.0
+
+
+# Hover is normally a mouse event, and there is no mouse here. The shop resolves
+# hover by pure arithmetic (JournalShopInput.handle_hover), so the pointer can be
+# parked by calling that with the point a cursor over the entry would produce —
+# the same route tests/test_journal_shop.gd takes.
+func _apply_hover() -> void:
+	if _hover_entry < 0:
+		return
+	var shop := _journal.get_node_or_null(^"Book/BookArt/BookHit")
+	var section := _journal.get_node_or_null(
+		^"Book/BookArt/Pages/PageRight/SubViewport/Content/KnownBuildings") as Control
+	if shop == null or section == null:
+		return
+	var cell: Rect2 = section.call(&"entry_rect", _hover_entry)
+	shop.call(&"handle_hover", (shop.get(&"content") as Control).position
+			+ section.position + cell.position + cell.size * 0.5)
 
 
 func _capture(name_: String) -> void:

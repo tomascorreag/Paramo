@@ -102,13 +102,18 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# No reticle before the FTUE has taught walking. The cursor's whole job is to
+	# say "this cell is a destination", and during the opening narrative it isn't
+	# one — a reticle there advertises a verb the game is refusing. Cleared the
+	# same way LOCKED clears it, rather than by entering LOCKED, which would also
+	# plant the locked X and square on a cell.
+	if not TutorialGate.allows(TutorialGate.Action.MOVE):
+		_clear_hovered_cell()
+		return
 	match _state:
 		State.LOCKED:
 			# Mouse moves freely (to pick menu items) but no in-world cursor.
-			if hovered_cell != Pathfinder.NO_CELL:
-				var old := hovered_cell
-				hovered_cell = Pathfinder.NO_CELL
-				hovered_cell_changed.emit(hovered_cell, old)
+			_clear_hovered_cell()
 		State.HOVER, State.PLACEMENT:
 			_update_cursor_cell()
 			if _state == State.PLACEMENT:
@@ -119,6 +124,22 @@ func _process(_delta: float) -> void:
 # ---------------------------------------------------------------------------
 # Public API — state transitions
 # ---------------------------------------------------------------------------
+
+## Drop the hovered cell if there is one. The signal is what hides the visuals:
+## _refresh_base_x fades the X out on NO_CELL and _refresh_circle hides the ring.
+func _clear_hovered_cell() -> void:
+	if hovered_cell == Pathfinder.NO_CELL:
+		return
+	var old := hovered_cell
+	hovered_cell = Pathfinder.NO_CELL
+	hovered_cell_changed.emit(hovered_cell, old)
+	# The refreshers are called directly, not off the signal — same as
+	# _update_cursor_cell does. In LOCKED they are redundant (the state's own
+	# visibility pass already hid both), but the FTUE path clears the cell
+	# WITHOUT a state change, so nothing else would take the visuals down.
+	_refresh_base_x(old)
+	_refresh_circle()
+
 
 func lock_at(cell: Vector2i) -> void:
 	_locked_cell = cell

@@ -63,6 +63,11 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not enabled:
 		return
+	# The FTUE hasn't taught walking yet. Returns WITHOUT consuming: the click
+	# that is refused here is the same click that dismisses the narrative line
+	# refusing it.
+	if not TutorialGate.allows(TutorialGate.Action.MOVE):
+		return
 	if pathfinder == null or player == null:
 		return
 	if not (event is InputEventMouseButton):

@@ -26,4 +26,16 @@ extends Resource
 ## 0.0 = always floor (strict; never crop — e.g. 960p with base 270 → 3×).
 ## 0.5 = round to nearest (960p → 4×; accepts up to ~9% content crop).
 ## 1.0 - eps = always ceil (most aggressive upscale; most crop).
+##
+## Quantization survey at bias 0.5 (fullscreen visible rows = height/N,
+## target 270 so a texel stays ~1/270 of screen height on every monitor):
+##   1280x720   → N=3 → 240 rows (-11%)
+##   1366x768   → N=3 → 256 rows (-5%)
+##   1600x900   → N=3 → 300 rows (+11%)
+##   1920x1080  → N=4 → 270 rows (0%)
+##   2560x1440  → N=5 → 288 rows (+7%)
+##   3440x1440  → N=5 → 288 rows (+7%, height-limited, ultrawide OK)
+##   3840x2160  → N=8 → 270 rows (0%)
+## Worst is ±11% on the x.33-ratio panels and their neighboring N is
+## strictly worse (900p at N=4 → 225 rows, -17%), so 0.5 stays.
 @export_range(0.0, 0.999, 0.01) var scale_round_bias: float = 0.5

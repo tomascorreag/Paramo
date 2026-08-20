@@ -25,13 +25,18 @@ jobs:
     permissions:
       contents: write # peaceiris pushes the build to the gh-pages branch
     container:
-      image: barichello/godot-ci:4.6.1 # must match Godot version in CLAUDE.md / project.godot
+      # Tag must match the Godot version in CLAUDE.md / project.godot; the digest
+      # pins WHICH build of that tag, since a tag can be repointed at any time.
+      image: barichello/godot-ci:4.6.1@sha256:f7593b4b88a572d976979b699052c67512e91fb4b99bfb43e8f4969a9312e069
     env:
       GODOT_VERSION: "4.6.1"
       EXPORT_DIR: build/web
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # Every third-party action here is pinned to a commit rather than a tag.
+        # This job holds `contents: write`, so a moved tag would be a write path
+        # into this repository.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The godot-ci image ships the matching export templates at /root/...; Godot
       # looks for them under the invoking user's home. Move them into place.
@@ -78,15 +83,25 @@ jobs:
 
       # The export's head_include references music/* static assets that Godot does
       # NOT bundle (the engine bundle + paramo-music.js, which in turn fetches the
-      # song file and the soundfonts). Copy them from docs/music/ into the export
-      # output so the deployed build can load them; drop the dev-only preview page.
+      # song file, the soundfonts and the drum samples). Copy them from docs/music/
+      # into the export output so the deployed build can load them; drop the
+      # dev-only preview page.
       - name: Bundle music assets
         run: |
           mkdir -p "${EXPORT_DIR}/music"
           cp -r docs/music/. "${EXPORT_DIR}/music/"
-          rm -f "${EXPORT_DIR}/music/dev-music.html"
+          rm -f "${EXPORT_DIR}/music/dev-"*.html            # dev-only preview pages
+          rm -f "${EXPORT_DIR}/music/samples/uzu-audition.json"
           test -f "${EXPORT_DIR}/music/paramo-music.js"          # gate: assets present
           test -f "${EXPORT_DIR}/music/ojos_azules.strudel.js"
+          # The soundfonts and drum samples are served from our own origin — the
+          # build fetches nothing from a third party at play time. If these fail
+          # to copy the page still boots and the music still starts, it just goes
+          # progressively silent, so a missing directory has to fail the deploy
+          # rather than wait to be noticed by ear.
+          test -d "${EXPORT_DIR}/music/samples/uzu-drumkit"
+          test -f "${EXPORT_DIR}/music/samples/uzu-drumkit.json"
+          test -f "${EXPORT_DIR}/music/soundfonts/0750_FluidR3_GM_sf2_file.js"
 
       # --- deploy: main -> gh-pages root ------------------------------------------
       # keep_files: true so refreshing the root build does NOT delete the staging/
@@ -95,7 +110,7 @@ jobs:
       # practice every file is overwritten in place.
       - name: Deploy main to root
         if: github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.0.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
@@ -108,7 +123,7 @@ jobs:
       # deploy fully refreshes staging/ while leaving the root build untouched.
       - name: Deploy staging to /staging
         if: github.ref == 'refs/heads/staging'
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.0.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
