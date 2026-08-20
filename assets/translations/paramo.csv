@@ -9,6 +9,11 @@ UI_DISCARD_RUN_Q,discard run and restart?,¿descartar la partida y reiniciar?
 UI_YES,yes,sí
 UI_CANCEL,cancel,cancelar
 UI_RESUME,resume,continuar
+UI_ABOUT,about,acerca de
+UI_ABOUT_SOURCE,source code,código fuente
+UI_ABOUT_LICENCE,mit licence,licencia mit
+UI_ABOUT_NOTICES,third-party licences,licencias de terceros
+UI_BACK,back,volver
 JOURNAL_SEASON_LOG,season log,temporadas
 JOURNAL_KNOWN_BUILDINGS,known buildings,obras conocidas
 JOURNAL_KNOWN_FLORA,known flora,flora conocida
