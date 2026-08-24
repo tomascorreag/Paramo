@@ -65,6 +65,30 @@ func painted_cells() -> Array[Dictionary]:
 	return _painted.duplicate()
 
 
+# Do this traversal's tiles change WALKABILITY, or are they only a picture?
+#
+# It decides what a build or a removal has to do to the pathfinder, and the two
+# answers differ by 18.7 ms — the cost of Pathfinder.rebuild() re-ingesting every
+# layer of every cell:
+#
+#   true   the painted tiles ARE terrain (a bridge deck is ground you stand on),
+#          so the grid must be rebuilt from the layers to see them.
+#   false  the tiles are decorative and listed in TileGrid._DECORATIVE (fences,
+#          ladders); the traversal's whole effect is its occupant claim plus any
+#          traversal edge, both of which are live on the CURRENT grid the moment
+#          they are set. Nothing to re-ingest — the graph only needs announcing,
+#          via Pathfinder.notify_graph_changed().
+#
+# Defaults to TRUE, the SLOW answer, deliberately. The two failure modes are not
+# symmetric: a decorative traversal that forgets to override pays 18.7 ms and is
+# correct, while a terrain-painting one that forgets pays nothing and leaves its
+# deck standing there un-walkable — a bridge you can see and cannot cross. Opt
+# into the fast path per subclass, having checked that its tiles are in
+# TileGrid._DECORATIVE.
+func changes_terrain() -> bool:
+	return true
+
+
 # True iff `cell` is one this traversal considers itself to stand on for the
 # purposes of "can the player remove me without being stranded?". Default:
 # any painted cell. Subclasses override when a cell is a functional part of

@@ -129,6 +129,12 @@ uniform vec3 col_char   : source_color = vec3(0.239, 0.200, 0.200); // P07 #3D33
 // (slot, birth) only, and every cell on the map is pixel-identical — which is
 // exactly what happens if you forget to push it (it defaults to 0).
 // FireBlobColumn sets it from a hash of the cell coord.
+// The world clock, in seconds — replaces the TIME built-in in the wind-gust term
+// (the blob age clock is blob_phase, a CPU accumulator, and was never TIME). It
+// stops under get_tree().paused, so the gust freezes with the rest of the world.
+// Written by the WorldClock autoload; see scripts/systems/world_clock.gd.
+global uniform float world_time;
+
 uniform float cell_seed = 0.0;
 
 // --- CODE-DRIVEN. Editing these on the MATERIAL (fire_blobs.tres) does nothing:
@@ -304,7 +310,7 @@ void vertex() {
 	// drops one _noise (4 hashes) off every covered fragment on the fill-bound web
 	// path — where the per-blob shape carve (fragment(), the r += _noise line) is
 	// the only noise that genuinely has to stay per-fragment.
-	float gust_n = _noise(round(origin / 2.0) * WIND_GUST_SCALE + WIND_GUST_SCROLL * TIME);
+	float gust_n = _noise(round(origin / 2.0) * WIND_GUST_SCALE + WIND_GUST_SCROLL * world_time);
 	v_lean_coeff = wind_lean + wind_gust * gust_n;
 }
 

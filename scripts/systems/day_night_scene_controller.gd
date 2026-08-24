@@ -21,8 +21,6 @@ const _DEFAULT_PROFILE: Resource = preload("res://resources/day_night/default_pr
 ## the scene tree by type.
 const GROUP: StringName = &"day_night_controller"
 
-enum _RainState { IDLE, RAMPING_UP, ACTIVE, RAMPING_DOWN }
-
 @export var profile: DayNightProfile
 @export var canvas_modulate: CanvasModulate
 @export var post_process_rect: ColorRect
@@ -55,6 +53,12 @@ var _last_time: float = -INF
 var _shadow_nodes: Array[Node] = []
 var _shadows_dirty: bool = true
 
+# Last shadow curve samples actually APPLIED to the shadow group. The node loop
+# in _apply_grading is skipped while both are unchanged within epsilon and the
+# node list hasn't changed — see the gate there. -INF forces the first pass.
+var _last_shadow_opacity: float = -INF
+var _last_shadow_length: float = -INF
+
 # Whether the post-process shader is currently doing visible work. When all
 # parameters are at neutral (no grading, no vignette, no tint) we hide the
 # ColorRect entirely so the back-buffer copy + fragment pass don't run.
@@ -68,26 +72,31 @@ const _POST_NEUTRAL_EPSILON: float = 0.001
 # wind_materials is empty.
 var _last_wind_val: float = 0.0
 var _rain_layer: RainLayer
-var _rain_state: int = _RainState.IDLE
-# Real-time seconds spent in the current state (used for ramp progress and as
-# the input to the intensity noise wave).
-var _rain_state_t: float = 0.0
-# In-game time (fractions of a day) spent in the current state. Drives the
-# post-start / post-stop cooldowns and the max-event-duration force-stop, so
-# they pause with the clock and scale with seconds_per_game_day. Initialized
-# to INF so the boot roll out of IDLE isn't blocked by the post-stop cooldown.
-var _rain_state_game_t: float = INF
-# Target the most recent rain event ramped UP to (the "held" intensity).
-var _rain_target: float = 0.0
-# What rain_current was at the moment a ramp began. RAMPING_UP starts from 0
-# (or wherever we already were if rolled mid-fade); RAMPING_DOWN starts from
-# whatever intensity was being held when the stop roll fired.
-var _rain_ramp_from: float = 0.0
-# Smoothed, noise-modulated value pushed to the shader.
-var _rain_current: float = 0.0
+# The rain state machine itself lives in WeatherModel (shared with the
+# headless balance simulator — same logic, one source of truth). This node
+# keeps only the scene-facing duties: clock/pause gating, the debug override,
+# and pushing the published intensity to the RainLayer shader.
+var _weather: WeatherModel = WeatherModel.new()
+# Weather's own RNG stream: the model's roll() draws only from here, so
+# unrelated global randf() consumers (VFX flame layouts, dirt-variant picks)
+# can never perturb when it rains. Randomized per scene load; the simulator
+# instead seeds its own model per run.
+var _rain_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 # Debug-only manual override. >=0 disables the state machine and snaps
 # rain_current to this value. <0 means "no override, run events".
 var _rain_override: float = -1.0
+# Climate-change scale on the rain START probability (never the stop roll —
+# see _roll_weather). 1.0 = the profile as authored; ClimateController lowers
+# it each season. Lives here rather than on DayNightProfile because profiles
+# are shared .tres — mutating one at runtime would leak into the editor and
+# every later run.
+var rain_probability_scale: float = 1.0
+
+
+## Climate hook: scales how often rain STARTS (clamped >= 0). Set by
+## ClimateController at season boundaries; a fresh scene resets it to 1.0.
+func set_rain_probability_scale(scale: float) -> void:
+	rain_probability_scale = maxf(0.0, scale)
 
 
 func _ready() -> void:
@@ -137,6 +146,10 @@ func set_profile(new_profile: DayNightProfile) -> void:
 	profile = new_profile
 	if _time_manager != null:
 		_last_time = -1.0
+		# Different curves may coincidentally sample equal at the swap instant,
+		# but the has-curve booleans can flip — force one full shadow pass.
+		_last_shadow_opacity = -INF
+		_last_shadow_length = -INF
 		_apply_grading(_time_manager.time_of_day)
 
 
@@ -154,11 +167,7 @@ func _resolve_rain_layer() -> void:
 	# path has no pause guard) so the gate shows steady rain iff the roll fired.
 	# The title intro clears this back to dry at the camera snap
 	# (see reset_weather_dry) so gameplay still begins without rain.
-	if _rain_state == _RainState.RAMPING_UP:
-		_rain_current = _rain_target
-		_rain_state = _RainState.ACTIVE
-		_rain_state_t = 0.0
-		_rain_state_game_t = 0.0
+	_weather.snap_active_to_target()
 	if _rain_layer != null:
 		_push_rain_to_shader()
 
@@ -261,9 +270,6 @@ func _apply_grading(t: float) -> void:
 			mat.set_shader_parameter(&"water_intensity", water_val)
 
 	# --- All shadows ---
-	if _shadows_dirty:
-		_shadows_dirty = false
-		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
 	# `t` is identical for every shadow node, so sample the time-driven curves
 	# once here rather than per node (otherwise N redundant Curve binary searches
 	# each frame, scaling with how many plants/structures the player has built).
@@ -274,6 +280,27 @@ func _apply_grading(t: float) -> void:
 		profile.shadow_opacity_curve.sample(t) if has_shadow_opacity else 0.0)
 	var shadow_length_base: float = (
 		profile.shadow_length_curve.sample(t) if has_shadow_length else 0.0)
+	# Skip the whole node loop while both samples sit on a flat curve segment
+	# (opacity is exactly 0 for ~40% of the cycle) and no shadow joined or left
+	# the tree. Epsilons: opacity multiplies an 8-bit alpha, so 0.001 is below
+	# one quantum; length is written as roundf(base * scale), so a 0.1 base
+	# delta can't move the rounded result at scale 1. Skips do NOT update
+	# _last_*, so drift accumulates and eventually passes the gate — no
+	# permanent staleness. Known bounded staleness: a growing frailejon's
+	# shadow_scale meta change re-applies only on the next gate pass — during
+	# flat-opacity night its shadow is hidden anyway, and day curves are sloped
+	# so the gate passes every few frames.
+	var shadows_changed: bool = (
+		absf(shadow_opacity_val - _last_shadow_opacity) > 0.001
+		or absf(shadow_length_base - _last_shadow_length) > 0.1
+	)
+	if not _shadows_dirty and not shadows_changed:
+		return
+	if _shadows_dirty:
+		_shadows_dirty = false
+		_shadow_nodes = get_tree().get_nodes_in_group(&"shadow")
+	_last_shadow_opacity = shadow_opacity_val
+	_last_shadow_length = shadow_length_base
 	for node: Node in _shadow_nodes:
 		var item := node as CanvasItem
 		var mat := item.material as ShaderMaterial
@@ -310,81 +337,40 @@ func _apply_grading(t: float) -> void:
 # -----------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if _rain_layer == null or profile == null:
+	if profile == null:
 		return
 	# Weather pauses with the game clock. Visual ramp continues smoothly if
-	# the user un-pauses mid-fade because _rain_state_t only advances here.
+	# the user un-pauses mid-fade because the model's real clock only advances here.
 	if _time_manager != null and _time_manager.paused:
 		return
 
 	# In-game time tick for cooldowns + max-event-duration. Mirrors how
 	# TimeManager advances time_of_day. Skipping when seconds_per_game_day <= 0
 	# matches TimeManager's own guard (frozen clock = frozen weather timers).
+	# Advances even under the debug override, exactly as before the extraction.
 	if _time_manager != null and _time_manager.seconds_per_game_day > 0.0:
-		_rain_state_game_t += delta * (
-			_time_manager.time_scale / _time_manager.seconds_per_game_day)
+		_weather.advance_game_time(delta * (
+			_time_manager.time_scale / _time_manager.seconds_per_game_day))
 
 	if _rain_override >= 0.0:
-		_rain_current = _rain_override
+		_weather.current = _rain_override
 	else:
-		_evolve_rain(delta)
+		_weather.evolve_real(profile, delta)
 
-	_push_rain_to_shader()
-
-
-func _evolve_rain(delta: float) -> void:
-	_rain_state_t += delta
-	match _rain_state:
-		_RainState.IDLE:
-			_rain_current = 0.0
-		_RainState.RAMPING_UP:
-			var dur: float = maxf(0.01, profile.rain_ramp_up_seconds)
-			var a: float = clampf(_rain_state_t / dur, 0.0, 1.0)
-			_rain_current = lerpf(_rain_ramp_from, _rain_target, a)
-			if a >= 1.0:
-				_rain_state = _RainState.ACTIVE
-				_rain_state_t = 0.0
-				_rain_state_game_t = 0.0
-		_RainState.ACTIVE:
-			# Hold near target with low-amplitude flutter so the visual doesn't
-			# read as frozen at a fixed value.
-			_rain_current = clampf(
-				_rain_target + _sample_intensity_noise(_rain_state_t),
-				0.0, 1.0)
-			# Force a stop if the storm has run past its max in-game duration.
-			# Bypasses the random stop roll so a streak of unlucky rolls can't
-			# pin the player in permanent rain.
-			if profile.rain_max_event_duration > 0.0 \
-					and _rain_state_game_t >= profile.rain_max_event_duration:
-				_stop_rain_event()
-		_RainState.RAMPING_DOWN:
-			var dur: float = maxf(0.01, profile.rain_ramp_down_seconds)
-			var a: float = clampf(_rain_state_t / dur, 0.0, 1.0)
-			_rain_current = lerpf(_rain_ramp_from, 0.0, a)
-			if a >= 1.0:
-				_rain_state = _RainState.IDLE
-				_rain_state_t = 0.0
-				_rain_state_game_t = 0.0
-				_rain_target = 0.0
-
-
-# Layered sin waves (irrational frequency ratio = non-repeating pattern).
-# Cheaper than a noise allocation and visually indistinguishable at this
-# amplitude.
-func _sample_intensity_noise(t: float) -> float:
-	if profile.rain_noise_amplitude <= 0.0:
-		return 0.0
-	var f: float = profile.rain_noise_frequency
-	var s: float = sin(t * TAU * f) * 0.6 + sin(t * TAU * f * 1.71 + 1.3) * 0.4
-	return s * profile.rain_noise_amplitude
+	# Only the PUSH needs a RainLayer. Gating the model step on it (as this
+	# used to) wedges a rolled start in RAMPING_UP forever on a map without
+	# rain visuals — every rain consumer (fire, water, climate) would then
+	# read a permanently-dry world with no diagnostic.
+	if _rain_layer != null:
+		_push_rain_to_shader()
 
 
 func _push_rain_to_shader() -> void:
-	_rain_layer.set_amount(_rain_current)
+	_rain_layer.set_amount(_weather.current)
 	# Sign + magnitude both live in profile.rain_max_angle. Wind has no
 	# direction in the data model — only intensity — so a single signed scalar
 	# on the profile is sufficient.
-	var angle: float = profile.rain_max_angle * _rain_current * _last_wind_val
+	var angle: float = profile.rain_max_angle * _weather.current * _last_wind_val
 	_rain_layer.set_streak_angle(angle)
 
 
@@ -395,40 +381,15 @@ func _on_period_changed(_new: StringName, _old: StringName) -> void:
 # Single-shot version of the period roll used at boot. Only rolls a START
 # from IDLE; never tries to stop existing rain (the scene was just loaded).
 func _roll_rain_start_if_idle() -> void:
-	if _rain_state == _RainState.IDLE:
+	if _weather.state == WeatherModel.State.IDLE:
 		_roll_weather()
 
 
 func _roll_weather() -> void:
-	if profile == null or profile.rain_probability_curve == null:
-		return
 	if _rain_override >= 0.0:
 		return
-	# Don't interrupt a ramp mid-fade. Rolls only matter at the two stable
-	# states (IDLE / ACTIVE); the next period boundary catches the result.
-	if _rain_state != _RainState.IDLE and _rain_state != _RainState.ACTIVE:
-		return
-
-	var t: float = _time_manager.time_of_day
-	var p_curve: float = clampf(profile.rain_probability_curve.sample(t), 0.0, 1.0)
-	var base: float = clampf(profile.rain_base_probability, 0.0, 1.0)
-
-	if _rain_state == _RainState.IDLE:
-		# Post-stop cooldown: a stop that just happened needs a dry buffer
-		# before the next start roll, otherwise the curve makes rain restart
-		# on the very next period boundary.
-		if _rain_state_game_t < profile.rain_post_stop_cooldown:
-			return
-		if randf() < base * p_curve:
-			_start_rain_event()
-	else: # ACTIVE
-		# Post-start cooldown: a fresh storm gets at least this much in-game
-		# time before it's eligible to stop, so a brief unlucky roll doesn't
-		# kill an event seconds after the visuals ramped up.
-		if _rain_state_game_t < profile.rain_post_start_cooldown:
-			return
-		if randf() < base * (1.0 - p_curve):
-			_stop_rain_event()
+	_weather.roll(profile, _time_manager.time_of_day,
+			rain_probability_scale, _rain_rng)
 
 
 ## Force a clean, dry weather state and push it to the shader immediately.
@@ -437,29 +398,9 @@ func _roll_weather() -> void:
 ## pre-title lake shot. Normal rolls resume unthrottled from the next period
 ## boundary (game_t = INF mirrors the boot init, so no post-stop cooldown).
 func reset_weather_dry() -> void:
-	_rain_state = _RainState.IDLE
-	_rain_state_t = 0.0
-	_rain_state_game_t = INF
-	_rain_target = 0.0
-	_rain_ramp_from = 0.0
-	_rain_current = 0.0
+	_weather.reset_dry()
 	if _rain_layer != null:
 		_push_rain_to_shader()
-
-
-func _start_rain_event() -> void:
-	var lo: float = clampf(profile.rain_target_intensity_min, 0.0, 1.0)
-	var hi: float = maxf(lo, clampf(profile.rain_target_intensity_max, 0.0, 1.0))
-	_rain_ramp_from = _rain_current
-	_rain_target = randf_range(lo, hi)
-	_rain_state = _RainState.RAMPING_UP
-	_rain_state_t = 0.0
-
-
-func _stop_rain_event() -> void:
-	_rain_ramp_from = _rain_current
-	_rain_state = _RainState.RAMPING_DOWN
-	_rain_state_t = 0.0
 
 
 # --- Debug overlay API ---
@@ -479,7 +420,7 @@ func clear_rain_override() -> void:
 
 
 func get_rain_current_intensity() -> float:
-	return _rain_current
+	return _weather.current
 
 
 ## Current ambient brightness — the HSV value of the CanvasModulate tint, in

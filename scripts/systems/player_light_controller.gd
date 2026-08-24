@@ -78,6 +78,14 @@ func get_effective_radius_px() -> float:
 	return _BASE_RADIUS_PX * texture_scale
 
 
+## True while the lantern is casting anything at all — set the instant activate()
+## is called and cleared only once the deactivate fade reaches zero. This is the
+## window a "holding the lantern" sprite should be shown for, so it spans the
+## fade rather than snapping at the day/night threshold.
+func is_lit() -> bool:
+	return enabled
+
+
 ## Current (already-lerped) energy. Useful for external systems that want to
 ## react to the activate/deactivate fade without duplicating the curve sample.
 func get_current_energy() -> float:

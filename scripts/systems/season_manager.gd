@@ -19,32 +19,38 @@ extends Node
 ## is therefore Dry-Wet-Dry-Wet (4 equal seasons per year).
 ##
 ## Lifecycle: IDLE until start_run() (the autoload is alive on the title screen
-## too and must not tick there). Run begins ACTIVE in season 0. Planning sits
-## BETWEEN seasons: season_ended -> PLANNING (clock paused) -> begin_next_season()
-## -> next season_started. The final season ending completes the run.
+## too and must not tick there). Run begins ACTIVE in season 0. Seasons roll
+## STRAIGHT into one another — season_ended is immediately followed by the next
+## season_started, with the clock never stopping. The final season ending
+## completes the run.
 ##
-## NOTE (spine scope): planning currently pauses only TimeManager (halts the day
-## clock). Full get_tree().paused + walk-to-station gating arrives with the
-## PlanningPhaseScreen in a later step; method/signal calls work regardless.
+## NOTE (removed 2026-08-09): there was a PLANNING phase between seasons that
+## paused TimeManager and waited for a begin_next_season() call. Nothing in the
+## game ever made that call — the PlanningPhaseScreen it was waiting on was never
+## built — so the run deadlocked at the first season boundary with the clock
+## frozen at midnight and every ACTIVE-gated system inert. Reinstating it means
+## reinstating the screen in the same change, not before it.
 
 signal season_started(index: int, profile: SeasonProfile)
+## Emitted before the next season starts (or before the run completes, on the
+## final season). This is the only "between seasons" moment there is now that
+## planning is gone — anything that used to hang off planning_phase_entered
+## hangs off this.
 signal season_ended(index: int, profile: SeasonProfile)
-signal planning_phase_entered(next_index: int)
-signal planning_phase_exited(index: int)
 signal year_changed(year: int)
 ## reason: &"survived" | &"laguna_dead" | &"funding_zero" | ...
 signal run_completed(reason: StringName)
 
-enum Phase { IDLE, ACTIVE, PLANNING, RUN_OVER }
+enum Phase { IDLE, ACTIVE, RUN_OVER }
 
 # --- Configuration (tunable; migrate to a RunConfig .tres in the balance pass) ---
 
-## Length of a full year in day/night cycles. The bimodal calendar splits this
-## evenly across `season_cycle`, so each season runs `days_per_year /
-## season_cycle.size()` days. N=16 -> 4 days per season for the default 4-season
-## (Dry-Wet-Dry-Wet) year. Run length = days_per_season * seconds_per_game_day *
-## season_count.
-@export var days_per_year: int = 16
+## Length of a full year in day/night cycles. The calendar splits this evenly
+## across `season_cycle`, so each season runs `days_per_year /
+## season_cycle.size()` days. N=24 -> 4 days per season for the default
+## 6-season (Wet-Dry x3) year. Run length = days_per_season *
+## seconds_per_game_day * season_count.
+@export var days_per_year: int = 24
 
 ## Day/night cycles per season — derived from days_per_year and the number of
 ## seasons in a year (= season_cycle length). Read-only; set days_per_year to
@@ -54,13 +60,31 @@ var days_per_season: int:
 	get:
 		return maxi(1, days_per_year / maxi(1, season_cycle.size()))
 
-## Total seasons in a run. 5 per the min-loop plan (Dry-Wet-Dry-Wet-Dry).
-@export var season_count: int = 5
+## Total seasons in a run. Equal to season_cycle.size(), so a run never
+## crosses a year boundary and year stays 1.
+@export var season_count: int = 6
 
-## Water the run starts with. Until generation/laguna seep feed the ledger,
-## this is the whole pool the player spends on firefighting. Migrate to a
-## RunConfig .tres in the balance pass.
-@export var starting_water: float = 100.0
+## Water the run starts with. Firefighting costs 1 per cell doused and WaterCycle
+## refills continuously (fast while it rains), so this is the buffer that decides
+## how big a fire you can survive before the weather has to bail you out — small
+## on purpose. Migrate to a RunConfig .tres in the balance pass.
+@export var starting_water: float = 10.0
+
+## Tokens the run starts with. Everything placeable begins LOCKED (10-30 to
+## unlock a type — see UnlockState.unlock_costs — then 1 per tile placed).
+##
+## Was 10 — deliberately half an unlock, so day one bought nothing and the
+## opening move was to survive a day of visitors first. The FTUE overrides that
+## call (2026-08-13): its last step is "buy a tool, then build it", and a player
+## who cannot complete the tutorial on day one has no smooth first day.
+##
+## 15 buys the cheap end of the shop (a ladder or a frailejon at 10) and leaves
+## 5 tiles of placement, but NOT a bridge or a fence — so the opening choice is
+## still a real one, and the expensive verbs still cost a day of visitors.
+## Roughly one perfect day's income (6 visitors x 2 tokens) handed over at
+## spawn: rerun sim/balance_sim.gd against the old arm before treating any
+## downstream number as unchanged. Migrate to a RunConfig .tres later.
+@export var starting_tokens: float = 15.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season
@@ -74,7 +98,6 @@ var season_index: int = 0
 var year: int = 1
 
 var _day_at_season_start: int = 0
-var _time_paused_before: bool = false
 
 
 func _ready() -> void:
@@ -92,10 +115,10 @@ func start_run() -> void:
 		return
 	ResourceLedger.reset()
 	ResourceLedger.set_amount(&"water", starting_water, &"initial")
+	ResourceLedger.set_amount(&"tokens", starting_tokens, &"initial")
 	season_index = 0
 	year = 1
-	TimeManager.day_count = 0
-	TimeManager.time_of_day = 0.0
+	TimeManager.reset_clock()
 	TimeManager.paused = false
 	_day_at_season_start = 0
 	phase = Phase.ACTIVE
@@ -123,21 +146,16 @@ func seasons_remaining() -> int:
 	return season_count - season_index
 
 
-## Called by the planning UI (or debug) to leave planning and start the next
-## season. No-op outside PLANNING.
-func begin_next_season() -> void:
-	if phase != Phase.PLANNING:
-		return
+## Roll into the next season. Called only from _end_current_season, which has
+## already checked there IS a next season.
+func _begin_next_season() -> void:
 	season_index += 1
 	var new_year: int = (season_index / maxi(1, season_cycle.size())) + 1
 	if new_year != year:
 		year = new_year
 		year_changed.emit(year)
-	phase = Phase.ACTIVE
-	TimeManager.paused = _time_paused_before
 	_day_at_season_start = TimeManager.day_count
 	_apply_profile(current_profile())
-	planning_phase_exited.emit(season_index)
 	season_started.emit(season_index, current_profile())
 
 
@@ -163,11 +181,7 @@ func _end_current_season() -> void:
 	if season_index + 1 >= season_count:
 		end_run(&"survived")
 		return
-	# Enter planning between seasons.
-	phase = Phase.PLANNING
-	_time_paused_before = TimeManager.paused
-	TimeManager.paused = true
-	planning_phase_entered.emit(season_index + 1)
+	_begin_next_season()
 
 
 func _apply_profile(profile: SeasonProfile) -> void:
@@ -184,6 +198,9 @@ func _load_default_cycle_if_empty() -> void:
 	var dry: Resource = load("res://resources/seasons/dry.tres")
 	var wet: Resource = load("res://resources/seasons/wet.tres")
 	if dry != null and wet != null:
-		# Bimodal year: two dry windows (Dec-Feb, Jun-Aug) alternating with two
-		# wet (Mar-May, Sep-Nov). Profiles are reused until DJF/JJA need to differ.
-		season_cycle = [dry, wet, dry, wet]
+		# Wet-first alternation (balance decision 2026-08-06): opening wet keeps
+		# the run's first day from being a map-wide cold-start burn — the whole
+		# map is contiguous fuel at day 1, and sim sweeps showed a dry opening
+		# chars ~45% of it before the player can matter. Departs from the strict
+		# bimodal-calendar framing (which had 2 dry + 2 wet per year).
+		season_cycle = [wet, dry, wet, dry, wet, dry]

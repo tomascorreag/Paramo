@@ -51,6 +51,11 @@ const VALID_DIRS: Array = [Vector2i(0, -1), Vector2i(-1, 0)]
 # layer stack covers the altitudes we want to paint at.
 const MAX_HEIGHT_CUBES: int = 4
 
+# Grid cells a ladder claims, however tall it is: the foot and the landing (see
+# occupied_cells). Named so the per-tile placement price has something to read
+# other than a literal 2.
+const OCCUPIED_CELLS: int = 2
+
 
 @export var origin_cell: Vector2i
 @export var top_cell: Vector2i
@@ -345,6 +350,15 @@ static func find_candidates(
 			continue
 		out.append(nb)
 	return out
+
+
+## LADDER_NE/LADDER_NW are in TileGrid._DECORATIVE: the ladder sprite hangs on
+## the lower floor's cell and that floor must stay walkable. The climb is a
+## Pathfinder traversal EDGE, which is live on the current grid the moment it is
+## registered (and removed the moment it is dropped) — neither needs the grid
+## rebuilt from the layers.
+func changes_terrain() -> bool:
+	return false
 
 
 static func result_name(r: int) -> String:

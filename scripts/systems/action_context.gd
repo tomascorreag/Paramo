@@ -39,6 +39,10 @@ var tile_interaction: TileInteractionController
 var traversal: TraversalPlacementController
 var pathfinder: Pathfinder
 
+# The scene's UnlockState ("unlocks" group), or null. Null means "everything
+# unlocked and free" — bare test scenes don't carry the token economy.
+var unlocks: Node = null
+
 
 ## True iff every service this game currently expects is wired. Actions can
 ## short-circuit `is_available` against this when they don't want to list every

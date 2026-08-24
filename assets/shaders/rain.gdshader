@@ -79,6 +79,13 @@ render_mode blend_premul_alpha;
 // SubViewports in the same frame (so TIME matches) and diffs them across a
 // sweep of uniform sets. Re-run it after touching this file.
 
+// The world clock, in seconds — replaces the TIME built-in so the rain freezes
+// with the rest of the world under get_tree().paused. Written by the WorldClock
+// autoload; see scripts/systems/world_clock.gd. It carries the same 3600 s
+// rollover TIME had, so the cycle math below is unchanged. Never use TIME in a
+// world shader.
+global uniform float world_time;
+
 uniform vec4 rain_color : source_color = vec4(0.75, 0.82, 0.95, 0.6);
 uniform vec4 tint_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 uniform float tint_intensity : hint_range(0.0, 1.0) = 1.0;
@@ -210,7 +217,7 @@ vec4 compute_drop(float col_idx, float cell_row, float h_cp, vec2 world_px,
 	for (int j = 0; j < K_DROPS_PER_CELL; j++) {
 		float jf = float(j);
 		float drop_phase = h_phase + jf / float(K_DROPS_PER_CELL);
-		float t_off = TIME + drop_phase * cycle_period;
+		float t_off = world_time + drop_phase * cycle_period;
 		float cycle_idx_j = floor(t_off / cycle_period);
 		float t_in_cycle_j = mod(t_off, cycle_period);
 		float head_y_world = cell_top + t_in_cycle_j * speed;

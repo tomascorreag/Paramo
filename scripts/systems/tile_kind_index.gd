@@ -21,11 +21,19 @@ extends RefCounted
 #   for cell in cells:
 #       ground_layer.set_cell(cell, src_id, flat_coord)
 #
-# On construction, the index validates both directions against TileSlots:
-#   - a tile_kind in the atlas that isn't a declared TileSlots constant
-#     -> push_warning (typo in the editor's custom data field)
-#   - a TileSlots constant with no painted tile in the atlas
-#     -> push_warning (unpainted slot; index.has() returns false)
+# On construction, the index checks the atlas against TileSlots in ONE
+# direction: a tile_kind in the atlas that isn't a declared TileSlots constant
+# -> push_warning (typo in the editor's custom data field).
+#
+# The opposite direction — "a TileSlots constant with no painted tile here" —
+# is NOT checked, because it cannot be decided from one source. TileSlots is the
+# union of every slot across every biome/structure source, and each source
+# paints a subset by design, so that check warned 257 times on a normal level1
+# run (6 sources x every slot the other 5 own) and could never be made clean.
+# An index that never went quiet was worth nothing as a signal and buried the
+# warnings that do mean something. `index.has()` is the runtime answer to "is
+# this slot on this source"; whether a slot is painted SOMEWHERE belongs to a
+# test over the shipped tileset, not to a per-construction warning.
 #
 # Preconditions:
 #   - The TileSet MUST have a custom data layer named "tile_kind" (String).
@@ -47,6 +55,10 @@ var _name_to_coord: Dictionary[StringName, Vector2i] = {}
 var _name_to_all_coords: Dictionary[StringName, Array] = {}
 var _coord_to_data: Dictionary[Vector2i, TileData] = {}
 var _tile_set: TileSet = null
+# custom-data layer name -> its id on _tile_set, or -1 for "no such layer".
+# `get_attr` is called by name and would otherwise linear-scan the layer list on
+# every call; GrassLadder asks twice per painted grass tile.
+var _layer_id_cache: Dictionary[String, int] = {}
 
 
 func _init(tile_set: TileSet, source_id: int) -> void:
@@ -105,7 +117,11 @@ func get_attr(atlas_coord: Vector2i, layer_name: String) -> Variant:
 		return null
 	if _tile_set == null:
 		return null
-	var layer_id := _find_custom_data_layer(_tile_set, layer_name)
+	var layer_id: int = _layer_id_cache.get(layer_name, -2)
+	if layer_id == -2:
+		# -1 (absent) is cached too, so a miss costs one scan, not one per call.
+		layer_id = _find_custom_data_layer(_tile_set, layer_name)
+		_layer_id_cache[layer_name] = layer_id
 	if layer_id < 0:
 		return null
 	return data.get_custom_data_by_layer_id(layer_id)
@@ -161,31 +177,12 @@ func _scan_atlas(source: TileSetAtlasSource, kind_layer_id: int) -> void:
 # ----------------------------------------------------------------------------
 
 func _validate_against_tile_slots() -> void:
-	var slots_script: Script = load(_TILE_SLOTS_PATH)
-	if slots_script == null:
-		push_error(
-			"TileKindIndex: could not load TileSlots script at %s — skipping validation."
-			% _TILE_SLOTS_PATH
-		)
+	var declared_names := _declared_slot_names()
+	if declared_names.is_empty():
 		return
 
-	var declared_names: Dictionary[StringName, bool] = {}
-	var constants: Dictionary = slots_script.get_script_constant_map()
-	for const_name in constants:
-		var const_value: Variant = constants[const_name]
-		if const_value is StringName:
-			declared_names[const_value as StringName] = true
-
-	# Declared but unpainted: slot names in TileSlots with no matching tile.
-	for declared in declared_names:
-		if not _name_to_coord.has(declared):
-			push_warning(
-				"TileKindIndex: slot '%s' declared in TileSlots but not painted on source %d. "
-				% [declared, _source_id]
-				+ "index.has() will return false; index.coord() returns (-1, -1)."
-			)
-
-	# Painted but undeclared: tile_kind strings in the atlas with no TileSlots entry.
+	# Painted but undeclared: tile_kind strings in the atlas with no TileSlots
+	# entry. The reverse direction is deliberately absent — see the header.
 	for found in _name_to_coord:
 		if not declared_names.has(found):
 			push_warning(
@@ -193,6 +190,32 @@ func _validate_against_tile_slots() -> void:
 				% [found, _source_id]
 				+ "Add a const to TileSlots or fix the custom data value."
 			)
+
+
+# Every StringName constant on TileSlots, as a set. Reflected once per process,
+# not once per index: the answer is the same for all six sources, and every
+# TileKindIndex used to `load()` the script and walk its constant map again.
+static var _declared_cache: Dictionary[StringName, bool] = {}
+static var _declared_loaded: bool = false
+
+
+static func _declared_slot_names() -> Dictionary[StringName, bool]:
+	if _declared_loaded:
+		return _declared_cache
+	_declared_loaded = true
+	var slots_script: Script = load(_TILE_SLOTS_PATH)
+	if slots_script == null:
+		push_error(
+			"TileKindIndex: could not load TileSlots script at %s — skipping validation."
+			% _TILE_SLOTS_PATH
+		)
+		return _declared_cache
+	var constants: Dictionary = slots_script.get_script_constant_map()
+	for const_name in constants:
+		var const_value: Variant = constants[const_name]
+		if const_value is StringName:
+			_declared_cache[const_value as StringName] = true
+	return _declared_cache
 
 
 # ----------------------------------------------------------------------------

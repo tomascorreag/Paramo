@@ -26,14 +26,18 @@ const _OPEN_DURATION: float = 0.20
 const _OPEN_STAGGER: float = 0.030
 const _CLOSE_DURATION: float = 0.10
 
-## Wheel sprite is 64×64; rotate around its center.
-const _WHEEL_PIVOT: Vector2 = Vector2(32, 32)
+## Modals the corner buttons drive, wired by NodePath on the HUD instance in
+## gameplay_base.tscn (../PauseMenu, ../FieldJournal). Direct typed refs — no group
+## traversal or stringly-typed dispatch. Null-guarded so a standalone hud.tscn
+## (no siblings) doesn't crash.
+@export var pause_menu: PauseMenu
+@export var field_journal: FieldJournal
 
 @onready var _slot: Button = %EquippedSlot
 @onready var _slot_icon: TextureRect = %EquippedIcon
 @onready var _menu_root: Control = %ItemMenu
-@onready var _season_wheel: TextureRect = %SeasonWheel
 @onready var _pause_button: Button = %PauseButton
+@onready var _journal_button: Button = %JournalButton
 var _pause_bars: Array[NinePatchRect] = []
 
 var _items: Array[Dictionary] = []
@@ -49,6 +53,7 @@ func _ready() -> void:
 	# visible over the pre-title lake shot.
 	add_to_group(&"hud")
 	_setup_pause_button()
+	_setup_journal_button()
 	_items = _placeholder_items()
 	_slot.pressed.connect(_on_slot_pressed)
 	_build_menu()
@@ -56,26 +61,6 @@ func _ready() -> void:
 	_menu_root.modulate.a = 0.0
 	if not _items.is_empty():
 		set_equipped(_items[0]["id"])
-
-	_season_wheel.pivot_offset = _WHEEL_PIVOT
-
-
-# The season wheel turns continuously with the season clock: a half-turn (180°)
-# per season, so the current season's weather sits at the top exactly when that
-# season begins (dry → sun up at 0°, wet → rain up at 180°) and it keeps turning
-# one direction across the run. (day_count + time_of_day) is a continuous,
-# monotonic season clock: it advances smoothly, wraps cleanly (time_of_day 1→0
-# the same frame day_count +1), and freezes when the clock is paused (planning /
-# run over), so the wheel holds between seasons instead of only moving at
-# boundaries. Tied to season length, so it's slow at normal speed (a season is
-# many minutes) and clearest under fast-forward.
-func _process(_delta: float) -> void:
-	if SeasonManager.phase == SeasonManager.Phase.IDLE:
-		_season_wheel.rotation = 0.0
-		return
-	var dps: float = maxf(1.0, float(SeasonManager.days_per_season))
-	var seasons_elapsed: float = (TimeManager.day_count + TimeManager.time_of_day) / dps
-	_season_wheel.rotation = deg_to_rad(seasons_elapsed * 180.0)
 
 
 ## Replace the placeholder roster. Each entry must contain `id: StringName`
@@ -118,13 +103,31 @@ func _setup_pause_button() -> void:
 	_pause_button.mouse_entered.connect(_tint_pause_bars.bind(Palette.ACCENT))
 	_pause_button.mouse_exited.connect(_tint_pause_bars.bind(Palette.TEXT))
 	_pause_button.pressed.connect(func() -> void:
-		get_tree().call_group(&"pause_menu", &"toggle")
+		if pause_menu != null:
+			pause_menu.toggle()
 	)
 
 
 func _tint_pause_bars(c: Color) -> void:
 	for bar in _pause_bars:
 		bar.self_modulate = c
+
+
+func _setup_journal_button() -> void:
+	# Frameless, mirroring the pause button; the journal glyph is the icon sprite
+	# (pause uses two drawn bars). Opens the FieldJournal (bottom-right, left of pause).
+	var empty := StyleBoxEmpty.new()
+	for state: StringName in [&"normal", &"hover", &"pressed", &"focus"]:
+		_journal_button.add_theme_stylebox_override(state, empty)
+	var icon := PixelUI.make_icon_fill(preload("res://assets/sprites/UX/icons/journal.tres"))
+	icon.self_modulate = Palette.TEXT
+	_journal_button.add_child(icon)
+	_journal_button.mouse_entered.connect(func() -> void: icon.self_modulate = Palette.ACCENT)
+	_journal_button.mouse_exited.connect(func() -> void: icon.self_modulate = Palette.TEXT)
+	_journal_button.pressed.connect(func() -> void:
+		if field_journal != null:
+			field_journal.toggle()
+	)
 
 
 func _on_slot_pressed() -> void:
@@ -264,5 +267,6 @@ func _placeholder_items() -> Array[Dictionary]:
 		{ "id": &"pickaxe", "icon": preload("res://assets/sprites/UX/icons/pickaxe.tres") },
 		{ "id": &"ladder", "icon": preload("res://assets/sprites/UX/icons/ladder.tres") },
 		{ "id": &"bridge", "icon": preload("res://assets/sprites/UX/icons/bridge.tres") },
+		{ "id": &"fence", "icon": preload("res://assets/sprites/UX/icons/fence.tres") },
 		{ "id": &"inspect", "icon": preload("res://assets/sprites/UX/icons/inspect.tres") },
 	]

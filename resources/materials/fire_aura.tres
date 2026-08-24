@@ -1,12 +1,13 @@
-[gd_resource type="ShaderMaterial" format=3]
+[gd_resource type="ShaderMaterial" format=3 uid="uid://b7poufbrdrajf"]
 
-[ext_resource type="Shader" path="res://assets/shaders/fire_aura.gdshader" id="1_fire_aura"]
+[ext_resource type="Shader" uid="uid://35pfikyfpav4" path="res://assets/shaders/fire_aura.gdshader" id="1_fire_aura"]
 
 [resource]
 shader = ExtResource("1_fire_aura")
 shader_parameter/aspect = 1.777
+shader_parameter/texel = Vector2(0, 0)
 shader_parameter/color_lo = Color(0.70980394, 0.34901962, 0.27058825, 1)
-shader_parameter/color_hi = Color(0.99215686, 0.81960785, 0.4745098, 1)
-shader_parameter/strength = 1.15
-shader_parameter/min_thickness = 0.05
-shader_parameter/max_thickness = 0.3
+shader_parameter/color_hi = Color(0.92156863, 0.5882353, 0.38039216, 1)
+shader_parameter/strength = 0.7
+shader_parameter/min_thickness = 0.04
+shader_parameter/max_thickness = 0.18

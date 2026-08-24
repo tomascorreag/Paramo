@@ -25,6 +25,8 @@ const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/ac
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
 const _ACTION_BUILD_LADDER: GDScript = preload("res://scripts/systems/actions/action_build_ladder.gd")
 const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/action_remove_ladder.gd")
+const _ACTION_BUILD_FENCE: GDScript = preload("res://scripts/systems/actions/action_build_fence.gd")
+const _ACTION_REMOVE_FENCE: GDScript = preload("res://scripts/systems/actions/action_remove_fence.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
 const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
 const _ACTION_IGNITE_FIRE: GDScript = preload("res://scripts/systems/actions/action_ignite_fire.gd")
@@ -96,8 +98,10 @@ func _ready() -> void:
 	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
 	_registry.register(_ACTION_BUILD_BRIDGE.new())
 	_registry.register(_ACTION_BUILD_LADDER.new())
+	_registry.register(_ACTION_BUILD_FENCE.new())
 	_registry.register(_ACTION_REMOVE_BRIDGE.new())
 	_registry.register(_ACTION_REMOVE_LADDER.new())
+	_registry.register(_ACTION_REMOVE_FENCE.new())
 	_registry.register(_ACTION_REMOVE_ROCK.new())
 	_registry.register(_ACTION_EXTINGUISH_FIRE.new())
 	# Debug-only (self-gates on Debug.enabled); registered unconditionally so the
@@ -144,6 +148,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# The action menu is the door to every placement, so gating it here is the
+	# whole of "no building before the FTUE's build step". Below the brake above
+	# on purpose: stopping a walk is part of the movement the FTUE has already
+	# taught by then. Not consumed, for the same reason as click-to-move.
+	if not TutorialGate.allows(TutorialGate.Action.BUILD):
+		return
+
 	var global_pos := _event_global_position(mb)
 	# Resolve the cell under the cursor with the general interaction rule: the
 	# topmost cell that is walkable OR has an available action — so water /
@@ -162,7 +173,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	var items := _assemble_menu_items(actions)
+	var items := _assemble_menu_items(actions, ctx)
 
 	_pending_cell = cell
 	var world_pos := pathfinder.cell_to_world(cell)
@@ -233,16 +244,33 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.tile_interaction = self
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
+	ctx.unlocks = _unlocks_node()
 	# Cached BFS from the player's cell — lets is_offerable answer "can the player
 	# reach a cell to act from?" without a per-action flood fill.
 	ctx.reachable = pathfinder.reachable_from(player.current_cell)
 	return ctx
 
 
+# The scene's UnlockState, resolved lazily by group (it sits beside this
+# controller in gameplay_base but _ready order is not guaranteed). Null in
+# scenes without the token economy — actions treat that as all-unlocked.
+var _unlocks: Node = null
+
+func _unlocks_node() -> Node:
+	if _unlocks == null or not is_instance_valid(_unlocks):
+		_unlocks = get_tree().get_first_node_in_group(&"unlocks")
+	return _unlocks
+
+
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
 # groups (group != &""). Group order follows registration order; within a
 # group, actions also keep registration order.
-func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
+#
+# Each entry carries "enabled" (from TileAction.is_enabled) so the wheel can dim
+# an action the player can't currently pay for rather than hiding it. A group
+# wrapper is enabled if ANY child is — dimming a submenu whose contents are
+# usable would hide working actions behind a dead-looking icon.
+func _assemble_menu_items(actions: Array[TileAction], ctx: ActionContext) -> Array[Dictionary]:
 	var top: Array[Dictionary] = []
 	var groups: Dictionary = {}            # StringName -> Array[Dictionary]
 	var group_order: Array[StringName] = []
@@ -250,6 +278,7 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 		var entry := {
 			"id": String(a.id),
 			"icon": a.icon,
+			"enabled": a.is_enabled(ctx),
 		}
 		if a.group == &"":
 			top.append(entry)
@@ -261,9 +290,15 @@ func _assemble_menu_items(actions: Array[TileAction]) -> Array[Dictionary]:
 
 	for group_id in group_order:
 		var submenu: Array = groups[group_id]
+		var any_enabled: bool = false
+		for entry: Dictionary in submenu:
+			if entry.get("enabled", true):
+				any_enabled = true
+				break
 		top.append({
 			"id": _GROUP_ID_PREFIX + String(group_id),
 			"icon": _GROUP_ICONS.get(group_id),
+			"enabled": any_enabled,
 			"submenu": submenu,
 		})
 	return top
@@ -309,6 +344,12 @@ func _on_item_selected(id: String) -> void:
 	if not action.is_offerable(ctx):
 		_deny(_pending_cell)
 		return
+	# Affordability is re-checked separately: the wheel dims an unaffordable
+	# action, but that snapshot is taken when the menu opens, and the balance can
+	# move before the click lands.
+	if not action.is_enabled(ctx):
+		_deny(_pending_cell)
+		return
 	# Already standing next to the target -> act immediately (unchanged UX).
 	if action.is_available(ctx):
 		action.execute(ctx)
@@ -352,7 +393,10 @@ func _process(_delta: float) -> void:
 	var target := _pending_target
 	_pending_action = null  # clear first so unlock/close guards see no pending
 	var ctx := _build_context(target)
-	if action.is_available(ctx):
+	# is_enabled as well as is_available: the walk takes real time, and a costed
+	# action the player could afford when they clicked may be unaffordable by the
+	# time they arrive.
+	if action.is_available(ctx) and action.is_enabled(ctx):
 		action.execute(ctx)
 		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
 		# for plant/remove it clears the walk marker.
@@ -402,6 +446,14 @@ func _deny(cell: Vector2i) -> void:
 # ---------------------------------------------------------------------------
 
 func plant_frailejon(cell: Vector2i) -> void:
+	# Charge at commit — 1 token AND 1 water, one cell (see UnlockState:
+	# planting is the only placement that spends the reserve). Instancing never
+	# fails after this point (no validate step — _applies already vetted the
+	# cell), so no refund path is needed.
+	var unlocks := _unlocks_node()
+	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
+		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
+			return
 	var frailejon: Frailejon = _frailejon_scene.instantiate()
 	frailejon.cell = cell
 
@@ -441,12 +493,18 @@ func remove_rock(cell: Vector2i) -> void:
 	var node := grid.occupant_at(cell) as Rock
 	if node == null:
 		return
-	# Rock clears its occupant claim in _exit_tree. queue_free defers to end
-	# of frame — rebuild() now would still see the stale occupant. Clear the
-	# claim eagerly so the rebuild reads the post-removal world.
+	# Rock clears its occupant claim in _exit_tree, and queue_free defers that to
+	# the end of the frame — so clear it eagerly, or every query until then still
+	# sees the rock.
 	grid.clear_occupant(cell, node)
 	node.queue_free()
-	pathfinder.rebuild()
+	# ANNOUNCE, don't rebuild. A rock blocks purely through blocks_movement() on
+	# its occupant claim; it paints no terrain, so there is nothing for a rebuild
+	# to re-ingest and it would spend 18.7 ms reconstructing an identical grid.
+	# clear_occupant already bumped TileGrid.structure_version, so the
+	# pathfinder's resolved-edge cache drops itself; the emit is what refreshes
+	# the reachability the action menu and UXOverlay read.
+	pathfinder.notify_graph_changed()
 
 
 func begin_traversal(origin: Vector2i, kind: StringName) -> void:

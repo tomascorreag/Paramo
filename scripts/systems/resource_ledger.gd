@@ -13,9 +13,18 @@ extends Node
 ## without any system having to be retrofitted — the data is captured as it
 ## happens, not reconstructed.
 ##
-## Why a single accountant (design compass): continuous, untracked trickles
+## Why a single accountant (design compass): continuous, UNTRACKED trickles
 ## invite per-second optimization and erode the "slow, asymmetric" rhetoric.
-## Routing everything here keeps generation season-quantized and auditable.
+## Routing everything here keeps generation auditable.
+##
+## The original stance was that generation must also be season-QUANTIZED. That
+## has been relaxed for water: WaterCycle accrues continuously, scaled by live
+## rain intensity, because watching the reserve fill while it rains is the whole
+## point of the mechanic and a lump sum at the season boundary cannot deliver it.
+## The optimization worry doesn't apply to this source — the player has no lever
+## on the weather, so there is nothing to optimize against beyond waiting, and
+## waiting is what the season clock already charges for. A source that the player
+## CAN steer (frailejon yield, laguna seep) should still be season-quantized.
 
 ## Emitted on every balance change. delta is signed (negative = spend).
 signal resource_changed(id: StringName, value: float, delta: float)

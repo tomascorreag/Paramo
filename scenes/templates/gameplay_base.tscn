@@ -35,6 +35,14 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/pause_menu.tscn" id="33_pause"]
 [ext_resource type="Script" path="res://scripts/vfx/fire_aura_overlay.gd" id="34_aura_scr"]
 [ext_resource type="Material" path="res://resources/materials/fire_aura.tres" id="35_aura_mat"]
+[ext_resource type="PackedScene" path="res://scenes/ui/field_journal.tscn" id="36_journal"]
+[ext_resource type="Script" path="res://scripts/systems/water_cycle.gd" id="37_water"]
+[ext_resource type="Script" path="res://scripts/systems/climate_controller.gd" id="38_climate"]
+[ext_resource type="Script" path="res://scripts/systems/regrowth_manager.gd" id="39_regrowth"]
+[ext_resource type="Script" path="res://scripts/systems/visitor_flow.gd" id="40_visitors"]
+[ext_resource type="Script" path="res://scripts/systems/unlock_state.gd" id="41_unlocks"]
+[ext_resource type="Script" uid="uid://bt42lm88iefif" path="res://scripts/systems/visitor_spawner.gd" id="42_vspawn"]
+[ext_resource type="Script" path="res://scripts/ui/tutorial_controller.gd" id="43_tutorial"]
 
 [sub_resource type="ShaderMaterial" id="SubResource_pp_mat"]
 shader = ExtResource("13_ppshd")
@@ -135,7 +143,6 @@ rendering_quadrant_size = 32
 metadata/altitude = 12
 
 [node name="Player" parent="World" unique_id=119520760 instance=ExtResource("2_player")]
-up_direction = Vector2(1, 0)
 
 [node name="VFXContainer" type="Node2D" parent="World" unique_id=1948391821 groups=["vfx_container"]]
 y_sort_enabled = true
@@ -219,6 +226,25 @@ background_rect = NodePath("../BackgroundLayer/BG")
 wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
 water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
 
+[node name="WaterCycle" type="Node" parent="." unique_id=480862932]
+script = ExtResource("37_water")
+
+[node name="ClimateController" type="Node" parent="." unique_id=480862933]
+script = ExtResource("38_climate")
+
+[node name="RegrowthManager" type="Node" parent="." unique_id=480862934]
+script = ExtResource("39_regrowth")
+
+[node name="VisitorFlow" type="Node" parent="." unique_id=480862935]
+script = ExtResource("40_visitors")
+
+[node name="UnlockState" type="Node" parent="." unique_id=480862936]
+script = ExtResource("41_unlocks")
+
+[node name="VisitorSpawner" type="Node" parent="." unique_id=480862937 node_paths=PackedStringArray("entity_parent")]
+script = ExtResource("42_vspawn")
+entity_parent = NodePath("../World")
+
 [node name="PostProcessLayer" type="CanvasLayer" parent="." unique_id=156444878]
 layer = 100
 
@@ -262,7 +288,9 @@ mouse_filter = 2
 color = Color(0, 0, 0, 0)
 script = ExtResource("34_aura_scr")
 
-[node name="HUD" parent="." instance=ExtResource("32_hud")]
+[node name="HUD" parent="." node_paths=PackedStringArray("pause_menu", "field_journal") instance=ExtResource("32_hud")]
+pause_menu = NodePath("../PauseMenu")
+field_journal = NodePath("../FieldJournal")
 
 [node name="TitleIntro" parent="." unique_id=924306497 instance=ExtResource("30_titleintro")]
 color_a = Color(0.078431375, 0.13725491, 0.22745098, 1)
@@ -272,9 +300,18 @@ flash_duration = 0.1
 anim_fps = 12.0
 pan_offset_px = 450.0
 start_delay = 2.0
-day_time_of_day = 0.4
+day_time_of_day = 0.29
 curtain_fade_in = 4.0
 title_fade_in_delay = 3.5
 hold_duration = 3.0
 
 [node name="PauseMenu" parent="." instance=ExtResource("33_pause")]
+
+[node name="FieldJournal" parent="." instance=ExtResource("36_journal")]
+
+; FTUE hint strip. Empty node — the whole UI is built in code from the step
+; table in tutorial_controller.gd. Its `layer` is set in _ready (UILayers.TUTORIAL),
+; not authored, because nothing here is scene-authored. Uncheck `enabled` on a
+; map to ship it without the tutorial.
+[node name="Tutorial" type="CanvasLayer" parent="."]
+script = ExtResource("43_tutorial")

@@ -73,6 +73,12 @@ var _reachable_anchor: Vector2i = Pathfinder.NO_CELL
 var _base_x_tween: Tween
 var _denied_tween: Tween
 
+# Hover resolution cache — see _update_cursor_cell. The Vector2.INF mouse
+# sentinel means "invalid, must re-resolve" (set by _invalidate_hover_cache).
+var _hover_mouse: Vector2 = Vector2.INF
+var _hover_xform: Transform2D
+var _hover_player_cell: Vector2i = Pathfinder.NO_CELL
+
 
 func _enter_tree() -> void:
 	add_to_group(GROUP_NAME)
@@ -96,13 +102,18 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# No reticle before the FTUE has taught walking. The cursor's whole job is to
+	# say "this cell is a destination", and during the opening narrative it isn't
+	# one — a reticle there advertises a verb the game is refusing. Cleared the
+	# same way LOCKED clears it, rather than by entering LOCKED, which would also
+	# plant the locked X and square on a cell.
+	if not TutorialGate.allows(TutorialGate.Action.MOVE):
+		_clear_hovered_cell()
+		return
 	match _state:
 		State.LOCKED:
 			# Mouse moves freely (to pick menu items) but no in-world cursor.
-			if hovered_cell != Pathfinder.NO_CELL:
-				var old := hovered_cell
-				hovered_cell = Pathfinder.NO_CELL
-				hovered_cell_changed.emit(hovered_cell, old)
+			_clear_hovered_cell()
 		State.HOVER, State.PLACEMENT:
 			_update_cursor_cell()
 			if _state == State.PLACEMENT:
@@ -114,9 +125,26 @@ func _process(_delta: float) -> void:
 # Public API — state transitions
 # ---------------------------------------------------------------------------
 
+## Drop the hovered cell if there is one. The signal is what hides the visuals:
+## _refresh_base_x fades the X out on NO_CELL and _refresh_circle hides the ring.
+func _clear_hovered_cell() -> void:
+	if hovered_cell == Pathfinder.NO_CELL:
+		return
+	var old := hovered_cell
+	hovered_cell = Pathfinder.NO_CELL
+	hovered_cell_changed.emit(hovered_cell, old)
+	# The refreshers are called directly, not off the signal — same as
+	# _update_cursor_cell does. In LOCKED they are redundant (the state's own
+	# visibility pass already hid both), but the FTUE path clears the cell
+	# WITHOUT a state change, so nothing else would take the visuals down.
+	_refresh_base_x(old)
+	_refresh_circle()
+
+
 func lock_at(cell: Vector2i) -> void:
 	_locked_cell = cell
 	_state = State.LOCKED
+	_invalidate_hover_cache()
 	_apply_state_visibility()
 
 
@@ -127,6 +155,9 @@ func unlock() -> void:
 		return
 	_state = State.HOVER
 	_locked_cell = Pathfinder.NO_CELL
+	# The mouse may not have moved since lock_at, but the accept predicate is
+	# state-dependent — force the next _process to re-resolve.
+	_invalidate_hover_cache()
 	_apply_state_visibility()
 
 
@@ -143,6 +174,7 @@ func enter_placement_mode(
 	_candidate_cells = candidates.duplicate()
 	_is_valid_endpoint = is_valid_endpoint
 	_state = State.PLACEMENT
+	_invalidate_hover_cache()
 	_rebuild_candidate_sprites()
 	_apply_state_visibility()
 
@@ -175,6 +207,7 @@ func exit_placement_mode() -> void:
 	_locked_cell = Pathfinder.NO_CELL
 	_candidate_cells.clear()
 	_is_valid_endpoint = Callable()
+	_invalidate_hover_cache()
 	_clear_candidate_sprites()
 	_apply_state_visibility()
 
@@ -184,6 +217,32 @@ func exit_placement_mode() -> void:
 # ---------------------------------------------------------------------------
 
 func _update_cursor_cell() -> void:
+	# resolve_click sweeps altitude × layer per call (and in HOVER runs the
+	# interaction accept predicate, which scans the action registry on
+	# non-walkable candidates), so skip it while nothing that can change the
+	# answer has moved. The camera follows the player, so a still screen mouse
+	# is NOT a still world mouse — comparing the canvas transform catches every
+	# camera-motion source (follow smoothing, texel snap, free camera). The
+	# player cell is part of the key because proximity feeds the accept
+	# predicate (and the free camera decouples player from camera). At rest the
+	# snapped transform is bit-stable, so equality is a safe skip test — a
+	# spurious mismatch merely re-resolves, never goes stale.
+	#
+	# Availability drift under a fully static key (e.g. a fire igniting on the
+	# hovered cell) already didn't repaint the reticle before this cache —
+	# _refresh_circle only runs on hovered-cell CHANGE — so nothing degrades:
+	# fires ignite only on walkable grass, which can't flip the resolution, and
+	# adjacency changes arrive via player.current_cell, which is in the key.
+	var viewport := get_viewport()
+	var mouse := viewport.get_mouse_position()
+	var xform := viewport.get_canvas_transform()
+	var pcell := player.current_cell if player != null else Pathfinder.NO_CELL
+	if mouse == _hover_mouse and xform == _hover_xform and pcell == _hover_player_cell:
+		return
+	_hover_mouse = mouse
+	_hover_xform = xform
+	_hover_player_cell = pcell
+
 	var cell := _resolve_hovered_cell()
 	if cell != hovered_cell:
 		var old := hovered_cell
@@ -284,8 +343,13 @@ func _refresh_reachable_set() -> void:
 # having to nudge the mouse.
 func _on_graph_changed() -> void:
 	_reachable_anchor = Pathfinder.NO_CELL
+	_invalidate_hover_cache()
 	if _state == State.HOVER and hovered_cell != Pathfinder.NO_CELL:
 		_refresh_circle()
+
+
+func _invalidate_hover_cache() -> void:
+	_hover_mouse = Vector2.INF
 
 
 # ---------------------------------------------------------------------------

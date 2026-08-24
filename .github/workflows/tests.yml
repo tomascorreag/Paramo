@@ -1,0 +1,54 @@
+name: Tests
+
+# The GUT suite on every branch and every PR. deploy.yml runs the same command
+# as a gate before exporting, so main/staging can't ship a red suite; this
+# workflow is what tells you BEFORE you open the PR.
+
+on:
+  push:
+    branches-ignore: [gh-pages]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gut:
+    runs-on: ubuntu-24.04
+    # This workflow runs on `pull_request`, so a fork's code executes here.
+    # GitHub already forces a read-only token for fork PRs, but spelling it out
+    # means the guarantee comes from this file rather than from a repo setting
+    # someone can change.
+    permissions:
+      contents: read
+    container:
+      # Tag must match the Godot version in CLAUDE.md / project.godot; the digest
+      # pins WHICH build of that tag, since a tag can be repointed at any time.
+      image: barichello/godot-ci:4.6.1@sha256:f7593b4b88a572d976979b699052c67512e91fb4b99bfb43e8f4969a9312e069
+    env:
+      GODOT_VERSION: "4.6.1"
+    steps:
+      - name: Checkout
+        # Pinned to a commit, not a tag: a tag is mutable, so `@v7` would let
+        # whoever controls that repo change what runs here.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same template shuffle as deploy.yml — the image ships them under /root
+      # and Godot looks under the invoking user's home.
+      - name: Install export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mv "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" "${HOME}/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+
+      # A fresh checkout has no .godot/ cache, so class_name scripts are unknown
+      # to a headless run until the project is imported once. Without this the
+      # suite fails to even parse. First import can emit transient errors.
+      - name: Import resources
+        run: godot --headless --import || true
+
+      # .gutconfig.json sets should_exit, so the runner quits with a non-zero
+      # code on any failure and this step is the gate.
+      - name: Run GUT
+        run: godot --headless --path . -s addons/gut/gut_cmdln.gd

@@ -18,8 +18,15 @@ const FIRE_AURA := 105     ## off-screen-fire edge glow; ABOVE the grade (so the
 const HUD := 110           ## gameplay HUD (season gauge, item slot). Ungraded.
 const TOAST := 120         ## inspect/info messages (was 100)
 const RADIAL_MENU := 130   ## right-click action wheel + dim overlay (was 101)
-const LOADING := 200       ## startup world-gen cover (was 128)
-const TITLE := 210         ## opening cinematic (was 200)
+const JOURNAL := 140       ## field journal modal (season gauge + run info). Pauses the
+                           ## game; below PAUSE so the pause modal can still cover it.
+const TUTORIAL := 150      ## FTUE hint strip + cue outline. ABOVE the journal: one of its
+                           ## steps points AT the open journal's shop page, so it has to
+                           ## draw over it. Below PAUSE.
+const TITLE := 200         ## opening cinematic + language gate (was 210). BELOW
+                           ## LOADING: the gate's opaque curtain is up from frame 0,
+                           ## and the loading UI must stay readable over it.
+const LOADING := 210       ## startup world-gen cover (was 200)
 const PAUSE := 220         ## pause modal — gameplay overlay ABOVE the startup loading/title
                            ## covers (only shown once those are gone), below debug
 const DEBUG := 250         ## dev panel — always on top (was 100)

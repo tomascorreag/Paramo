@@ -50,10 +50,13 @@ logs/
 godot.log
 *.stackdump
 
-# Local Claude state
+# Raw audio libraries (Kenney packs etc). Only the clips actually used ship,
+# copied into assets/audio/.
+assets/audio_all/
+
+# Local Claude state. CLAUDE.md itself is TRACKED — it's the repo's contributor
+# guidance, not local state; only the session/settings dir is private.
 .claude/
-CLAUDE.md
-TILE_SYSTEM_REWRITE.md
 
 # Secrets (defensive — none currently exist in repo)
 .env
@@ -62,3 +65,10 @@ TILE_SYSTEM_REWRITE.md
 *.key
 secrets.*
 credentials.*
+
+# Balance-simulator CSV output (scripts/tools/sim/balance_sim.gd --out)
+sim_out/
+
+# Preview-tool renders (--out). Under res://, so Godot would otherwise import
+# every capture into the project and litter .import files beside them.
+preview_out/

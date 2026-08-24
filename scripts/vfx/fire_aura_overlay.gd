@@ -5,9 +5,9 @@ extends ColorRect
 # glows warm at the border in the direction of any OFF-SCREEN fire. Sits on a
 # root CanvasLayer above post-process (see gameplay_base.tscn / UILayers.FIRE_AURA).
 #
-# This node is the CPU half of the effect: every frame it finds the live fires,
-# projects each into screen space, and bakes an angular WEIGHT STRIP the shader
-# samples by bearing. The shader itself knows nothing about fires (see
+# This node is the CPU half of the effect: every frame it projects each live
+# fire (from a tree-change-cached list) into screen space and bakes an angular
+# WEIGHT STRIP the shader samples by bearing. The shader itself knows nothing about fires (see
 # fire_aura.gdshader) — all the "which fires, where, how strong" logic is here.
 #
 # The weight of a single fire is  intensity × rise × far:
@@ -72,6 +72,18 @@ var _img: Image
 var _tex: ImageTexture
 var _mat: ShaderMaterial
 
+# Cached fire_vfx member list, refreshed lazily after any tree change so the
+# per-frame path doesn't allocate a fresh Array via get_nodes_in_group
+# (mirrors day_night_scene_controller's shadow-list dirty flag).
+var _fires: Array[Node] = []
+var _fires_dirty: bool = true
+
+# Viewport size / aspect and the DisplayManager autoload (absent in the preview
+# tool's bare viewport), cached so aspect/texel are pushed on change, not per frame.
+var _vp: Vector2 = Vector2.ZERO
+var _aspect: float = 1.0
+var _dm: Node = null
+
 
 func _ready() -> void:
 	# Own a private material so the per-frame aura_tex we bind doesn't leak onto
@@ -88,11 +100,88 @@ func _ready() -> void:
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter(&"aura_tex", _tex)
 
+	# These fire for EVERY node, but the handler is a single bool write.
+	# Deliberately NOT filtered on group membership: BurningCellVFX joins
+	# fire_vfx in its own _ready, which runs AFTER node_added is emitted, so a
+	# membership filter here would miss every real fire. The refresh happens on
+	# the next _process, after the whole add_child call stack has completed.
+	var tree: SceneTree = get_tree()
+	tree.node_added.connect(_on_scene_tree_changed)
+	tree.node_removed.connect(_on_scene_tree_changed)
+
+	get_viewport().size_changed.connect(_update_screen_params)
+	_dm = get_node_or_null(^"/root/DisplayManager")
+	if _dm != null:
+		_dm.scale_changed.connect(_on_scale_changed)
+	_update_screen_params()
+
 	# Start hidden — nothing is burning at spawn, and a hidden rect skips the fill.
 	visible = false
 
 
+func _on_scene_tree_changed(_n: Node) -> void:
+	_fires_dirty = true
+
+
+func _on_scale_changed(_new_scale: int) -> void:
+	_update_screen_params()
+
+
+# Push the uniforms that depend only on viewport size and integer scale. Called
+# on size/scale change instead of every frame.
+func _update_screen_params() -> void:
+	_vp = get_viewport_rect().size
+	if _vp.x <= 0.0 or _vp.y <= 0.0:
+		return
+	_aspect = _vp.x / _vp.y
+	_mat.set_shader_parameter(&"aspect", _aspect)
+
+	# Feed the shader the low-res texel size so it snaps its glow to the same grid
+	# as the pixel-art world. This rect draws at full monitor res (root layer,
+	# above post-process), so N window pixels == one logical texel; texel in the
+	# rect's 0..1 UV is therefore N / window. Fall back to no snap (1px) when the
+	# DisplayManager autoload is absent (e.g. the preview tool's bare viewport).
+	var scale_n: int = 1
+	if _dm != null:
+		scale_n = maxi(1, int(_dm.current_scale))
+	_mat.set_shader_parameter(&"texel", Vector2(scale_n, scale_n) / _vp)
+
+
+## Seconds between strip rebuilds. The whole update — bearing bake, smoothing,
+## 96 set_pixel calls and a texture upload — used to run every frame and
+## measured 164 us at the 80-fire cap, the second largest per-frame script cost
+## in the game and all of it in ONE node.
+##
+## 20 Hz because of what this draws: a soft, heavily smoothed edge glow whose
+## own SMOOTH_TAU already lags it far more than 50 ms. The one thing that could
+## show is bearing lag while the camera pans fast, and at 50 ms that is a
+## fraction of a texel on a 96-bin strip.
+##
+## The smoothing stays frame-rate independent for free — it is exp(-dt/TAU), so
+## handing it the accumulated delta at 20 Hz traces the same curve it traced at
+## 60.
+const UPDATE_INTERVAL: float = 1.0 / 20.0
+
+
 func _process(delta: float) -> void:
+	if _fires_dirty:
+		_fires_dirty = false
+		_fires = get_tree().get_nodes_in_group(FIRE_VFX_GROUP)
+
+	# Fully idle path: nothing in the group and the glow already decayed below
+	# HIDE_BELOW (visible only goes false after that decay completes), so the
+	# target is zero and the smoothed strip is ~zero — nothing to rebuild,
+	# smooth, or upload. Checked EVERY frame, unlike the work below: it is two
+	# comparisons, and it is what makes a map with no fire on it free.
+	if _fires.is_empty() and not visible:
+		return
+
+	_since_update += delta
+	if _since_update < UPDATE_INTERVAL:
+		return
+	delta = _since_update
+	_since_update = 0.0
+
 	_build_target()
 
 	# Exponential smoothing toward this frame's target. a = 1 at long delta, small
@@ -118,24 +207,27 @@ func _process(delta: float) -> void:
 
 # Rebuild _target from the current off-screen fires. Leaves _target zeroed when
 # nothing qualifies, so the smoothing above fades any lingering glow out.
+var _since_update: float = 0.0
+
+
 func _build_target() -> void:
 	for b: int in BINS:
 		_target[b] = 0.0
 
-	var fires: Array = get_tree().get_nodes_in_group(FIRE_VFX_GROUP)
-	if fires.is_empty():
+	if _fires.is_empty():
 		return
-
-	var vp: Vector2 = get_viewport_rect().size
-	if vp.x <= 0.0 or vp.y <= 0.0:
+	if _vp.x <= 0.0 or _vp.y <= 0.0:
 		return
 	# World -> screen-pixel transform for the current Camera2D. Works regardless of
 	# WHICH camera is current — we never touch a camera node.
 	var cam: Transform2D = get_viewport().get_canvas_transform()
-	var aspect: float = vp.x / vp.y
-	_mat.set_shader_parameter(&"aspect", aspect)
 
-	for node: Node in fires:
+	for node: Node in _fires:
+		# queue_free()d nodes leave the tree at frame end, emitting node_removed
+		# before the next _process refreshes the cache, so a stale entry can't
+		# normally be hit — this guards a same-frame free() only.
+		if not is_instance_valid(node):
+			continue
 		if not (node is Node2D) or not node.has_method(&"get_intensity"):
 			continue
 		var vfx := node as Node2D
@@ -144,7 +236,7 @@ func _build_target() -> void:
 			continue
 
 		# Fire position in normalized screen space (0..1 on-screen, outside = off).
-		var uv: Vector2 = (cam * vfx.global_position) / vp
+		var uv: Vector2 = (cam * vfx.global_position) / _vp
 
 		# Signed distance to the screen rect: negative inside (dist to nearest
 		# edge), positive outside (euclidean overshoot, incl. corners).
@@ -162,7 +254,7 @@ func _build_target() -> void:
 			continue
 
 		# Aspect-corrected bearing — must match the shader's fragment bearing.
-		var dc: Vector2 = Vector2((uv.x - 0.5) * aspect, uv.y - 0.5)
+		var dc: Vector2 = Vector2((uv.x - 0.5) * _aspect, uv.y - 0.5)
 		_deposit(atan2(dc.y, dc.x), w)
 
 

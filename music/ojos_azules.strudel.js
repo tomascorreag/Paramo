@@ -10,6 +10,21 @@ setcpm(72 / 22)   // 1 quarter = 72 BPM
 // per-hit randomized dynamics, pitch wobble, and sample-variant rotation.
 // samples('bubo:waveforms')
 
+// EVERY SOUND HERE IS OPENLY LICENSED AND SERVED FROM THIS REPO (2026-08-17).
+// Nothing is fetched from a third party at play time. Two consequences show up
+// as odd-looking code below, so they are worth stating once:
+//
+//   .n(1) / .n(3) on the melodic layers pick the FluidR3_GM soundfont (MIT)
+//   instead of the default JCLive, whose redistribution licence could not be
+//   established. `n` indexes the engine's per-instrument variant list — verified
+//   in web-sf-1.3.0.js, where registerSoundfonts does `t[Ta(s.n, t.length)]` —
+//   and is a separate control from `note`, so pitch is untouched. The indices
+//   are per-instrument and NOT interchangeable; see THIRD-PARTY-NOTICES.md.
+//
+//   The bombo has no .bank(). It used to be .bank("AkaiMPC60"), from a pack that
+//   grants no licence and carries inMusic trademarks. It now plays the unbanked
+//   uzu-drumkit kick (public domain) that the rest of the percussion already used.
+
 // Melody (flute) — Theme A then Theme B, exact rhythms from the score.
 // Plays complete only once every 4 loops; the other 3 randomly skip ~40% of
 // notes (dropped notes leave silence, so timing stays locked to the other layers).
@@ -20,7 +35,7 @@ const melodyNotes = note(`
 const melody = melodyNotes
   .degradeBy(0.11)              // 3 of 4 loops: drop notes at random
   .every(4, x => melodyNotes)  // every 4th loop: full melody
-  .sound("gm_pan_flute").gain(0.4).attack(0.005).release(0.2).room(0.35).add(note(rand.range(-12.1, -11.9)))
+  .sound("gm_pan_flute").n(1).gain(0.4).attack(0.005).release(0.2).room(0.35).add(note(rand.range(-12.1, -11.9)))
 
 // Chords — ritmo de huayno as a SINGLE-NOTE riff (no chords): the cell is a
 // corchea + dos semicorcheas (eighth + two sixteenths). Per beat: the root on
@@ -37,20 +52,20 @@ const chords = note(`
   c4@2 e4@1 g4@1   c4@2 e4@1 g4@1   c4@2 e4@1 g4@1
   e3@2 gs3@1 b3@1   e3@2 gs3@1 b3@1
   a3@2 c4@1 e4@1   a3@2 c4@1 e4@1
-`).sound("gm_acoustic_guitar_nylon").gain(0.22).attack(0.001).release(0.14).resonance(8).room(0.5).add(note(12))//.octave(choose(0,1))
+`).sound("gm_acoustic_guitar_nylon").n(3).gain(0.22).attack(0.001).release(0.14).resonance(8).room(0.5).add(note(12))//.octave(choose(0,1))
 
 // Bass — chord roots, held (one sustained note per harmony instead of repeats)
 const bass = note(`
   a2@8   e2@8   a2@8 c3@4   e2@8   a2@8
   a2@8   g2@8   c3@12   e2@8   a2@8
-`).sound("gm_acoustic_bass").gain(0.75)
+`).sound("gm_acoustic_bass").n(1).gain(0.98)
   .attack(0.005).decay(3.5).sustain(0).release(0.4)   // pluck, then decay to silence (sustain=0) like a real bass
   .add(note(-12))
 
 
 
 // Bombo — round low kick on every beat (the anchor; kept solid)
-const bombo = sound("bd").bank("AkaiMPC60").fast(11)
+const bombo = sound("bd").fast(11)
   .speed(0.9)
   .gain(rand.range(0.3, 0.5)).room(0.2)
 

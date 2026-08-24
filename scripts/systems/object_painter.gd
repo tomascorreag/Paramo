@@ -23,9 +23,11 @@ extends RefCounted
 #   - Every spawned instance joins group `&"procedural_object"`. On each
 #     paint() call, prior group members under `world` are freed first so
 #     clicking Regenerate doesn't stack rocks on top of old ones.
-#   - Variant pick is non-deterministic per call (RandomNumberGenerator
-#     .randomize), as is placement. Frailejones (player-placed, not in the
-#     procedural group) are unaffected.
+#   - Placement + variant picks draw from the rng the caller passes into
+#     paint()/begin_spawn(). ProceduralWorld derives it from the terrain seed
+#     (seed ^ 0xC8FAB0CC, the same derivation verify_terrain_invariants.gd and
+#     the balance simulator use), so rock layouts are reproducible per seed.
+#     A null rng falls back to randomize() for legacy callers.
 #
 # ============================================================================
 
@@ -64,6 +66,12 @@ const _SCENE_BY_KIND: Dictionary = {
 }
 
 const _GROUP_PROCEDURAL: StringName = &"procedural_object"
+
+## The one authored derivation for the object-placement RNG stream:
+## rng.seed = terrain_seed ^ OBJECT_SEED_XOR. Lives here (the consumer of the
+## stream) so ProceduralWorld, SimWorld, and the terrain harness all reference
+## the same constant instead of re-authoring the literal.
+const OBJECT_SEED_XOR: int = 0xC8FAB0CC
 
 # Gaussian σ (in altitude half-steps) for the per-kind altitude preference
 # applied during placement. Matches the tile painter's `_SIGMA_ALT` so an
@@ -208,23 +216,27 @@ static func paint(
 	grid: TerrainGrid,
 	world: Node2D,
 	pathfinder: Pathfinder,
+	rng: RandomNumberGenerator = null,
 ) -> void:
-	var ctx: Dictionary = begin_spawn(grid, world, pathfinder)
+	var ctx: Dictionary = begin_spawn(grid, world, pathfinder, rng)
 	if ctx.is_empty():
 		return
 	while not spawn_step(ctx, 0x7FFFFFFF):
 		pass
 
 
-## Begins a chunked spawn job: validates inputs, rolls `assign_object_kinds`
-## (non-deterministic), clears prior procedural-group children, and returns a
-## context Dictionary that spawn_step consumes. Returns {} on invalid input.
-## Driving spawn_step with a small row budget across frames keeps instantiation
-## (100-500 nodes) from freezing the main thread on load.
+## Begins a chunked spawn job: validates inputs, rolls `assign_object_kinds`,
+## clears prior procedural-group children, and returns a context Dictionary
+## that spawn_step consumes. Returns {} on invalid input. Driving spawn_step
+## with a small row budget across frames keeps instantiation (100-500 nodes)
+## from freezing the main thread on load. Pass a seeded `rng` for
+## reproducible layouts (ProceduralWorld derives one from the terrain seed);
+## null keeps the legacy randomized behavior.
 static func begin_spawn(
 	grid: TerrainGrid,
 	world: Node2D,
 	pathfinder: Pathfinder,
+	rng: RandomNumberGenerator = null,
 ) -> Dictionary:
 	if grid == null:
 		push_error("ObjectPainter.begin_spawn: grid is null.")
@@ -236,8 +248,9 @@ static func begin_spawn(
 		push_error("ObjectPainter.begin_spawn: pathfinder is null.")
 		return {}
 
-	var rng := RandomNumberGenerator.new()
-	rng.randomize()
+	if rng == null:
+		rng = RandomNumberGenerator.new()
+		rng.randomize()
 
 	assign_object_kinds(grid, rng)
 	_clear_existing(world)

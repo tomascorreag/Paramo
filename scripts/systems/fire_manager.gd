@@ -9,10 +9,13 @@ extends Node
 # the grass→dirt swap on burn-out.
 #
 # Lazy resolution: the autoload is alive across the title screen and other
-# non-gameplay scenes. It silently idles while no Pathfinder exists, picks
-# one up the moment one enters the tree (via get_tree().node_added), and
-# clears its state whenever Pathfinder.graph_changed fires (a map reload or
-# rebuild starts the simulation over with a fresh grid).
+# non-gameplay scenes. It silently idles while no Pathfinder exists, and picks
+# one up the moment one enters the tree (via get_tree().node_added).
+#
+# It clears its state only when the WORLD is replaced — a different Pathfinder
+# (scene load/reload) or a ProceduralWorld regeneration. Pathfinder.graph_changed
+# on its own is not that: it also fires for every structure placement, which must
+# leave burning cells untouched.
 #
 # Ignition tuning sits at the top of this file (BASE_IGNITION_RATE, day/altitude/
 # water falloff). Burn/intensity/spread/fuel tuning lives in FireDynamics. Drop
@@ -28,9 +31,16 @@ extends Node
 
 # Per-sample chance, before all multipliers. Combined with K_IGNITION_SAMPLES
 # this becomes ~K * BASE expected new-fire attempts per tick.
-const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.04
+# 0.04 -> 0.01 (balance decision 2026-08-06): at 0.04 a 128-run sim sweep
+# averaged ~2,450 ignitions/run with ~150 concurrent fires — 90% burned out
+# untouched and the bot's ~6 douses/day were statistically irrelevant.
+const BASE_IGNITION_RATE_PER_SAMPLE: float = 0.01
 const K_IGNITION_SAMPLES: int = 4 # per ignition tick
 const IGNITION_TICK_SECONDS: float = 0.25
+
+## How often a burning cell rolls to spread. Matched to IGNITION_TICK_SECONDS,
+## and to sim_runner's DT — see sim_tick for why those must agree.
+const SPREAD_TICK_SECONDS: float = 0.25
 
 # Burn progression, intensity, spread chance, and fuel consumption all live in
 # FireDynamics now (the testable sim math). What remains here is ignition
@@ -50,7 +60,27 @@ const WATER_SEARCH_R: int = 6 # max bounded BFS radius (cells)
 const ALTITUDE_FALLOFF_SCALE: float = 4.0 # exp(-alt / scale)
 const DAY_SIGMA: float = 0.18 # day-curve gaussian width
 
-const MAX_CONCURRENT_BURNING: int = 80 # safety cap
+# Ceiling on simultaneously burning cells — but read the next paragraph before
+# treating it as one.
+#
+# IT ONLY GATES RANDOM IGNITION. `_roll_spread` calls `_ignite` directly rather
+# than through `can_ignite`, so a fire front walks straight past this number.
+# MEASURED at the previous value of 80, 12 seeds: peak_fires averaged 95 and hit
+# 145. So it bounds how many fires the world STARTS, not how many burn, and the
+# per-frame cost it is supposed to bound (FireManager._advance_burns, ~6 us per
+# burning cell) scales with the number it does not control.
+const MAX_CONCURRENT_BURNING: int = 64 # ignition cap — see above, NOT a ceiling
+
+## First day_count on which the world lights its own fires. 1 = the opening day
+## (day_count 0) never spontaneously ignites, which is what the FTUE is built on:
+## the player learns to walk, read the journal and build without a fire on the
+## mountain. Set to 0 for the pre-FTUE behaviour.
+##
+## Gates `_roll_ignitions` ONLY. `_roll_spread` and the public `ignite()` (the
+## debug ignite action, the balance simulator's scripted burns) are untouched —
+## on day 0 there is nothing to spread from anyway, and silencing the debug key
+## would cost more than it buys.
+var first_ignition_day: int = 1
 
 # --- Rain coupling ---
 # Spread chance hits zero at this rain intensity. Linear ramp from 0 (no rain
@@ -63,6 +93,7 @@ const RAIN_EXTINGUISH_THRESHOLD: float = 0.33
 const RAIN_EXTINGUISH_RATE_PER_SECOND: float = 0.8
 
 const DAY_NIGHT_GROUP: StringName = &"day_night_controller"
+const PROCEDURAL_WORLD_GROUP: StringName = &"procedural_world"
 
 # Source IDs in base_tileset.tres — kept in sync with TerrainPainter.
 const SOURCE_GRASS: int = 0
@@ -84,7 +115,21 @@ const VFX_CONTAINER_GROUP: StringName = &"vfx_container"
 
 # --- Signals ---------------------------------------------------------------
 
-signal tile_burned(cell: Vector2i)
+## A fire finished consuming its cell (burnout, not extinguish). Carries the
+## pre-burn grass atlas coord + layer so a regrowth system can repaint the
+## grass later — without them the coord dies with the _burning entry and the
+## cell is dirt forever.
+signal tile_burned(cell: Vector2i, grass_coord: Vector2i, grass_layer: TileMapLayer)
+
+## A fire went out WITHOUT consuming its tile — rain, or a player douse. The
+## counterpart to tile_burned, and deliberately a separate signal: the two leave
+## the cell in opposite states (grass restored vs. dirt), so a listener that
+## cares about one almost never cares about the other.
+##
+## Emitted from the one private _extinguish, so every route out — the rain roll
+## and the public extinguish() the douse action calls — reports identically. The
+## FTUE's fire step advances off this.
+signal tile_extinguished(cell: Vector2i)
 
 
 # --- State -----------------------------------------------------------------
@@ -94,6 +139,7 @@ var _grid: Object = null # TileGrid
 var _vfx_container: Node2D = null
 var _time_manager: Node = null
 var _day_night: Node = null # DayNightSceneController, for rain query
+var _climate: Node = null # ClimateController, for the dryness ignition multiplier
 
 # cell -> { "vfx": BurningCellVFX, "age": float, "fuel": float, "fuel_max": float,
 #           "max_intensity": float, "frailejon": Node2D (or null),
@@ -102,6 +148,25 @@ var _day_night: Node = null # DayNightSceneController, for rain query
 # tile's grass being consumed (drives the dissolve and burnout); max_intensity =
 # this fire's own random ceiling (some fires stay small). See FireDynamics.
 var _burning: Dictionary = {}
+
+# Fire's own RNG stream. Every gameplay roll (ignition sample/roll, spread,
+# rain extinguish, per-fire intensity ceiling, dirt-variant pick) draws from
+# here, never from the global stream — so VFX (which stays on the global
+# stream) can't perturb outcomes, and the balance simulator can seed this
+# per run for determinism. Randomly seeded on construction, so the live game
+# is distributionally unchanged.
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
+# The simulator runs fire without a scene: no BurningCellVFX node per
+# ignition. Entries then carry "vfx": null, which every consumer already
+# guards with is_instance_valid. The game leaves this true.
+var spawn_vfx: bool = true
+
+# Lifetime tallies for the balance simulator (polling the burning set can't
+# see an ignition and its burnout landing in the same tick). Monotonic;
+# readers snapshot and diff. The game never resets or reads them.
+var stats_ignitions: int = 0
+var stats_rain_extinguished: int = 0
 
 var _water_dist_cache: Dictionary[Vector2i, int] = {}
 
@@ -113,6 +178,12 @@ var _water_dist_cache: Dictionary[Vector2i, int] = {}
 var _dirt_coords_by_tileset: Dictionary = {}
 
 var _ignition_accum: float = 0.0
+## Time banked toward the next spread roll. Separate from _ignition_accum even
+## though both tick at 0.25 s: ignitions consume theirs in a `while` (so a long
+## frame fires several rolls), while spread hands the WHOLE accumulated interval
+## to one roll — the probability is linear in dt, so that is equivalent and
+## cheaper.
+var _spread_accum: float = 0.0
 
 
 func _ready() -> void:
@@ -140,6 +211,16 @@ func is_burning(cell: Vector2i) -> bool:
 ## caches whatever atlas coord happened to be there as `grass_coord`, so a later
 ## extinguish repaints that foreign coord from SOURCE_GRASS and corrupts the
 ## tile. Any new caller must go through here rather than `_ignite`.
+## Is the world allowed to start its OWN fires right now? False through the
+## FTUE's opening day (see first_ignition_day). Says nothing about spread or
+## about the public ignite() — both bypass it deliberately. Public so the gate
+## is testable without reaching into _roll_ignitions.
+func spontaneous_ignition_allowed() -> bool:
+	if _time_manager == null:
+		return true
+	return int(_time_manager.day_count) >= first_ignition_day
+
+
 func can_ignite(cell: Vector2i) -> bool:
 	if _grid == null:
 		return false
@@ -155,10 +236,24 @@ func can_ignite(cell: Vector2i) -> bool:
 ## Light a fire at `cell`: a fresh kindling at age 0, identical to what a
 ## random ignition produces — same spread, same burn, same VFX. Returns true if a
 ## fire actually started. Mirrors `extinguish`.
-func ignite(cell: Vector2i) -> bool:
+##
+## The two optional arguments exist for ONE caller, the FTUE's scripted fire
+## (see dev-notes/ftue.md), and both default to the natural behaviour:
+##
+##   `contained`  the fire never spreads. A fire lit to be walked to and put out
+##                must still be one fire when the player arrives — the tutorial
+##                asks for a single right click, and a front that has crossed
+##                six tiles by then is a different, unwinnable lesson.
+##   `fuel`       overrides the tile's own fuel (`< 0` keeps it). A default tile
+##                burns out in ~10 s and the walk over is longer than that, so
+##                the tutorial fire is given enough fuel to outlast the trip.
+##
+## Neither is reachable from the natural ignition path or from spread — this is
+## the only entry point that can set them.
+func ignite(cell: Vector2i, contained: bool = false, fuel: float = -1.0) -> bool:
 	if not can_ignite(cell):
 		return false
-	_ignite(cell)
+	_ignite(cell, contained, fuel)
 	# _ignite can still bail (no grass source on the tileset, null CellData), so
 	# report what actually happened rather than assuming it took.
 	return _burning.has(cell)
@@ -172,6 +267,58 @@ func extinguish(cell: Vector2i) -> bool:
 		return false
 	_extinguish(cell)
 	return true
+
+
+# --- Headless-driver surface (balance sim, tests) --------------------------
+# The scene path attaches lazily via groups + call_deferred; a headless run
+# happens inside ONE frame, so deferred work would land after the run ended.
+# These are the only supported entry points for driving fire without a scene
+# — reach-ins to _burning/_pathfinder/etc. couple callers to internals.
+
+## Attach to `pf`'s world and start from a clean slate, synchronously.
+func reset_to_world(pf: Node) -> void:
+	_wipe_all_fires()
+	if _pathfinder != pf:
+		_attach_to_pathfinder(pf)
+	_refresh_grid_and_vfx()
+	_ignition_accum = 0.0
+
+
+## Detach from the current world entirely (test teardown — the world node is
+## about to be freed and _process must not touch its stale layers).
+func detach_world() -> void:
+	_wipe_all_fires()
+	_pathfinder = null
+	_grid = null
+
+
+## Number of currently burning cells.
+func burning_count() -> int:
+	return _burning.size()
+
+
+## Total cells in the attached world's TileGrid (0 with no world). Fire is the
+## grid's owner-of-record among the autoloads, so consumers that need a
+## whole-mountain denominator (RegrowthManager's appeal) read it here instead
+## of finding the pathfinder themselves.
+func grid_cell_count() -> int:
+	return _grid.cell_count() if _grid != null else 0
+
+
+## The attached TileGrid, or null. Same reasoning as grid_cell_count: fire owns
+## the attach/detach lifecycle (pathfinder discovery, graph_changed, wipes), so
+## a system that needs to read a cell's layer borrows it here rather than
+## duplicating that lifecycle. Typed Object because TileGrid is resolved at
+## runtime, exactly as _grid is.
+func grid() -> Object:
+	return _grid
+
+
+## Read-only view of the burning set (cell -> entry). Returned BY REFERENCE
+## on purpose: the sim's bot polls this every decision and must not pay a
+## copy. Callers must not mutate it or hold it across a tick.
+func burning_view() -> Dictionary:
+	return _burning
 
 
 func _on_node_added(n: Node) -> void:
@@ -191,6 +338,12 @@ func _try_resolve_pathfinder() -> void:
 func _attach_to_pathfinder(pf: Node) -> void:
 	if _pathfinder == pf:
 		return
+	# A DIFFERENT Pathfinder means a different world (scene load or reload) —
+	# every fire belonged to the old one. This, and a world regeneration, are the
+	# only two events that legitimately wipe the simulation; a mere graph_changed
+	# is NOT one (see _on_graph_changed).
+	if _pathfinder != null:
+		_wipe_all_fires()
 	_pathfinder = pf
 	if pf.has_signal(&"graph_changed") and not pf.graph_changed.is_connected(_on_graph_changed):
 		pf.graph_changed.connect(_on_graph_changed)
@@ -209,33 +362,113 @@ func _refresh_grid_and_vfx() -> void:
 		# wired a VFXContainer on a custom map yet.
 		_vfx_container = _pathfinder.get_parent() as Node2D
 	_day_night = get_tree().get_first_node_in_group(DAY_NIGHT_GROUP)
+	# A world regeneration replaces the terrain under every live fire, so it IS a
+	# wipe (unlike graph_changed). Connected here rather than in _ready because
+	# the autoload outlives scenes and ProceduralWorld only exists inside one.
+	var pw := get_tree().get_first_node_in_group(PROCEDURAL_WORLD_GROUP)
+	if pw != null and pw.has_signal(&"generation_finished") \
+			and not pw.is_connected(&"generation_finished", _wipe_all_fires):
+		pw.connect(&"generation_finished", _wipe_all_fires)
 	_water_dist_cache.clear()
+	_prune_stale_burns()
 
 
 func _on_graph_changed() -> void:
-	# A new grid is in town. Burn-in-flight references go stale — wipe.
+	# The graph changed SHAPE — a bridge or ladder landed, a rock was removed, or
+	# Pathfinder rebuilt against the same painted map. This is NOT a new world, so
+	# fires must survive it: every structure placement calls Pathfinder.rebuild(),
+	# and wiping here put out every fire on the map the moment the player built
+	# anything. A genuinely new world arrives as a new Pathfinder (scene reload)
+	# or a regeneration — both wipe explicitly.
 	#
-	# Wipe by GROUP, not by _burning.values(). Smouldering cells have already
-	# been erased from _burning (see _complete_burn) but their VFX node is still
-	# alive running its tail — a dictionary-based wipe would leave those orphaned
-	# over the new grid. The group covers both live and smouldering fires.
+	# Deferred: Pathfinder emits this from inside rebuild(), so re-resolve the
+	# grid (and prune fires the new grid no longer has a tile for) next idle.
+	call_deferred(&"_refresh_grid_and_vfx")
+
+
+## Kill the whole simulation: live fires AND smouldering tails. Wipes by GROUP,
+## not by _burning.values() — a cell that finished burning is already erased from
+## _burning (see _complete_burn) while its VFX node lives on running the smoke
+## tail, and a dictionary-based wipe would strand those over the new world.
+func _wipe_all_fires() -> void:
 	for v: Node in get_tree().get_nodes_in_group(BurningCellVFX.FIRE_VFX_GROUP):
 		if is_instance_valid(v):
 			v.queue_free()
 	_burning.clear()
 	_water_dist_cache.clear()
 	_dirt_coords_by_tileset.clear()
-	call_deferred(&"_refresh_grid_and_vfx")
+
+
+# Drop burning cells the current grid can no longer describe: the TileMapLayer
+# holding their grass overlay is gone, or the rebuilt grid has no tile at that
+# cell (e.g. a bounds_clip change shrank the playable area). Everything else in
+# an entry — age, fuel, the VFX node, the frailejon — is independent of the
+# TileGrid instance, which is why a rebuild alone doesn't invalidate a fire.
+func _prune_stale_burns() -> void:
+	if _burning.is_empty():
+		return
+	for cell: Vector2i in _burning.keys():
+		var entry: Dictionary = _burning[cell]
+		var layer := entry.get("grass_layer") as TileMapLayer
+		var alive: bool = is_instance_valid(layer) and layer.is_inside_tree()
+		if alive and _grid != null and _grid.get_tile(cell) == null:
+			alive = false
+		if alive:
+			continue
+		var vfx := entry.get("vfx") as BurningCellVFX
+		if is_instance_valid(vfx):
+			vfx.queue_free()
+		_burning.erase(cell)
 
 
 # --- Per-frame loop --------------------------------------------------------
 
 func _process(delta: float) -> void:
+	# Same gates sim_tick applies, checked BEFORE _rain_intensity(): the rain
+	# lookup is a validity check + dynamic call, and paying it every frame on
+	# the title screen / pause / planning (where sim_tick would discard it) is
+	# the only game-side cost the sim extraction added. Duplicating two cheap
+	# branches removes it.
 	if _grid == null:
 		return
+	if _time_manager != null and bool(_time_manager.get(&"paused")):
+		return
+	sim_tick(delta, _rain_intensity())
 
-	var rain: float = _rain_intensity()
-	_advance_burns(delta, rain)
+
+## One fire step at an explicit rain intensity. The frame path above and the
+## headless balance simulator both run exactly this — the simulator calls it
+## directly with a fixed dt and its own rain value.
+func sim_tick(delta: float, rain: float) -> void:
+	if _grid == null:
+		return
+	# Fire pauses with the game clock, like weather does. Without this gate,
+	# fires burned/spread/ignited in REAL time through the title gate and the
+	# planning phase (clock paused, player shopping) — a screen the player
+	# can't fight from.
+	if _time_manager != null and bool(_time_manager.get(&"paused")):
+		return
+
+	# Spread rolls on the SAME cadence as ignitions rather than every frame. The
+	# probability is linear in dt (FireDynamics.spread_probability), so one roll
+	# at 0.25 s carries the same expected spread as fifteen at 1/60 s — while
+	# doing a fifteenth of the work. That work is not trivial: each roll walks
+	# four neighbours, and each neighbour is a TileMapLayer query plus a level
+	# check, for every burning cell, every frame.
+	#
+	# It also removes a GAME/SIM divergence nobody had noticed: sim_runner drives
+	# this with DT = 0.25 exactly, so the balance model has ALWAYS measured
+	# quarter-second spread rolls while the game rolled fifteen times as often at
+	# a fifteenth the chance. Those are not identical — fifteen independent small
+	# rolls spread ~4% less per unit time than one coarse roll, because they can
+	# waste draws on the same neighbour. The game now matches what was balanced.
+	var spread_dt: float = 0.0
+	_spread_accum += delta
+	if _spread_accum >= SPREAD_TICK_SECONDS:
+		spread_dt = _spread_accum
+		_spread_accum = 0.0
+
+	_advance_burns(delta, rain, spread_dt)
 
 	_ignition_accum += delta
 	while _ignition_accum >= IGNITION_TICK_SECONDS:
@@ -243,7 +476,9 @@ func _process(delta: float) -> void:
 		_roll_ignitions()
 
 
-func _advance_burns(delta: float, rain: float) -> void:
+## `spread_dt` is 0 on the frames between spread rolls, and the accumulated
+## interval on the frames one is due — see sim_tick.
+func _advance_burns(delta: float, rain: float, spread_dt: float = 0.0) -> void:
 	if _burning.is_empty():
 		return
 	# Cache rain-derived multipliers once per tick rather than per cell.
@@ -258,25 +493,38 @@ func _advance_burns(delta: float, rain: float) -> void:
 	var completed: Array[Vector2i] = []
 	var extinguished: Array[Vector2i] = []
 	# Snapshot keys so we can mutate _burning during spread.
+	#
+	# Skipping the snapshot on non-spread frames (iterating the dictionary
+	# directly, since extinguish and burnout are both deferred to the arrays
+	# above) was tried and REVERTED: it measured 402-459 us against 341 before,
+	# i.e. nothing outside this measurement's ~20% run-to-run spread. The
+	# untyped iteration it forced may well have cost more than the allocation it
+	# saved. Don't re-derive it without a benchmark that can resolve the
+	# difference.
 	var cells: Array = _burning.keys()
 	for cell: Vector2i in cells:
 		var entry: Dictionary = _burning[cell]
 
-		if extinguish_p > 0.0 and randf() < extinguish_p:
+		if extinguish_p > 0.0 and rng.randf() < extinguish_p:
 			extinguished.append(cell)
 			continue
 
 		# Age drives the intensity ramp; fuel drives the dissolve + burnout. The
 		# fire grows on its own (no neighbour term) and eats the tile's fuel at a
 		# rate set by how hot it is.
+		#
+		# `.get` with a default rather than `entry[...]` on every read: the burn
+		# entry's shape is a contract with the tests, several of which inject an
+		# entry carrying only the fields they care about. Indexing directly would
+		# be marginally faster and would turn those into crashes.
 		var age: float = float(entry.get("age", 0.0)) + delta
 		entry["age"] = age
 		var fuel: float = float(entry.get("fuel", FUEL_DEFAULT))
-		var fuel_max: float = float(entry.get("fuel_max", FUEL_DEFAULT))
-		var fuel_frac: float = clampf(fuel / maxf(fuel_max, 0.0001), 0.0, 1.0)
+		var fuel_frac: float = clampf(
+				fuel / maxf(float(entry.get("fuel_max", FUEL_DEFAULT)), 0.0001), 0.0, 1.0)
 
-		var max_i: float = float(entry.get("max_intensity", 1.0))
-		var intensity: float = FireDynamics.intensity(age, fuel_frac, max_i)
+		var intensity: float = FireDynamics.intensity(
+				age, fuel_frac, float(entry.get("max_intensity", 1.0)))
 		fuel -= FireDynamics.fuel_consumed(intensity, delta)
 		entry["fuel"] = fuel
 
@@ -289,12 +537,19 @@ func _advance_burns(delta: float, rain: float) -> void:
 			# Char the plant as its tile's fuel is consumed (reaches 1 at burnout).
 			frj.call(&"set_burn_amount", 1.0 - fuel_frac)
 
-		if intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
-			_roll_spread(cell, intensity, delta, spread_mult)
+		# `contained` is the FTUE's scripted fire and nothing else (see ignite):
+		# it burns and douses exactly like any other, it simply never seeds a
+		# neighbour. Checked here rather than inside _roll_spread so a contained
+		# fire costs nothing per tick instead of walking four neighbours to
+		# refuse them all.
+		if spread_dt > 0.0 and not bool(entry.get("contained", false)) \
+				and intensity >= FireDynamics.SPREAD_MIN and spread_mult > 0.0:
+			_roll_spread(cell, intensity, spread_dt, spread_mult)
 
 		if fuel <= 0.0:
 			completed.append(cell)
 
+	stats_rain_extinguished += extinguished.size()
 	for cell: Vector2i in extinguished:
 		_extinguish(cell)
 	for cell: Vector2i in completed:
@@ -320,7 +575,7 @@ func _roll_spread(from_cell: Vector2i, intensity: float, delta: float, rain_mult
 			continue
 		if not _same_flat_level(from_cd, nb):
 			continue
-		if randf() < p_per_neighbour:
+		if rng.randf() < p_per_neighbour:
 			_ignite(nb)
 
 
@@ -328,6 +583,8 @@ func _roll_ignitions() -> void:
 	if _burning.size() >= MAX_CONCURRENT_BURNING:
 		return
 	if _grid == null:
+		return
+	if not spontaneous_ignition_allowed():
 		return
 	var b: Rect2i = _grid.bounds()
 	if b.size.x <= 0 or b.size.y <= 0:
@@ -338,8 +595,8 @@ func _roll_ignitions() -> void:
 		return
 	for i in K_IGNITION_SAMPLES:
 		var c := Vector2i(
-			b.position.x + randi() % b.size.x,
-			b.position.y + randi() % b.size.y,
+			b.position.x + rng.randi() % b.size.x,
+			b.position.y + rng.randi() % b.size.y,
 		)
 		if _burning.has(c):
 			continue
@@ -348,8 +605,9 @@ func _roll_ignitions() -> void:
 
 		var alt_mult: float = _altitude_falloff(_grid.altitude_center(c))
 		var water_mult: float = _water_falloff(c)
-		var p: float = BASE_IGNITION_RATE_PER_SAMPLE * day_mult * alt_mult * water_mult
-		if randf() < p:
+		var p: float = BASE_IGNITION_RATE_PER_SAMPLE * day_mult * alt_mult \
+				* water_mult * _climate_ignition_multiplier()
+		if rng.randf() < p:
 			_ignite(c)
 			if _burning.size() >= MAX_CONCURRENT_BURNING:
 				return
@@ -357,7 +615,7 @@ func _roll_ignitions() -> void:
 
 # --- Ignition / completion -------------------------------------------------
 
-func _ignite(cell: Vector2i) -> void:
+func _ignite(cell: Vector2i, contained: bool = false, fuel_override: float = -1.0) -> void:
 	if _burning.has(cell):
 		return
 	var cd = _grid.get_tile(cell)
@@ -373,9 +631,9 @@ func _ignite(cell: Vector2i) -> void:
 	# but swaps to a random walkable dirt variant of the same kind, so a
 	# patch of charred ground shows visual variety. Fall back to FLAT if the
 	# dirt source doesn't paint the cell's kind.
-	var dirt_coord: Vector2i = _pick_random_dirt_coord(layer.tile_set, cd.tile_kind)
+	var dirt_coord: Vector2i = pick_dirt_coord(layer.tile_set, cd.tile_kind)
 	if dirt_coord.x < 0:
-		dirt_coord = _pick_random_dirt_coord(layer.tile_set, &"FLAT")
+		dirt_coord = pick_dirt_coord(layer.tile_set, &"FLAT")
 
 	# Swap underlying tile to dirt immediately. The BurningCellVFX overlay
 	# holds the grass texture and dissolves it pixel-by-pixel — as alpha drops,
@@ -384,12 +642,16 @@ func _ignite(cell: Vector2i) -> void:
 	if dirt_coord.x >= 0:
 		layer.set_cell(cell, SOURCE_DIRT, dirt_coord, 0)
 
-	var vfx := BurningCellVFX.new()
-	vfx.setup(cell, layer, grass_src, atlas_coords)
-	# Parent under the source TileMapLayer so the layer's altitude lift +
-	# y_sort_origin place us in the same frame as the burning tile. Flames then
-	# y-sort correctly against tiles on every other layer.
-	layer.add_child(vfx)
+	# Headless simulation runs without the overlay node; every consumer of
+	# entry["vfx"] already null/validity-guards.
+	var vfx: BurningCellVFX = null
+	if spawn_vfx:
+		vfx = BurningCellVFX.new()
+		vfx.setup(cell, layer, grass_src, atlas_coords)
+		# Parent under the source TileMapLayer so the layer's altitude lift +
+		# y_sort_origin place us in the same frame as the burning tile. Flames
+		# then y-sort correctly against tiles on every other layer.
+		layer.add_child(vfx)
 
 	var occ: Node2D = cd.occupant
 	var frailejon: Node = null
@@ -398,14 +660,23 @@ func _ignite(cell: Vector2i) -> void:
 		frailejon = occ
 
 	var fuel: float = _fuel_for_cell(cell, cd)
+	if fuel_override > 0.0:
+		fuel = fuel_override
+	stats_ignitions += 1
 	_burning[cell] = {
 		"vfx": vfx,
 		"age": 0.0,
 		"fuel": fuel,
+		# fuel_max is what the dissolve and the flame size are read against, so a
+		# high-fuel tutorial fire looks like a normal one at full burn rather than
+		# like a tile that has barely started.
 		"fuel_max": fuel,
+		# Spread is refused from this cell for as long as it burns. Lives on the
+		# entry rather than in a side table so it cannot outlive the fire.
+		"contained": contained,
 		# This fire's own intensity ceiling, rolled uniformly — some fires stay
 		# small, some grow to full. See FireDynamics.intensity.
-		"max_intensity": randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
+		"max_intensity": rng.randf_range(FireDynamics.MAX_INTENSITY_MIN, FireDynamics.MAX_INTENSITY_MAX),
 		"frailejon": frailejon,
 		# Cached for the extinguish-restore path: re-paint these on the source
 		# layer to undo the ignition-time grass→dirt swap.
@@ -456,6 +727,9 @@ func _extinguish(cell: Vector2i) -> void:
 		frj.call(&"clear_burn_material")
 
 	_burning.erase(cell)
+	# After the erase, so a listener that queries is_burning() from the handler
+	# gets the state the signal is announcing rather than the one before it.
+	tile_extinguished.emit(cell)
 
 
 func _complete_burn(cell: Vector2i) -> void:
@@ -475,8 +749,10 @@ func _complete_burn(cell: Vector2i) -> void:
 	if is_instance_valid(frj):
 		frj.queue_free()
 
+	var grass_coord: Vector2i = entry.get("grass_coord", Vector2i(-1, -1))
+	var grass_layer: TileMapLayer = entry.get("grass_layer") as TileMapLayer
 	_burning.erase(cell)
-	tile_burned.emit(cell)
+	tile_burned.emit(cell, grass_coord, grass_layer)
 
 
 # --- Probability terms -----------------------------------------------------
@@ -486,6 +762,16 @@ func _rain_intensity() -> float:
 			and _day_night.has_method(&"get_rain_current_intensity"):
 		return float(_day_night.call(&"get_rain_current_intensity"))
 	return 0.0
+
+
+# Dryness scaling from the scene's ClimateController. Fallback 1.0 keeps
+# scenes without one (tests, tools) at the pre-climate ignition rate.
+func _climate_ignition_multiplier() -> float:
+	if _climate == null or not is_instance_valid(_climate):
+		_climate = get_tree().get_first_node_in_group(&"climate")
+	if _climate != null and _climate.has_method(&"get_ignition_multiplier"):
+		return float(_climate.call(&"get_ignition_multiplier"))
+	return 1.0
 
 
 func _day_curve() -> float:
@@ -543,7 +829,16 @@ func _is_water_layer(layer: TileMapLayer, cell: Vector2i) -> bool:
 	return layer.get_cell_source_id(cell) == SOURCE_WATER
 
 
-func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
+## A random walkable dirt variant of `kind`, or (-1, -1) if the dirt source
+## doesn't paint that kind. Public because fire is no longer the only thing that
+## bares a cell — RegrowthManager's trampling wears grass down to dirt and must
+## produce the same shape-preserving variety, and the atlas scan is cached here.
+##
+## `stream` lets a caller draw from its OWN RNG. Fire's stream is replayed
+## byte-for-byte by the balance simulator, so a second system drawing from it
+## would silently make fire outcomes depend on how much walking happened.
+func pick_dirt_coord(tile_set: TileSet, kind: StringName,
+		stream: RandomNumberGenerator = null) -> Vector2i:
 	if tile_set == null or String(kind).is_empty():
 		return Vector2i(-1, -1)
 	var by_kind: Dictionary = _dirt_coords_by_tileset.get(tile_set, {})
@@ -553,7 +848,8 @@ func _pick_random_dirt_coord(tile_set: TileSet, kind: StringName) -> Vector2i:
 	var coords: Array = by_kind.get(kind, [])
 	if coords.is_empty():
 		return Vector2i(-1, -1)
-	return coords[randi() % coords.size()]
+	var draw: RandomNumberGenerator = stream if stream != null else rng
+	return coords[draw.randi() % coords.size()]
 
 
 # Returns { tile_kind: Array[Vector2i] } over the dirt source: every painted

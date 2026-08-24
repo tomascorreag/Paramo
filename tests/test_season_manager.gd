@@ -83,49 +83,32 @@ func test_season_does_not_end_before_n_days() -> void:
 	assert_signal_not_emitted(SeasonManager, "season_ended")
 
 
-func test_season_ends_after_n_days_enters_planning() -> void:
+func test_season_ends_after_n_days_and_rolls_straight_on() -> void:
 	_start()
 	watch_signals(SeasonManager)
 	_advance_days(DAYS)
 	assert_signal_emitted(SeasonManager, "season_ended")
-	assert_signal_emitted(SeasonManager, "planning_phase_entered")
-	assert_eq(SeasonManager.phase, SeasonManager.Phase.PLANNING)
+	assert_signal_emitted(SeasonManager, "season_started")
+	assert_eq(SeasonManager.season_index, 1)
+	assert_eq(SeasonManager.phase, SeasonManager.Phase.ACTIVE)
 
 
-func test_planning_pauses_clock() -> void:
+## The regression the planning phase caused: the boundary parked the run with
+## the clock paused, waiting on a call nothing in the game ever made.
+func test_season_boundary_does_not_pause_clock() -> void:
 	_start()
 	TimeManager.paused = false
 	_advance_days(DAYS)
-	assert_true(TimeManager.paused)
-
-
-# --- begin_next_season ------------------------------------------------------
-
-func test_begin_next_season_advances_index_and_resumes() -> void:
-	_start()
-	_advance_days(DAYS)  # -> planning, next index 1
-	watch_signals(SeasonManager)
-	SeasonManager.begin_next_season()
-	assert_eq(SeasonManager.season_index, 1)
-	assert_eq(SeasonManager.phase, SeasonManager.Phase.ACTIVE)
-	assert_signal_emitted(SeasonManager, "season_started")
-
-
-func test_begin_next_season_noop_outside_planning() -> void:
-	_start()  # ACTIVE, not planning
-	SeasonManager.begin_next_season()
-	assert_eq(SeasonManager.season_index, 0)
+	assert_false(TimeManager.paused)
 
 
 func test_year_changes_after_full_cycle() -> void:
 	# Cycle length 2: reaching season_index 2 starts year 2.
 	_start()
-	_advance_days(DAYS)
-	SeasonManager.begin_next_season()  # index 1, still year 1
+	_advance_days(DAYS)  # -> season 1, still year 1
 	assert_eq(SeasonManager.year, 1)
-	_advance_days(DAYS)
 	watch_signals(SeasonManager)
-	SeasonManager.begin_next_season()  # index 2 -> year 2
+	_advance_days(DAYS)  # -> season 2, year 2
 	assert_eq(SeasonManager.year, 2)
 	assert_signal_emitted(SeasonManager, "year_changed")
 
@@ -135,25 +118,20 @@ func test_year_changes_after_full_cycle() -> void:
 func test_run_completes_after_final_season() -> void:
 	_start()  # season 0
 	watch_signals(SeasonManager)
-	# Seasons 0 and 1 each end into planning; season 2 ending completes the run.
-	_advance_days(DAYS)            # end season 0 -> planning
-	SeasonManager.begin_next_season()  # season 1
-	_advance_days(DAYS)            # end season 1 -> planning
-	SeasonManager.begin_next_season()  # season 2 (final)
-	_advance_days(DAYS)            # end season 2 -> run over
+	# Seasons 0 and 1 roll straight on; season 2 ending completes the run.
+	_advance_days(DAYS * SEASONS)
 	assert_signal_emitted_with_parameters(SeasonManager, "run_completed", [&"survived"])
 	assert_eq(SeasonManager.phase, SeasonManager.Phase.RUN_OVER)
 
 
-func test_final_season_does_not_enter_planning() -> void:
+func test_final_season_does_not_start_another() -> void:
 	_start()
-	_advance_days(DAYS)
-	SeasonManager.begin_next_season()
-	_advance_days(DAYS)
-	SeasonManager.begin_next_season()  # final season
+	_advance_days(DAYS * (SEASONS - 1))  # into the final season
+	assert_eq(SeasonManager.season_index, SEASONS - 1)
 	watch_signals(SeasonManager)
 	_advance_days(DAYS)
-	assert_signal_not_emitted(SeasonManager, "planning_phase_entered")
+	assert_signal_not_emitted(SeasonManager, "season_started")
+	assert_eq(SeasonManager.season_index, SEASONS - 1)
 
 
 func test_end_run_idempotent() -> void:
@@ -168,5 +146,4 @@ func test_seasons_remaining_counts_down() -> void:
 	_start()
 	assert_eq(SeasonManager.seasons_remaining(), SEASONS)
 	_advance_days(DAYS)
-	SeasonManager.begin_next_season()
 	assert_eq(SeasonManager.seasons_remaining(), SEASONS - 1)

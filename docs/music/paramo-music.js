@@ -106,25 +106,29 @@
       prebake: function () {
         window.setSoundfontUrl(BASE + "soundfonts");
         window.registerSoundfonts();
-        // Drum samples for the percussion layers. Mirrors strudel.cc's default
-        // kit so sound("bd"/"oh"/"rd"/"cr"/"sh") resolve UNBANKED exactly as in
-        // the editor (uzu-drumkit), plus AkaiMPC60 from tidal-drum-machines for
-        // the bombo's .bank(). allSettled: a missing pack must not block init.
+        // Drum samples for the percussion layers, so sound("bd"/"sd"/"cr"/"oh"/
+        // "rd"/"sh") resolve UNBANKED the way they do in the strudel.cc editor.
         //
-        // PRODUCTION CAVEAT: these load cross-origin from the Strudel CDN — fine
-        // in the dev preview, but the COEP-isolated web export may block them, so
-        // percussion can drop in the deployed build until these packs are
-        // vendored locally. The gm_* soundfont layers (vendored) always play.
+        // SAME-ORIGIN, ALWAYS (changed 2026-08-17). These used to be two
+        // cross-origin fetches from strudel.b-cdn.net — uzu-drumkit plus
+        // AkaiMPC60 from tidal-drum-machines for the bombo's .bank(). Both are
+        // now gone: the six uzu keys the song plays are vendored under
+        // samples/ (public domain), and the bombo dropped its .bank() because
+        // tidal-drum-machines grants no redistribution licence. Nothing in the
+        // deployed build reaches a third party at play time; see
+        // samples/README.md and THIRD-PARTY-NOTICES.md.
+        //
+        // The second argument overrides the manifest's own base path, which is
+        // why the vendored uzu-drumkit.json carries no "_base" key.
+        //
+        // allSettled is kept deliberately: a sample pack that fails to load must
+        // degrade to silent percussion, never block init and take the whole
+        // arrangement down with it.
         var S = window.strudel;
         return Promise.allSettled([
           S.samples(
-            "https://strudel.b-cdn.net/uzu-drumkit.json",
-            "https://strudel.b-cdn.net/uzu-drumkit/",
-            { tag: "drum-machines" }
-          ),
-          S.samples(
-            "https://strudel.b-cdn.net/tidal-drum-machines.json",
-            "https://strudel.b-cdn.net/tidal-drum-machines/machines/",
+            BASE + "samples/uzu-drumkit.json",
+            BASE + "samples/uzu-drumkit/",
             { tag: "drum-machines" }
           ),
         ]);
