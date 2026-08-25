@@ -4,16 +4,19 @@
 // engine, but it does NOT play the file's full stack verbatim. The director reads
 // the layer list from the song's final stack(...), starts with the base layer
 // alone, then folds one random instrument back into the mix every ADD_EVERY cycles
-// until the whole arrangement is sounding. Each addition re-evaluates the song with
-// a larger stack(...); the Cyclist scheduler swaps the pattern in place without
-// resetting its clock, so layers enter seamlessly.
+// until the whole arrangement is sounding. ADD_EVERY defaults to 4, so the mix
+// fills in over ~7 minutes of ojos_azules — slow enough that the build-up is
+// still happening while a first-time player walks through the tutorial. Each
+// addition re-evaluates the song with a larger stack(...); the Cyclist scheduler
+// swaps the pattern in place without resetting its clock, so layers enter
+// seamlessly.
 //
 // SONG-AGNOSTIC: nothing about the arrangement is hardcoded. The song file, the
 // base layer name, and the per-layer cadence are read from data-* attributes on
 // the <script> tag (see CFG below); the layer set is parsed from the song itself.
 // Cadence is counted in CYCLES via the scheduler, so it adapts to any tempo or
 // song length with no seconds-per-cycle math. Defaults reproduce ojos_azules:
-// base = "melody", one instrument added per cycle (1 cycle == one melody loop).
+// base = "melody", one instrument added every 4 cycles (1 cycle == one melody loop).
 //
 // The song file is never modified — only the final stack() it ends with is
 // reconstructed here (see parseSong). Strudel's randomness is seeded by cycle
@@ -59,13 +62,15 @@
   // Timing is expressed in CYCLES (not seconds): the build-up counts the
   // scheduler's cycle position, so it adapts to any tempo/song length on its own —
   // no cycle-length-in-seconds is ever needed. ADD_EVERY is "cycles per added
-  // layer" (= one melody loop for ojos, where 1 cycle == the whole loop).
+  // layer" (1 cycle == the whole loop for ojos, ~18s). It defaults to 4 loops per
+  // layer so the arrangement is still filling in during the tutorial; the seven
+  // layers of ojos_azules reach the full mix ~7 min in instead of ~1.8 min.
   var CFG = (SELF_EL && SELF_EL.dataset) || {};
   var SONG_URL = BASE + (CFG.song || "ojos_azules.strudel.js");
   var BASE_LAYER = CFG.baseLayer || "melody";
   var ADD_EVERY = (function () {
     var n = parseFloat(CFG.addEvery);
-    return (isFinite(n) && n > 0) ? n : 1;   // cycles between layer additions
+    return (isFinite(n) && n > 0) ? n : 4;   // cycles between layer additions
   })();
 
   var repl = null;       // set once initStrudel resolves

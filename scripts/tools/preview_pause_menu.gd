@@ -7,9 +7,11 @@ extends SceneTree
 ## that outgrows a row is clipped with no error. test_locale_manager.gd measures
 ## both; this is how you look at the result. Saved states:
 ##
-##   0_main_en / 1_main_es      settings column: volume, fullscreen, language, about
-##   2_about_en / 3_about_es    credits + the licence links
+##   0_main_en / 1_main_es      settings + info sections
+##   2_about_en / 3_about_es    credits + the licence links, under the back arrow
 ##   4_confirm_en / 5_confirm_es the quit guard
+##   6_lang_en / 7_lang_es      the language dropdown, open
+##   8_check_en                 the fullscreen checkbox ticked
 ##
 ## What to look for, i.e. the failures it exists to catch:
 ##   - Every row's glyphs inside its frame, in BOTH languages. Spanish runs ~25%
@@ -18,6 +20,9 @@ extends SceneTree
 ##     anchored to the panel's bottom edge rather than being part of the stack.
 ##   - The author line's á and the middot must render, not tofu. The panel uses
 ##     the theme face (Tiny5, full Spanish set) — Eggmode would drop both.
+##   - The open dropdown must sit UNDER its row and over the rows below it, and
+##     its frame must not run past the panel's own frame.
+##   - The back chevron only appears on the submenu states (2..5), never on main.
 ##
 ## Needs a rendering context — do NOT pass --headless.
 ##
@@ -31,20 +36,23 @@ const PAUSE_PATH := "res://scenes/ui/pause_menu.tscn"
 
 const VIEW_SIZE := Vector2i(480, 270)
 const PIXEL_SCALE := 3
-## The panel is 184x150 centred in the 480x270 view, i.e. x 148..332, y 60..210.
+## The panel is 184x164 centred in the 480x270 view, i.e. x 148..332, y 53..217.
 ## This crop is the panel plus a margin for the Resume button's overhang.
-const CROP := Rect2i(138, 50, 204, 170)
+const CROP := Rect2i(138, 43, 204, 184)
 ## Palette P30 #14233A — stands in for the world behind the dim layer.
 const BG := Color8(0x14, 0x23, 0x3A, 0xFF)
 
-## name -> [locale, PauseMenu.View ordinal]
+## name -> [locale, PauseMenu.View ordinal, language dropdown open, checkbox on]
 const STATES: Array[Array] = [
-	["0_main_en", "en_GB", 0],
-	["1_main_es", "es_CO", 0],
-	["2_about_en", "en_GB", 2],
-	["3_about_es", "es_CO", 2],
-	["4_confirm_en", "en_GB", 1],
-	["5_confirm_es", "es_CO", 1],
+	["0_main_en", "en_GB", 0, false, false],
+	["1_main_es", "es_CO", 0, false, false],
+	["2_about_en", "en_GB", 2, false, false],
+	["3_about_es", "es_CO", 2, false, false],
+	["4_confirm_en", "en_GB", 1, false, false],
+	["5_confirm_es", "es_CO", 1, false, false],
+	["6_lang_en", "en_GB", 0, true, false],
+	["7_lang_es", "es_CO", 0, true, false],
+	["8_check_en", "en_GB", 0, false, true],
 ]
 
 ## Two frames of settle (the containers lay out on the frame after the view
@@ -116,11 +124,18 @@ func _build(state: Array) -> void:
 	# _initialize — the scene's _ready runs after that and sets visible = false.
 	_pause.visible = true
 	TranslationServer.set_locale(String(state[1]))
-	# The language button's label is literal, not a key, so it does not follow
+	# The language row's value is literal, not a key, so it does not follow
 	# NOTIFICATION_TRANSLATION_CHANGED — the menu refreshes it off LocaleManager,
 	# which this tool bypasses. Ask for it by hand.
-	_pause.call(&"_refresh_language_label")
+	_pause.call(&"_refresh_language_row")
+	# The view swap closes the dropdown, so open it after, not before.
 	_pause.call(&"_set_view", int(state[2]))
+	if bool(state[3]):
+		_pause.call(&"_toggle_language_popup")
+	# The tick follows the real window mode, and this tool runs windowed — so the
+	# ON state is set by hand. It is the only way to look at the widget's other
+	# half without launching the game fullscreen.
+	(_pause.get_node("%CheckFill") as Control).visible = bool(state[4])
 
 
 func _capture(name_: String) -> void:

@@ -188,6 +188,16 @@ var _spread_accum: float = 0.0
 
 func _ready() -> void:
 	_time_manager = get_node_or_null("/root/TimeManager")
+	# Compile the fire shaders now, off screen, instead of on the frame a burning
+	# cell first enters the camera rect — see FireShaderWarmup for the
+	# measurement. Once per PROCESS, not once per world: a compiled program is
+	# global to the renderer, so re-warming on every scene load would be pure
+	# cost. The node frees itself after a few frames.
+	# The A/B seam. Engine metadata rather than Debug, because this has to be
+	# answerable BEFORE any autoload's _ready — profile_fire_reveal sets it in
+	# _initialize, and by the time Debug exists the warm-up has already drawn.
+	if not Engine.has_meta(&"skip_fire_shader_warmup"):
+		add_child(FireShaderWarmup.new())
 	# Pathfinder may already exist (autoload loads after scene tree on instant
 	# scene transitions) — try to grab one up front; otherwise we'll catch the
 	# next one via node_added.

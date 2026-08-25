@@ -495,6 +495,12 @@ func _on_dwell_elapsed(index: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not _running or not _is_narrative():
 		return
+	# ANY key advances a line, and this layer is PROCESS_MODE_ALWAYS — so without
+	# this, every keystroke aimed at the pause menu would also burn an FTUE line
+	# the player never read. The journal's pause is a different case and stays
+	# live: two steps are read inside it.
+	if PauseMenu.is_blocking():
+		return
 	var pressed: bool = (event is InputEventKey and event.is_pressed() and not event.is_echo()) \
 			or (event is InputEventMouseButton and event.is_pressed())
 	if pressed:

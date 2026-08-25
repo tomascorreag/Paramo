@@ -16,6 +16,7 @@ answered on the [web build](#the-web-build--scriptstoolsprofile_webgd).
 | Whole-frame cost of a scene | `profile_scene.gd` |
 | Which system costs what on a **loaded** map | `profile_systems.gd` |
 | Which single frame stutters | `profile_day_boundary.gd` |
+| Why revealing a fire stutters | `profile_fire_reveal.gd` ([vfx](vfx.md)) |
 | Where the **web** frame goes | `profile_web.gd` + `run_web_profile.py` |
 | Is routing the cost | `benchmark_pathfinder.gd` |
 | Is the visitor system the cost | `benchmark_visitors.gd` |

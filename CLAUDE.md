@@ -64,6 +64,7 @@ headless run sees them.
 | `verify_world_clock.gd` | Prove `world_time` reaches the GPU **and** freezes under pause | [vfx](dev-notes/vfx.md) |
 | `benchmark_rain.gd` / `benchmark_fire.gd` | Price a shader edit (the **ratio** is the number) | [vfx](dev-notes/vfx.md) |
 | `preview_fire_blobs.gd` / `preview_fire_aura.gd` | Look at procedural fire / the off-screen aura | [vfx](dev-notes/vfx.md) |
+| `profile_fire_reveal.gd` | **Why revealing a fire stutters.** Ignite off screen, reveal, hide, re-reveal, one continuous recording | [vfx](dev-notes/vfx.md) |
 | `preview_page_warp.gd` | **Measure** journal page-warp error per column | [journal](dev-notes/journal.md) |
 | `audit_page_blocks.gd` | Where the journal's warp seams are, what each section inks, and **how far a heading may move**. `--gap <n>` prices a tightening before authoring it | [journal](dev-notes/journal.md) |
 | `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette | [journal](dev-notes/journal.md) |
@@ -103,6 +104,17 @@ to them. Generator, indexing and sim tools are headless.
 - **Compare balance arms seed by seed**, 12+ paired seeds for anything downstream
   of fire. Never price code changes off the sim's wall clock (12% arm drift).
 - **`MAX_CONCURRENT_BURNING` is not a ceiling** — spread bypasses `can_ignite`.
+- **Revealing a fire and igniting one are two different spikes, and only the
+  first is about shaders.** A culled CanvasItem never draws, so under
+  `gl_compatibility` its shader never compiles — that bill lands on the frame the
+  camera reaches the fire, and `FireShaderWarmup` (spawned from
+  `FireManager._ready`, one item per frame) pays it at load instead: **6.10 →
+  2.83 ms, 10 of 11 paired cold runs** on a 40-cell front. The **ignition** frame
+  costs ~9.6 ms and the warm-up does not touch it (6 of 11 — a coin flip); that
+  one is 40 `BurningCellVFX` spawned at once, and staggered spawning is its lever.
+  The effect scales with how much is revealed at once — a six-cell fire is pure
+  noise. Deleting `.godot/shader_cache` does NOT get you back to cold, the driver
+  caches by source; use `profile_fire_reveal --cold`. See [vfx](dev-notes/vfx.md).
 - **Generated dirt colonises, so the dirt band is no longer a free firebreak** —
   every walkable dirt cell climbs slowly to a short grass ceiling, and
   `can_ignite` reads the layer. `natural` on each regrowth record is what keeps
@@ -121,10 +133,17 @@ to them. Generator, indexing and sim tools are headless.
   See [ftue](dev-notes/ftue.md) before retuning any of them.
 - **`toggle_journal` is Space, which the language gate also answers** — the
   journal ignores it until the run is ACTIVE *and* the cinematic is gone.
+- **Pausing the tree does NOT silence hotkeys on a `PROCESS_MODE_ALWAYS` node.**
+  Anything that stays live under pause and reads input must ask
+  `PauseMenu.is_blocking()` first — and not `get_tree().paused`, which the
+  journal also sets. See [ui](dev-notes/ui.md).
 - **The pause panel does not grow to its content** — `Margin` is anchored to the
   panel rect, so `custom_minimum_size` IS the content box and the **tallest** of
-  its three views sets it. About is currently the tallest, at 128px of 130.
+  its three views sets it. Main is currently the tallest, at 133px of 144.
   `test_locale_manager.gd` prints both numbers. See [ui](dev-notes/ui.md).
+- **A Container resets a child's `rotation` and `scale` every layout pass** — a
+  rotated glyph inside an `HBoxContainer` renders unrotated, silently. Wrap it in
+  a plain `Control` the container can size. See [ui](dev-notes/ui.md).
 - **The FTUE lights its own fire, off-screen, and it must stay inside
   `FireAuraOverlay.REACH`** — the screen-edge glow is the only thing that reports
   it. It is `contained` (never spreads) and over-fuelled (outlasts the walk),

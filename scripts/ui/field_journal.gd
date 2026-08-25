@@ -86,6 +86,12 @@ func _process(_delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Nothing here while the pause menu holds the game — this layer is
+	# PROCESS_MODE_ALWAYS, so without the guard Space would throw the book open
+	# on top of the modal (and Esc would close the book behind it). Returns
+	# WITHOUT consuming: the key belongs to the pause menu.
+	if PauseMenu.is_blocking():
+		return
 	# Space toggles from either state.
 	if event.is_action_pressed(&"toggle_journal"):
 		# ...but not before the run exists. `toggle_journal` is Space, and the

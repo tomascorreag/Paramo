@@ -144,6 +144,123 @@ post-process on purpose: the post vignette darkens the screen edges, i.e.
 exactly where the aura draws, so grading it would cancel it. With no fire
 off-screen the overlay sets `visible = false`, so it costs nothing.
 
+## The reveal stutter — `scripts/tools/profile_fire_reveal.gd`
+
+**Igniting a fire is not what hitches; revealing one is.** Under
+`gl_compatibility` a canvas shader is compiled and linked the first time it is
+actually DRAWN, on the main thread. A CanvasItem outside the camera rect is
+culled, so it never draws, so its shader never compiles. FireManager can light a
+front two screens away for free and the bill arrives on the frame the camera
+reaches it — which is exactly how the symptom was reported ("stutter when fire
+comes on screen").
+
+The tool records every frame of one continuous run and scripts four events onto
+it — ignite off screen, reveal, hide, re-reveal the same fire — so the worst
+frames can be read against what caused them. Re-reveal is the discriminator: a
+cheap second reveal means a ONE-TIME cost and a warm-up fixes it; an equally dear
+one means recurring per-reveal work and a warm-up would not.
+
+```bash
+... --script res://scripts/tools/profile_fire_reveal.gd
+... --script res://scripts/tools/profile_fire_reveal.gd -- --cold --fires 40 --cluster 200
+... --script res://scripts/tools/profile_fire_reveal.gd -- --cold --no-warmup   # the old behaviour
+... --script res://scripts/tools/profile_fire_reveal.gd -- --compile-only --cold
+```
+
+Note the `--` before the flags: these are user args, and without the separator
+`OS.get_cmdline_user_args()` returns nothing and every run silently uses the
+defaults.
+
+**MEASURED (level1, RTX 3080, 960x540, vsync off, median frame ~1.8 ms):**
+
+- **The effect scales with how much is revealed at once, and a six-cell fire
+  cannot see it.** At `--fires 6` the reveal frame sits inside the run-to-run
+  noise (12 paired cold runs: 3.35 ms vs 2.77 ms, the warm-up ahead in only 8 of
+  12 — not a result). At `--fires 40`, one realistic front, it is unambiguous:
+  **6.10 ms → 2.83 ms mean over 11 paired cold runs, the warm-up ahead 10 of 11.**
+  Size the cluster before concluding anything from this tool.
+- **The warm-up does NOT relocate the cost onto ignition** — the obvious
+  objection, measured rather than argued. Over the same 11 pairs the ignition
+  frame cost **9.63 ms without the warm-up and 9.01 ms with it, the warm-up ahead
+  in 6 of 11** — a coin flip. Always read both rows of the event table; a change
+  that only moved the spike would show here.
+- **Re-revealing the same fire costs nothing** (~1.1x median in every arm), which
+  is what identifies the cost as first-draw and not as culling or node work.
+- **`--compile-only` prices the compile alone at well under 1 ms on this
+  driver** (cold 0.84 ms of excess, warm 0.73 ms). So NVIDIA's own compile is not
+  where the 7 ms goes; what the warm-up removes is the wider first-draw setup the
+  reveal frame otherwise pays for every material and light at once. On WebGL2,
+  where program linking is orders of magnitude dearer, the same warm-up covers
+  the compile too — **unverified on web**, see below.
+
+**Getting back to cold is harder than it looks.** Deleting
+`.godot/shader_cache` is not enough: the GL driver keeps its own program cache
+keyed by shader source, so the second run of an experiment re-links from that and
+the spike disappears — an early version of this investigation measured the warm
+path four times while believing it was measuring the cold one. `--cold` appends a
+unique comment to each fire shader, which misses both caches.
+
+**Two spikes this tool finds that are NOT the reveal**, and that the warm-up
+neither causes nor cures:
+
+- **Igniting 40 cells inside one frame costs ~9.6 ms**, identical with and
+  without the warm-up. It is CPU work — 40 `BurningCellVFX`, each duplicating a
+  material, baking a texture and adding a `PointLight2D` — and it *cannot* be
+  shader work, because those nodes are off screen and culled on the frame they
+  are created, so nothing draws. The tool lights the whole cluster at once, which
+  the real sim does not (spread rolls ignite a few neighbours per tick); the lever
+  if this ever matters is staggered spawning, not warming.
+- **The frame a burn completes costs ~7.5 ms.**
+
+**NOT VERIFIED ON WEB.** The shipping target is WebGL2, where this class of
+hitch is far worse, but `profile_web.gd` measures steady-state per-layer costs
+over a 60-frame median — it has no way to see a one-off hitch. Confirming the
+reveal stutter on web needs instrumentation that does not exist yet.
+
+## `FireShaderWarmup` — the fix
+
+`scripts/vfx/fire_shader_warmup.gd`, spawned once per process from
+`FireManager._ready`. A 128x64 SubViewport that nothing composites anywhere, fed
+**one item per frame** and then freed. Same trick `ProceduralWorld` already uses
+for water/post-process (`SHADER_WARM_FRAMES`), except fire has nothing on screen
+at load time to warm itself with.
+
+Four things about it are load-bearing:
+
+- **One item per frame.** The first version added every item at once and rendered
+  for three frames, which only relocated the pile-up onto the first of those
+  three — the same mistake as the reveal frame, one level down. On an RTX 3080
+  the whole warm-up measures 0.84 ms, so this buys nothing locally; it matters
+  because the shipping target is WebGL2, where the same work is orders of
+  magnitude dearer and a pile-up would show even behind the loading overlay.
+  `tests/test_fire_shader_warmup.gd` asserts at most one item lands per frame,
+  because that property would otherwise regress silently.
+- **The light, and the fact that half the viewport is outside it.** Canvas
+  lighting is a separate shader permutation, and the game draws fire BOTH ways: a
+  burning cell normally sits under its own `PointLight2D`, but cells past
+  `BurningCellVFX.LIGHT_BUDGET` get none. So the light covers only the right half
+  and every shader is warmed twice, once each side. Warming one permutation
+  leaves the other on the reveal frame.
+- **Real node types with the real shader resources.** A stand-in `ColorRect` for
+  something the game draws as a `Sprite2D` can warm a different permutation and
+  still look like it worked — hence a real `FireBlobColumn` and a real
+  `ColorRect` for the aura, matching how each actually draws.
+- **`fire.gdshader` is deliberately NOT warmed.** It is the legacy sprite-flame
+  path behind `Debug.fire_blob_flames`, which ships off; warming it would charge
+  every player a compile for something they never see. Flip that toggle and the
+  first fire hitches — the intended trade, asserted in
+  `tests/test_fire_shader_warmup.gd`.
+
+`Engine.set_meta("skip_fire_shader_warmup", true)` suppresses it. It has to be
+engine metadata rather than a `Debug` flag because it must be answerable before
+any autoload's `_ready` — `profile_fire_reveal --no-warmup` sets it in
+`_initialize`, and by the time `Debug` exists the warm-up has already drawn.
+
+`tests/test_fire_shader_warmup.gd` guards the coverage by DISCOVERING which
+shaders the fire VFX reference (scanning their sources, and the materials that
+scenes attach) rather than restating the warm-up's own list — a hand-copied list
+would agree with itself forever.
+
 ## Fire cost — `scripts/tools/benchmark_fire.gd`
 
 Renders N columns at the real tuning on the real 32x16 iso spacing, each phase
