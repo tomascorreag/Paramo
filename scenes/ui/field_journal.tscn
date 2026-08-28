@@ -21,6 +21,10 @@
 [ext_resource type="Texture2D" uid="uid://bbpg5ojlxb0gh" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
 [ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="20_tiles"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="21_frail"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_3.tres" id="22_barc"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_hartwegiana_3.tres" id="23_hart"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/hypericum_3.tres" id="24_hype"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_3.tres" id="25_arcy"]
 [ext_resource type="Texture2D" uid="uid://beuuvvk0p5pnv" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
 [ext_resource type="Texture2D" uid="uid://dsacbgjb0dpw" path="res://resources/ui/journal_ink_cool.tres" id="23_inkcool"]
 [ext_resource type="Texture2D" uid="uid://dnfw5nq3847p3" path="res://resources/ui/journal_ink_neutral.tres" id="24_inkneutral"]
@@ -322,9 +326,10 @@ mouse_filter = 2
 script = ExtResource("17_known")
 title = "JOURNAL_KNOWN_FLORA"
 tile_kinds = PackedStringArray()
-textures = Array[Texture2D]([ExtResource("21_frail")])
-entry_ids = PackedStringArray("frailejon")
+textures = Array[Texture2D]([ExtResource("21_frail"), ExtResource("22_barc"), ExtResource("23_hart"), ExtResource("24_hype"), ExtResource("25_arcy")])
+entry_ids = PackedStringArray("frailejon", "espeletia_barclayana", "espeletia_hartwegiana", "hypericum", "arcytophyllum")
 tileset = ExtResource("20_tiles")
+align_ink_bottom = true
 cell_size = Vector2i(24, 30)
 header_gap_px = -12
 header_font = ExtResource("11_egg")

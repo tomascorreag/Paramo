@@ -36,6 +36,9 @@ extends Node
 ##   tokens_final      ledger tokens at end
 ##   water_final       ledger water at end
 ##   tokens_visitors   total tokens earned from visitors
+##   plants_trampled   plants feet destroyed outright (trampled at stage 0 and
+##                     freed). Ground cover mostly; a rosette needs a route
+##                     crossing it several times a day for weeks.
 ##   visitors_walked   bodies actually put on the mountain over the run. NOT the
 ##                     same as the arrivals VisitorFlow banked: opening hours
 ##                     and the concurrency cap hold some back. The gap between
@@ -90,7 +93,7 @@ const RUN_COLUMNS: PackedStringArray = [
 	"unlock_day_bridge", "unlock_day_ladder", "unlock_day_frailejon",
 	"bot_douses", "bot_travel_seconds",
 	"placements_ladder", "placements_frailejon",
-	"visitors_walked",
+	"visitors_walked", "plants_trampled",
 ]
 
 const DAY_COLUMNS: PackedStringArray = [
@@ -388,6 +391,7 @@ func run_one(run_seed: int, scenario: Dictionary = {},
 		"placements_frailejon":
 				int(bot.placements.get(&"frailejon", 0)) if bot != null else 0,
 		"visitors_walked": spawner.stats_spawned,
+		"plants_trampled": regrowth.stats_plants_trampled,
 	}
 
 	# --- cleanup -------------------------------------------------------------
@@ -430,10 +434,11 @@ func _flush_dead_objects() -> void:
 # RegrowthManager's ledger, whose deficit is grass-cells-worth missing.
 #
 # `deficit` is a FLOAT because vegetation is continuous now — a cell half worn
-# away counts half. In a sim run it is always whole numbers, since fire is the
-# only damage source here (visitor BODIES, the thing that tramples, are a scene
-# node the simulator never constructs) — but the column has to carry the
-# fraction for the game, where it does not stay whole.
+# away counts half, and a sim run has plenty of those: VisitorSpawner is in
+# _SYSTEM_DEFS and really does instantiate visitor bodies, so feet wear the
+# ground here exactly as they do in the game. (This comment used to claim the
+# simulator never constructs them. It does — ~95 a run — and every trampling
+# number in dev-notes/vegetation.md was measured through them.)
 static func _grass_fraction(initial: int, burning: int, deficit: float) -> float:
 	if initial <= 0:
 		return 1.0

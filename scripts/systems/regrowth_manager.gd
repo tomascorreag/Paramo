@@ -398,6 +398,13 @@ func get_appeal_factor() -> float:
 	return appeal_factor(vegetation_deficit(), FireManager.grid_cell_count())
 
 
+## Plants feet have finished off — trampled at growth stage 0 and freed. The
+## grass ledger has no equivalent (grass is a continuous value that bottoms
+## out, not a thing that dies), so this is the only count of what trampling
+## actually destroys. Read by the balance sim as `plants_trampled`.
+var stats_plants_trampled: int = 0
+
+
 ## Wear from a footfall. `amount` defaults to trample_per_step.
 ##
 ## Called per visitor step (Visitor._on_step_started), so it must stay cheap and
@@ -412,17 +419,54 @@ func trample(cell: Vector2i, amount: float = -1.0) -> void:
 	var wear: float = trample_per_step if amount < 0.0 else amount
 	if wear <= 0.0:
 		return
+	# A burning cell is already dirt and is fire's to resolve; walking on it
+	# must not pre-empt the burnout that registers the damage. True of the
+	# plant standing on it as well as of the grass.
+	var burning: bool = FireManager.is_burning(cell)
+	# The plant is worn BEFORE the ledger and independently of it: the ledger
+	# only tracks grass-source tiles, and a rosette standing on bare dirt is
+	# still walked on.
+	if not burning:
+		_trample_occupant(cell, wear)
 	var rec: Dictionary = _veg.get(cell, {})
 	if rec.is_empty():
 		rec = _begin_tracking(cell)
 		if rec.is_empty():
 			return
-	# A burning cell is already dirt and is fire's to resolve; walking on it
-	# must not pre-empt the burnout that registers the damage.
-	if FireManager.is_burning(cell):
+	if burning:
 		return
 	_set_veg(rec, float(rec["veg"]) - wear)
 	_refresh_paint(cell, rec)
+
+
+# Feet wear the PLANT on the cell as well as the grass under it, at the same
+# rate — a plant absorbs `trample_resistance` of it per growth stage and is
+# freed at the bottom, so a route across a stand walks it back down the sprite
+# sheet before it clears it. Duck-typed like the burn hook: the occupant
+# registry holds bridges, fences and rocks too, and none of them have feelings
+# about feet.
+#
+# Ordered BEFORE the grass ledger, not after: the ledger only tracks
+# grass-source tiles and gives up on anything else, and plants stand on dirt
+# too. The two are independent damage tracks on one cell — a cell already worn
+# bare must not shelter what is standing on it.
+func _trample_occupant(cell: Vector2i, wear: float) -> void:
+	var grid: Object = FireManager.grid()
+	# has_method, not a cast: FireManager.grid() is typed Object so the fire
+	# and regrowth tests can inject a stub, and not every stub keeps an
+	# occupant registry.
+	if grid == null or not grid.has_method(&"occupant_at"):
+		return
+	var occ: Object = grid.call(&"occupant_at", cell)
+	if occ == null or not occ.has_method(&"trample"):
+		return
+	occ.call(&"trample", wear)
+	# Counted here rather than reported by the plant, so the manager owns every
+	# trample statistic and a plant stays ignorant of who is measuring it.
+	# is_queued_for_deletion is what "the feet finished it" looks like: the
+	# plant queue_frees itself when it is trampled at stage 0.
+	if occ is Node and (occ as Node).is_queued_for_deletion():
+		stats_plants_trampled += 1
 
 
 ## Wear from the PLAYER's own footfall — trample() at player_trample_fraction.

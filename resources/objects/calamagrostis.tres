@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="PlantObjectData" format=3]
+
+[ext_resource type="Script" uid="uid://rpdc15ywvr5x" path="res://scripts/data/plant_object_data.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/calamagrostis_0.tres" id="3"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/calamagrostis_1.tres" id="4"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/calamagrostis_2.tres" id="5"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/calamagrostis_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+growth_chance = 0.08
+water_affinity = -0.3
+casts_shadow = false
+trample_resistance = 0.3
+id = &"calamagrostis"
+density_by_biome = {
+0: 0.37,
+1: 0.185,
+2: 0,
+3: 0.0
+}
+altitude_band = Vector2i(8, 32)
+patch_frequency = 0.06
+patch_cut = -0.2
+patch_edge = 0.12
+individuals_per_cell = Vector2i(2, 4)
+displaceable = true
+walk_penalty = 0.0
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

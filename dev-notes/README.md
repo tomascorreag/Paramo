@@ -22,6 +22,7 @@ Every command assumes the project root as cwd and this executable:
 | [ftue.md](ftue.md) | Opening day: start time, first-day fire grace, the tutorial strip |
 | [visitors.md](visitors.md) | Visitor sheets, recolour, parties, routing behaviour |
 | [vegetation.md](vegetation.md) | Regrowth/trample: one value per cell |
+| [flora.md](flora.md) | Eight plant species, three ecosystems: placement rules, calibration, budget |
 | [performance.md](performance.md) | Every profiler and benchmark, and what they found |
 | [balance-sim.md](balance-sim.md) | Monte Carlo balance simulator |
 | [interviews/](interviews/) | Conversaciones con habitantes de páramo: fuentes crudas y lecciones de diseño |

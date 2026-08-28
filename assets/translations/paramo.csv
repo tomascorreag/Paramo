@@ -39,6 +39,10 @@ TUTORIAL_BUILD_LADDER,a ladder climbs a two-block ledge. right click the ground 
 TUTORIAL_BUILD_BRIDGE,a bridge carries a path over a gap. right click the ground at its edge,un puente lleva un camino sobre un vacío. haz clic derecho en el suelo en su borde
 TUTORIAL_BUILD_FENCE,a fence blocks the cells it stands on. right click the ground to start a run,una cerca bloquea las casillas donde se levanta. haz clic derecho en el suelo para empezar un tramo
 TUTORIAL_BUILD_FRAILEJON,planting costs water as well as tokens. right click open ground to sow a frailejon,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un frailejón
+TUTORIAL_BUILD_ESPELETIA_BARCLAYANA,planting costs water as well as tokens. right click open ground to sow a frailejon motoso,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un frailejón motoso
+TUTORIAL_BUILD_ESPELETIA_HARTWEGIANA,planting costs water as well as tokens. right click open ground to sow a frailejon,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un frailejón
+TUTORIAL_BUILD_HYPERICUM,planting costs water as well as tokens. right click open ground to sow a chite,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un chite
+TUTORIAL_BUILD_ARCYTOPHYLLUM,planting costs water as well as tokens. right click open ground to sow a piojo,sembrar cuesta agua además de fichas. haz clic derecho en suelo libre para sembrar un piojo
 TUTORIAL_ENDPOINT,now click one of the marked cells to finish placing it,ahora haz clic en una de las casillas marcadas para terminar
 TUTORIAL_ENDPOINT_LADDER,now click a marked cell on top of the ledge. that is where the ladder lands,ahora haz clic en una casilla marcada encima del borde. ahí llega la escalera
 TUTORIAL_ENDPOINT_BRIDGE,now click a marked cell across the gap. the bridge spans to it,ahora haz clic en una casilla marcada al otro lado del vacío. el puente llega hasta ahí

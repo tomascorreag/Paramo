@@ -9,8 +9,8 @@ extends RefCounted
 #
 #   1. `assign_object_kinds(grid)` — rolls each registered `WorldObjectData`'s
 #      `density_by_biome` against eligible cells and writes
-#      `TerrainCell.object_kind`. Called every Regenerate; non-deterministic
-#      so each call produces a fresh scatter at the same terrain seed.
+#      `TerrainCell.object_kind`. Called every Regenerate; deterministic per
+#      object-rng seed, and it also picks the run's EcosystemProfile.
 #   2. `paint(grid, world, pathfinder)` — instantiates Node2D occupants for
 #      every flagged cell and parents them under `world`.
 #
@@ -33,26 +33,45 @@ extends RefCounted
 
 
 # Kind → WorldObjectData. Single source of truth for the kinds the painter
-# knows how to procgen-place. Frailejones spawn procedurally for the natural
-# baseline scatter; players can still plant more (the action layer reuses
-# the same scene). Procgen instances join group `&"procedural_object"` and
-# are cleared on Regenerate; player-planted ones aren't tagged and survive.
+# knows how to procgen-place. Every plant species spawns procedurally for the
+# natural baseline scatter (which species, and how much, is the run's
+# EcosystemProfile); players can plant the woody/rosette ones on top (the
+# action layer reuses the same scene and .tres via `data_for`). Procgen
+# instances join group `&"procedural_object"` and are cleared on Regenerate;
+# player-planted ones aren't tagged and survive. `frailejon` is Espeletia
+# grandiflora — the id predates the species list and is keyed on everywhere
+# (FTUE, unlocks, sim), so it stays.
 const _ROCK_DATA: WorldObjectData = preload("res://resources/objects/rock.tres")
 const _ROCK_SNOW_DATA: WorldObjectData = preload("res://resources/objects/rock_snow.tres")
 const _ROCK_MOSS_DATA: WorldObjectData = preload("res://resources/objects/rock_moss.tres")
 const _FRAILEJON_DATA: WorldObjectData = preload("res://resources/objects/frailejon.tres")
+const _ESPELETIA_BARCLAYANA_DATA: WorldObjectData = preload("res://resources/objects/espeletia_barclayana.tres")
+const _ESPELETIA_HARTWEGIANA_DATA: WorldObjectData = preload("res://resources/objects/espeletia_hartwegiana.tres")
+const _CALAMAGROSTIS_DATA: WorldObjectData = preload("res://resources/objects/calamagrostis.tres")
+const _CHUSQUEA_DATA: WorldObjectData = preload("res://resources/objects/chusquea.tres")
+const _CORTADERIA_DATA: WorldObjectData = preload("res://resources/objects/cortaderia.tres")
+const _HYPERICUM_DATA: WorldObjectData = preload("res://resources/objects/hypericum.tres")
+const _ARCYTOPHYLLUM_DATA: WorldObjectData = preload("res://resources/objects/arcytophyllum.tres")
 
 const _DATA_BY_KIND: Dictionary = {
 	&"rock": _ROCK_DATA,
 	&"rock_snow": _ROCK_SNOW_DATA,
 	&"rock_moss": _ROCK_MOSS_DATA,
 	&"frailejon": _FRAILEJON_DATA,
+	&"espeletia_barclayana": _ESPELETIA_BARCLAYANA_DATA,
+	&"espeletia_hartwegiana": _ESPELETIA_HARTWEGIANA_DATA,
+	&"calamagrostis": _CALAMAGROSTIS_DATA,
+	&"chusquea": _CHUSQUEA_DATA,
+	&"cortaderia": _CORTADERIA_DATA,
+	&"hypericum": _HYPERICUM_DATA,
+	&"arcytophyllum": _ARCYTOPHYLLUM_DATA,
 }
 
-# Kind → PackedScene. All boulder-shaped kinds share `rock.tscn` — the
-# Sprite2D + shadow shader config is identical across rock / rock_snow /
-# rock_moss; only the texture variants differ, and those come off the
-# instance's `data` resource (overridden in the spawn loop). This dict lives
+# Kind → PackedScene. All boulder-shaped kinds share `rock.tscn` and all
+# plant kinds share `frailejon.tscn` — the Sprite2D + shadow shader config is
+# identical within a family; only the texture variants (and, for plants, the
+# growth/shadow/displaceable flags) differ, and those come off the instance's
+# `data` resource (overridden in the spawn loop). This dict lives
 # here — not on WorldObjectData — to break the rock.tscn ↔ rock.tres
 # load-time cycle.
 const _ROCK_SCENE: PackedScene = preload("res://scenes/objects/rock.tscn")
@@ -63,9 +82,33 @@ const _SCENE_BY_KIND: Dictionary = {
 	&"rock_snow": _ROCK_SCENE,
 	&"rock_moss": _ROCK_SCENE,
 	&"frailejon": _FRAILEJON_SCENE,
+	&"espeletia_barclayana": _FRAILEJON_SCENE,
+	&"espeletia_hartwegiana": _FRAILEJON_SCENE,
+	&"calamagrostis": _FRAILEJON_SCENE,
+	&"chusquea": _FRAILEJON_SCENE,
+	&"cortaderia": _FRAILEJON_SCENE,
+	&"hypericum": _FRAILEJON_SCENE,
+	&"arcytophyllum": _FRAILEJON_SCENE,
 }
 
 const _GROUP_PROCEDURAL: StringName = &"procedural_object"
+
+# The ecosystems a run can draw. One is picked per grid by the FIRST draw of
+# the object rng stream (see assign_object_kinds), so every caller that seeds
+# the stream the same way — ProceduralWorld, SimWorld, the invariants harness —
+# lands on the same mountain for the same seed without passing it around.
+# Order matters: it is the index the draw selects. Append, never reorder.
+const _PROFILES: Array[EcosystemProfile] = [
+	preload("res://resources/ecosystems/chingaza.tres"),
+	preload("res://resources/ecosystems/guerrero.tres"),
+	preload("res://resources/ecosystems/nevados.tres"),
+]
+
+# Above this many plant occupants per grid, assign_object_kinds warns. Each
+# plant is one or two CanvasItems and canvas-item count is the measured
+# web-frame lever (dev-notes/performance.md); the target is ~350–450. Tune
+# per-kind densities down rather than thinning after the fact.
+const PLANT_BUDGET: int = 600
 
 ## The one authored derivation for the object-placement RNG stream:
 ## rng.seed = terrain_seed ^ OBJECT_SEED_XOR. Lives here (the consumer of the
@@ -80,19 +123,33 @@ const OBJECT_SEED_XOR: int = 0xC8FAB0CC
 const _SIGMA_ALT: float = 3.0
 
 
-## Roll each registered kind's `density_by_biome` against every eligible cell
-## and write the winner into `TerrainCell.object_kind`. Cells previously
-## flagged are reset before rolling, so calling this twice on the same grid
-## produces a fresh scatter rather than stacking flags.
+## Pick the run's ecosystem, then roll every registered kind against every
+## eligible cell and write the winner into `TerrainCell.object_kind`. Cells
+## previously flagged are reset before rolling, so calling this twice on the
+## same grid produces a fresh scatter rather than stacking flags.
 ##
 ## Eligible cells: `kind == GROUND` AND `ground_shape ∈ {FULL_CUBE, FLAT}`.
-## When multiple kinds have non-zero density on the same biome, they're
-## rolled in dictionary-key order — first hit wins.
+##
+## Per cell, every kind gets a weight
+##   d_k = density_by_biome[biome] × ecosystem scale × altitude × water × patch
+## and the cell is occupied with probability min(Σ d_k, 1), the occupant drawn
+## proportionally to the weights. This is a WEIGHTED pick, not first-hit-wins:
+## with a dozen competing kinds, dictionary order must not be a balance knob.
+## Σ d_k > 1 saturates — two kinds at 0.8 on the same cell do not make it
+## 160% full, they split it.
+##
+## `profile` is the ecosystem. When null it is drawn from `rng` — the FIRST
+## draw of the stream — so every caller that seeds the object rng the same
+## way (ProceduralWorld, SimWorld, the harness) gets the same mountain per
+## seed with no plumbing. The choice is written to `grid.ecosystem`.
 ##
 ## `rng` defaults to a freshly randomized RNG so successive calls yield
-## different layouts. Pass an explicit RNG (e.g. seeded) if you need
-## reproducibility (only the verify-invariants harness does today).
-static func assign_object_kinds(grid: TerrainGrid, rng: RandomNumberGenerator = null) -> void:
+## different layouts. Pass a seeded RNG for reproducibility.
+static func assign_object_kinds(
+	grid: TerrainGrid,
+	rng: RandomNumberGenerator = null,
+	profile: EcosystemProfile = null,
+) -> void:
 	if grid == null:
 		return
 	if _DATA_BY_KIND.is_empty():
@@ -101,20 +158,54 @@ static func assign_object_kinds(grid: TerrainGrid, rng: RandomNumberGenerator = 
 		rng = RandomNumberGenerator.new()
 		rng.randomize()
 
-	# Distance-to-water field, computed once per call IF any registered plant
-	# kind uses water_affinity > 0. Multi-source BFS over face-connected cells
-	# is O(W * H) — much cheaper than a per-cell radius scan inside the
-	# placement loop. Skipped entirely when no plant kind needs it, so adding
-	# more plain (non-water-biased) plant kinds costs nothing.
-	var water_dist: PackedInt32Array = PackedInt32Array()
+	if profile == null:
+		profile = _PROFILES[rng.randi_range(0, _PROFILES.size() - 1)]
+	grid.ecosystem = profile
+
+	# Per-kind precompute, in registry order. The ecosystem scale applies to
+	# PLANT kinds only — rocks are geology, not flora, and a profile listing
+	# them would just be noise. Kinds scaled to 0 are dropped here so the
+	# per-cell loop never sees them.
+	var kinds: Array[StringName] = []
+	var datas: Array[WorldObjectData] = []
+	var scales: PackedFloat32Array = PackedFloat32Array()
+	var noises: Array = []  # FastNoiseLite or null, parallel to `kinds`
 	var need_water_dist: bool = false
-	for kind in _DATA_BY_KIND.keys():
-		var d_kind: WorldObjectData = _DATA_BY_KIND[kind]
-		if d_kind is PlantObjectData and (d_kind as PlantObjectData).water_affinity > 0.0:
-			need_water_dist = true
-			break
+	for kind: StringName in _DATA_BY_KIND.keys():
+		var data: WorldObjectData = _DATA_BY_KIND[kind]
+		var scale: float = 1.0
+		if data is PlantObjectData:
+			scale = profile.scale_for(kind)
+			if (data as PlantObjectData).water_affinity != 0.0:
+				need_water_dist = true
+		if scale <= 0.0:
+			continue
+		kinds.append(kind)
+		datas.append(data)
+		scales.append(scale)
+		# Patch noise: one generator per patchy kind, seeded from the stream
+		# (one draw, fixed order) xor the kind name so two species never
+		# share an outline even at the same draw.
+		var noise: FastNoiseLite = null
+		if data.patch_frequency > 0.0:
+			noise = FastNoiseLite.new()
+			noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+			noise.frequency = data.patch_frequency
+			noise.seed = int(hash(kind)) ^ rng.randi()
+		noises.append(noise)
+
+	# Distance-to-water field, computed once per call IF any surviving plant
+	# kind reads it (affinity or avoidance). Multi-source BFS over
+	# face-connected cells is O(W * H) — much cheaper than a per-cell radius
+	# scan inside the placement loop.
+	var water_dist: PackedInt32Array = PackedInt32Array()
 	if need_water_dist:
 		water_dist = _compute_water_distance(grid)
+
+	var n: int = kinds.size()
+	var weights: PackedFloat32Array = PackedFloat32Array()
+	weights.resize(n)
+	var plant_count: int = 0
 
 	for y in grid.height:
 		for x in grid.width:
@@ -125,29 +216,113 @@ static func assign_object_kinds(grid: TerrainGrid, rng: RandomNumberGenerator = 
 			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
 					and c.ground_shape != TerrainCell.GroundShape.FLAT:
 				continue
-			for kind in _DATA_BY_KIND.keys():
-				var data: WorldObjectData = _DATA_BY_KIND[kind]
+			var total: float = 0.0
+			for i in n:
+				var data: WorldObjectData = datas[i]
 				var d: float = float(data.density_by_biome.get(c.biome, 0.0))
-				if d <= 0.0:
-					continue
-				# Optional altitude preference. `preferred_altitude <= 0`
-				# means "no preference" (matches the tile painter's pa
-				# semantics): the term drops out and density is used flat.
-				if data.preferred_altitude > 0:
-					var ad: float = float(c.altitude - data.preferred_altitude)
-					d *= exp(- (ad * ad) / (2.0 * _SIGMA_ALT * _SIGMA_ALT))
-				# Plant-only water-proximity bias. Reads the precomputed
-				# BFS field; dist == INT_MAX (no water on the grid) collapses
-				# the term to 0, which is the correct degenerate behavior.
-				if need_water_dist and data is PlantObjectData:
-					var wa: float = (data as PlantObjectData).water_affinity
-					if wa > 0.0:
-						var dist: int = water_dist[y * grid.width + x]
-						var fd: float = float(dist)
-						d *= exp(-wa * fd * fd)
-				if rng.randf() < d:
-					c.object_kind = kind
+				if d > 0.0:
+					d *= scales[i]
+					d *= _altitude_term(data, c.altitude)
+					if need_water_dist and data is PlantObjectData:
+						var wa: float = (data as PlantObjectData).water_affinity
+						if wa != 0.0:
+							d *= _water_term(wa, water_dist[y * grid.width + x])
+					if noises[i] != null:
+						d *= _patch_term(noises[i], data.patch_cut, data.patch_edge, x, y)
+				weights[i] = d
+				total += d
+			if total <= 0.0:
+				continue
+			if rng.randf() >= minf(total, 1.0):
+				continue
+			# Occupied: draw the kind proportionally to its weight.
+			var pick: float = rng.randf() * total
+			var acc: float = 0.0
+			var chosen: int = n - 1
+			for i in n:
+				acc += weights[i]
+				if pick < acc:
+					chosen = i
 					break
+			c.object_kind = kinds[chosen]
+			if datas[chosen] is PlantObjectData:
+				plant_count += 1
+
+	if plant_count > PLANT_BUDGET:
+		push_warning(
+			"ObjectPainter: %d plants on a %dx%d grid (ecosystem '%s') — over PLANT_BUDGET %d. Lower per-kind densities; see dev-notes/performance.md."
+			% [plant_count, grid.width, grid.height, profile.id, PLANT_BUDGET]
+		)
+
+
+## The registered data for `kind`, or null. For the action layer, which
+## spawns player-placed plants from the same .tres the painter scatters.
+static func data_for(kind: StringName) -> WorldObjectData:
+	return _DATA_BY_KIND.get(kind)
+
+
+## The scene every plant kind is rendered with. Kind-specific behaviour comes
+## from the `data` resource swapped in at spawn, not from separate scenes.
+static func plant_scene() -> PackedScene:
+	return _FRAILEJON_SCENE
+
+
+## The ecosystem profile with `id`, or null when unknown / empty. Used by
+## `ProceduralWorld.ecosystem_override` and tools to pin a mountain.
+static func profile_by_id(id: StringName) -> EcosystemProfile:
+	if id == &"":
+		return null
+	for p in _PROFILES:
+		if p.id == id:
+			return p
+	push_warning("ObjectPainter: unknown ecosystem id '%s'." % id)
+	return null
+
+
+## Every ecosystem a run can draw, in draw-index order.
+static func profiles() -> Array[EcosystemProfile]:
+	return _PROFILES
+
+
+# Altitude multiplier in [0, 1]. A band (`altitude_band.x >= 0`) is a plateau
+# with Gaussian shoulders on the distance to its nearest edge; otherwise the
+# legacy single-peak Gaussian on `preferred_altitude`; otherwise flat. Both
+# use `_SIGMA_ALT` so one internalised falloff shape serves both.
+static func _altitude_term(data: WorldObjectData, altitude: int) -> float:
+	var dd: float = 0.0
+	if data.altitude_band.x >= 0:
+		if altitude < data.altitude_band.x:
+			dd = float(data.altitude_band.x - altitude)
+		elif altitude > data.altitude_band.y:
+			dd = float(altitude - data.altitude_band.y)
+	elif data.preferred_altitude > 0:
+		dd = float(altitude - data.preferred_altitude)
+	else:
+		return 1.0
+	return exp(- (dd * dd) / (2.0 * _SIGMA_ALT * _SIGMA_ALT))
+
+
+# Water multiplier in [0, 1] from a signed affinity and a BFS distance.
+# `dist == INT32_MAX` (no water on the grid) collapses attraction to 0 and
+# avoidance to 1 — the correct degenerate behaviour in both directions.
+static func _water_term(affinity: float, dist: int) -> float:
+	var fd: float = float(dist)
+	var g: float = exp(-absf(affinity) * fd * fd)
+	return g if affinity > 0.0 else 1.0 - g
+
+
+# Patch multiplier in [0, 1]: noise at or above `cut` ramps linearly to 1 over
+# `edge`, so a patch is a plateau with a soft rim rather than a hard outline.
+# The ramp is a FIXED width on the noise scale, not "to the noise ceiling":
+# TYPE_SIMPLEX_SMOOTH only reaches ±0.75 (p90 = 0.33), so a ramp to 1.0 would
+# average ~0.2 across a whole patch interior and silently halve every patchy
+# species — the first report_flora_scatter run measured exactly that. `edge` is
+# per species (WorldObjectData.patch_edge) because the pajonal matrix and a
+# chuscal want opposite shapes: wide-and-low is a soft mosaic, narrow-and-high
+# is a small dense stand with a sharp boundary.
+static func _patch_term(noise: FastNoiseLite, cut: float, edge: float, x: int, y: int) -> float:
+	var v: float = noise.get_noise_2d(float(x), float(y))
+	return clampf((v - cut) / maxf(edge, 0.001), 0.0, 1.0)
 
 
 # Multi-source BFS over 4-connected face neighbors. Returns a flat W*H
@@ -217,8 +392,9 @@ static func paint(
 	world: Node2D,
 	pathfinder: Pathfinder,
 	rng: RandomNumberGenerator = null,
+	profile: EcosystemProfile = null,
 ) -> void:
-	var ctx: Dictionary = begin_spawn(grid, world, pathfinder, rng)
+	var ctx: Dictionary = begin_spawn(grid, world, pathfinder, rng, profile)
 	if ctx.is_empty():
 		return
 	while not spawn_step(ctx, 0x7FFFFFFF):
@@ -231,12 +407,14 @@ static func paint(
 ## with a small row budget across frames keeps instantiation (100-500 nodes)
 ## from freezing the main thread on load. Pass a seeded `rng` for
 ## reproducible layouts (ProceduralWorld derives one from the terrain seed);
-## null keeps the legacy randomized behavior.
+## null keeps the legacy randomized behavior. `profile` pins the ecosystem;
+## null draws it from `rng` (see assign_object_kinds).
 static func begin_spawn(
 	grid: TerrainGrid,
 	world: Node2D,
 	pathfinder: Pathfinder,
 	rng: RandomNumberGenerator = null,
+	profile: EcosystemProfile = null,
 ) -> Dictionary:
 	if grid == null:
 		push_error("ObjectPainter.begin_spawn: grid is null.")
@@ -252,7 +430,7 @@ static func begin_spawn(
 		rng = RandomNumberGenerator.new()
 		rng.randomize()
 
-	assign_object_kinds(grid, rng)
+	assign_object_kinds(grid, rng, profile)
 	_clear_existing(world)
 
 	return {

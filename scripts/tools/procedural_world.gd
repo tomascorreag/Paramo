@@ -64,6 +64,17 @@ signal generation_finished
 ##
 ## seed_override = -1  → use generation_params.seed
 @export var seed_override: int = -1
+## ecosystem_override = &""  → ObjectPainter draws the ecosystem from the seed.
+## Set to a profile id (`chingaza`, `guerrero`, `nevados`) to pin which real
+## paramo this map is; level1 pins `chingaza` so the FTUE's frailejón is
+## always on sale.
+@export var ecosystem_override: StringName = &""
+
+## The ecosystem the last generation placed — the pinned override, or the one
+## ObjectPainter drew from the seed. Read by UnlockState.is_available (group
+## `procedural_world`) to limit the shop to this mountain's species. Null
+## until the object pass has run.
+var ecosystem: EcosystemProfile = null
 
 @export_group("Wiring")
 ## Ground TileMapLayers indexed by altitude. Drag the layers in low-to-high.
@@ -201,7 +212,10 @@ func regenerate() -> void:
 		# editor mode (Pathfinder is a placeholder) and when `world` is
 		# unwired (defensive — emits a single error).
 		if world != null:
-			_OBJECT_PAINTER.paint(grid, world, pathfinder, _object_rng(params))
+			_OBJECT_PAINTER.paint(
+					grid, world, pathfinder, _object_rng(params),
+					_OBJECT_PAINTER.profile_by_id(ecosystem_override))
+			ecosystem = grid.ecosystem
 
 	_place_player_on_walkable(grid)
 
@@ -273,7 +287,9 @@ func regenerate_async() -> void:
 			if overlay != null:
 				overlay.set_status("LOADING_PLANTING")
 			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(
-					grid, world, pathfinder, _object_rng(params))
+					grid, world, pathfinder, _object_rng(params),
+					_OBJECT_PAINTER.profile_by_id(ecosystem_override))
+			ecosystem = grid.ecosystem
 			if not spawn_ctx.is_empty():
 				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
 					if overlay != null:

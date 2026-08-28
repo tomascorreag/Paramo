@@ -140,6 +140,20 @@ extends Control
 ## The page's warp quantisation. The title row rounds up to a multiple of this, so
 ## changing the title face or size cannot knock the swatch row off phase. Keep it
 ## equal to the page's `row_block_px`; tests/test_journal_pages.gd guards that.
+## Stand every swatch's INK on the cell's bottom row instead of centring it.
+## For a set whose entries differ a lot in height (the flora: a 24-row
+## frailejón beside a 10-row shrub) centring puts each ink top at a different
+## row, and there is then no header row at which they all clear the warp
+## seams — measured: hypericum (15 rows) and arcytophyllum (10 rows) straddled
+## a block at every gap from -36 to 36. With a shared baseline every run ends
+## on the same row, so one row top serves all heights (and plants standing on
+## one ground line is the right picture anyway). Off for the buildings set,
+## whose centred layout was tuned by hand and passes as it is.
+@export var align_ink_bottom: bool = false:
+	set(value):
+		align_ink_bottom = value
+		_rebuild()
+
 @export var block_px: int = 18:
 	set(value):
 		block_px = value
@@ -358,9 +372,17 @@ func swatch_ink_run(index: int, tex: Texture2D) -> Vector2i:
 	var cell := cell_size_for(index)
 	var ink := _ink_rect(tex)
 	# The row's top is a whole texel, so it factors out of the floor _rebuild does.
-	var off: int = int(floorf((float(cell.y) - ink.size.y) * 0.5 - ink.position.y)) \
-			+ int(ink.position.y)
+	var off: int = int(floorf(_ink_top_in_cell(cell, ink)))
 	return Vector2i(off, int(ink.size.y))
+
+
+# Where the INK's top row sits below the row top: bottom-aligned or centred.
+# Shared by _rebuild (which places the texture) and swatch_ink_run (which
+# tells the snap what will be inked), so the two cannot disagree.
+func _ink_top_in_cell(cell: Vector2i, ink: Rect2) -> float:
+	if align_ink_bottom:
+		return float(cell.y) - ink.size.y
+	return (float(cell.y) - ink.size.y) * 0.5
 
 
 ## Every run of ink this section draws, in its own local space, labelled. The
@@ -722,7 +744,7 @@ func _rebuild() -> void:
 		var ink := _ink_rect(tex)
 		r.position = Vector2(
 			floorf(x + (float(cell.x) - ink.size.x) * 0.5 - ink.position.x),
-			floorf(top + (float(cell.y) - ink.size.y) * 0.5 - ink.position.y))
+			floorf(top + _ink_top_in_cell(cell, ink) - ink.position.y))
 		_rest_positions.append(r.position)
 		add_child(r)
 		# Deliberately NOT set_owner: under @tool an owned child would be written

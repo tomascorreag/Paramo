@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="PlantObjectData" format=3]
+
+[ext_resource type="Script" uid="uid://rpdc15ywvr5x" path="res://scripts/data/plant_object_data.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_0.tres" id="3"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_1.tres" id="4"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_2.tres" id="5"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+growth_chance = 0.028
+water_affinity = 0.0
+casts_shadow = true
+trample_resistance = 0.6
+id = &"arcytophyllum"
+density_by_biome = {
+0: 0.31,
+1: 0.155,
+2: 0.093,
+3: 0.0
+}
+altitude_band = Vector2i(0, 30)
+patch_frequency = 0.05
+patch_cut = 0.30
+patch_edge = 0.08
+individuals_per_cell = Vector2i(2, 4)
+displaceable = false
+walk_penalty = 0.3
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

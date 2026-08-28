@@ -86,4 +86,5 @@ script = ExtResource("3_fpv")
 [node name="ProceduralWorld" parent="." index="20"]
 generation_params = ExtResource("2_b7bw0")
 seed_override = 26
+ecosystem_override = &"chingaza"
 randomize_seed_on_ready = true

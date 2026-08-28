@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="PlantObjectData" format=3]
+
+[ext_resource type="Script" uid="uid://rpdc15ywvr5x" path="res://scripts/data/plant_object_data.gd" id="1"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_0.tres" id="3"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_1.tres" id="4"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_2.tres" id="5"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_3.tres" id="6"]
+
+[resource]
+script = ExtResource("1")
+growth_chance = 0.012
+water_affinity = -0.05
+casts_shadow = true
+trample_resistance = 3.0
+id = &"espeletia_barclayana"
+density_by_biome = {
+0: 0.57,
+1: 0.285,
+2: 0,
+3: 0.0
+}
+altitude_band = Vector2i(4, 20)
+patch_frequency = 0.07
+patch_cut = 0.22
+patch_edge = 0.08
+displaceable = false
+walk_penalty = 0.4
+variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

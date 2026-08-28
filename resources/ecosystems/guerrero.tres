@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EcosystemProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ecosystem_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"guerrero"
+density_scale = {
+&"espeletia_barclayana": 1.0,
+&"calamagrostis": 1.2,
+&"chusquea": 0.15,
+&"cortaderia": 0.6,
+&"hypericum": 1.0,
+&"arcytophyllum": 1.0
+}
+plantable = Array[StringName]([&"espeletia_barclayana", &"hypericum", &"arcytophyllum"])

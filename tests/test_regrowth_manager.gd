@@ -41,8 +41,16 @@ class GridStub:
 
 	var cells: Dictionary = {}
 
+	# Trampling forwards a footfall to whatever is standing on the cell, so
+	# the stub grid has to answer the same occupant query the real TileGrid
+	# does. Empty in every test that is only about grass.
+	var occupants: Dictionary = {}
+
 	func get_tile(cell: Vector2i) -> Variant:
 		return cells.get(cell)
+
+	func occupant_at(cell: Vector2i) -> Object:
+		return occupants.get(cell)
 
 	func cell_count() -> int:
 		return cells.size()
@@ -62,6 +70,24 @@ class GridStub:
 			else:
 				r = r.expand(cell).expand(cell + Vector2i.ONE)
 		return r
+
+
+# Stands in for a Frailejon: the manager only knows that an occupant may have
+# a trample() method, so anything that does is a plant as far as it is
+# concerned.
+class PlantStub:
+	extends Node2D
+
+	var wear_taken: float = 0.0
+
+	func trample(amount: float) -> void:
+		wear_taken += amount
+
+
+# An occupant that is NOT a plant — a fence, a bridge deck, a rock. Feet must
+# not error on it.
+class MuteOccupantStub:
+	extends Node2D
 
 
 class TileStub:
@@ -621,6 +647,92 @@ func test_a_regenerated_world_forgets_every_scar() -> void:
 
 	assert_eq(_regrowth._veg.size(), 0,
 			"stale records would repaint grass onto a brand new mountain")
+
+
+func test_a_footfall_wears_the_plant_standing_on_the_cell() -> void:
+	var cell := Vector2i(2, 2)
+	_put_grass(cell)
+	var plant := PlantStub.new()
+	add_child_autofree(plant)
+	_grid.occupants[cell] = plant
+	_regrowth.trample_per_step = 0.2
+
+	_regrowth.trample(cell)
+
+	assert_almost_eq(plant.wear_taken, 0.2, 0.0001,
+			"the plant takes the same wear the grass under it does")
+	assert_almost_eq(_regrowth.vegetation_at(cell), 0.8, 0.0001)
+
+
+func test_the_player_treads_lighter_on_plants_too() -> void:
+	var cell := Vector2i(2, 2)
+	_put_grass(cell)
+	var plant := PlantStub.new()
+	add_child_autofree(plant)
+	_grid.occupants[cell] = plant
+	_regrowth.trample_per_step = 0.4
+	_regrowth.player_trample_fraction = 0.25
+
+	_regrowth.trample_by_player(cell)
+
+	assert_almost_eq(plant.wear_taken, 0.1, 0.0001)
+
+
+func test_a_plant_on_bare_dirt_is_still_trampled() -> void:
+	# The vegetation ledger only tracks grass-source tiles and gives up on
+	# anything else. A rosette standing on dirt is still walked on, so the
+	# plant hook cannot sit behind that early return.
+	var cell := Vector2i(4, 4)
+	var plant := PlantStub.new()
+	add_child_autofree(plant)
+	_grid.occupants[cell] = plant
+	FireManager._grid = _grid
+	_regrowth.trample_per_step = 0.3
+
+	_regrowth.trample(cell)
+
+	assert_almost_eq(plant.wear_taken, 0.3, 0.0001)
+	assert_eq(_regrowth.vegetation_at(cell), 1.0, "no grass here to lose")
+
+
+func test_a_burning_cell_is_fires_to_resolve_for_the_plant_as_well() -> void:
+	var cell := Vector2i(2, 2)
+	_put_grass(cell)
+	var plant := PlantStub.new()
+	add_child_autofree(plant)
+	_grid.occupants[cell] = plant
+	FireManager._burning[cell] = {}
+
+	_regrowth.trample(cell)
+
+	assert_eq(plant.wear_taken, 0.0)
+	assert_eq(_regrowth.vegetation_at(cell), 1.0)
+
+
+func test_a_non_plant_occupant_ignores_feet() -> void:
+	var cell := Vector2i(2, 2)
+	_put_grass(cell)
+	_grid.occupants[cell] = MuteOccupantStub.new()
+	autofree(_grid.occupants[cell])
+
+	_regrowth.trample(cell)
+
+	assert_almost_eq(_regrowth.vegetation_at(cell), 1.0 - _regrowth.trample_per_step, 0.0001,
+			"the grass still wears; only the plant hook is skipped")
+
+
+func test_a_grid_without_an_occupant_registry_does_not_break_trampling() -> void:
+	# FireManager.grid() is typed Object so tests (and the headless sim) can
+	# inject a stub; not every stub keeps occupants.
+	var cell := Vector2i(2, 2)
+	_put_grass(cell)
+	FireManager._grid = RefCounted.new()
+	_regrowth.trample_per_step = 0.1
+
+	_regrowth.trample(cell)
+
+	assert_eq(_regrowth.vegetation_at(cell), 1.0,
+			"an unreadable grid means the cell is not tracked, not a crash")
 
 
 # --- continuous recovery -----------------------------------------------------

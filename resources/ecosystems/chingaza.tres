@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EcosystemProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ecosystem_profile.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"chingaza"
+density_scale = {
+&"frailejon": 1.0,
+&"calamagrostis": 1.0,
+&"chusquea": 1.0,
+&"cortaderia": 1.0,
+&"hypericum": 0.8,
+&"arcytophyllum": 1.0
+}
+plantable = Array[StringName]([&"frailejon", &"hypericum", &"arcytophyllum"])

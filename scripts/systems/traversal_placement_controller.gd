@@ -62,9 +62,14 @@ var _tile_interaction: TileInteractionController
 var _player: Player
 
 # Kinds that count as "occupied" for new placement validation. Order doesn't
-# matter — _gather_blocked_cells unions them all into the blocked dict.
+# matter — _gather_blocked_cells unions them all into the blocked dict. The
+# grasses (calamagrostis, chusquea, cortaderia) are deliberately absent: they
+# are `displaceable` ground cover, and TileGrid.set_occupant evicts them when
+# a structure claims the cell.
 const _BLOCKING_KINDS: Array[StringName] = [
-	&"frailejon", &"bridge_deck", &"ladder", &"rock", &"fence"
+	&"frailejon", &"espeletia_barclayana", &"espeletia_hartwegiana",
+	&"hypericum", &"arcytophyllum",
+	&"bridge_deck", &"ladder", &"rock", &"fence"
 ]
 
 

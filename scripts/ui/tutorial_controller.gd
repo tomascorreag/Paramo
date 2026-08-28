@@ -228,6 +228,10 @@ const _BUILD_KEYS: Dictionary = {
 	&"bridge": "TUTORIAL_BUILD_BRIDGE",
 	&"fence": "TUTORIAL_BUILD_FENCE",
 	&"frailejon": "TUTORIAL_BUILD_FRAILEJON",
+	&"espeletia_barclayana": "TUTORIAL_BUILD_ESPELETIA_BARCLAYANA",
+	&"espeletia_hartwegiana": "TUTORIAL_BUILD_ESPELETIA_HARTWEGIANA",
+	&"hypericum": "TUTORIAL_BUILD_HYPERICUM",
+	&"arcytophyllum": "TUTORIAL_BUILD_ARCYTOPHYLLUM",
 }
 
 ## Second-click copy per type, on the same fallback rule as _BUILD_KEYS. Each

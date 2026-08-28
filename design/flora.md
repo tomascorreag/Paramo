@@ -31,6 +31,10 @@ Ordered as the reference PDF is ordered: structural dominants first, then shrubs
 
 Common names are stripped of accents in the table above **on purpose** — see [Naming and localisation](#naming-and-localisation).
 
+## In the game (2026-08-28)
+
+Rows 0–7 of `assets/sprites/objects/ISO_Plants.png` are #2, #4, #3, #1, #5, #6, #7, #10 in this list's numbering, each with four growth stages. They are placed by `ObjectPainter` from `resources/objects/<kind>.tres`, and a run draws ONE of three `EcosystemProfile`s modelled on real paramos — `chingaza` (*grandiflora*), `guerrero` (*barclayana*), `nevados` (*hartwegiana*) — because the three *Espeletia* are allopatric (GBIF department facets: *hartwegiana* Tolima/Cauca/Caldas; *grandiflora* 80% Cundinamarca; *barclayana* Cundinamarca/Boyacá, absent from Chingaza's own monitoring) and *Arcytophyllum nitidum* has one record in the whole Cordillera Central. That settles the open question below: one signature *Espeletia* per mountain, and the shrubs follow the mountain too. The rosettes and the two shrubs are sold; the grasses colonise and are not. Ground cover draws several individuals on one cell (a cell is ~2 m across and *Calamagrostis* tussocks stand ~0.5 m apart), while anything with a trunk or a rosette is one plant on one cell. Numbers, sources and the measured placement are in [../dev-notes/flora.md](../dev-notes/flora.md).
+
 ## Why these twenty
 
 Selected for **ground cover and encounter frequency in Colombian paramo**, not for taxonomic representativeness. Two lines of evidence, and species were only kept where both agreed:

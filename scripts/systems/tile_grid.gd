@@ -918,11 +918,22 @@ func set_occupant(cell: Vector2i, node: Node2D) -> bool:
 		# than crash.
 		return false
 	if t.occupant != null and t.occupant != node:
-		push_warning(
-			"TileGrid.set_occupant: cell %s already occupied by %s; refusing to overwrite with %s."
-			% [cell, t.occupant, node]
-		)
-		return false
+		# Natural ground cover (a tussock, a bamboo clump — `is_displaceable`)
+		# yields to whatever is being placed on it: released here and freed,
+		# so the new claim lands in the SAME frame. This is the one eviction
+		# point for every placer (plants, bridges, ladders, fences); the
+		# action/validation layer decides whether the cell is offered at all,
+		# the registry decides what happens to what was there.
+		var old: Node2D = t.occupant
+		if old.has_method(&"is_displaceable") and bool(old.call(&"is_displaceable")):
+			clear_occupant(cell, old)
+			old.queue_free()
+		else:
+			push_warning(
+				"TileGrid.set_occupant: cell %s already occupied by %s; refusing to overwrite with %s."
+				% [cell, t.occupant, node]
+			)
+			return false
 	t.occupant = node
 	var kind: StringName = _occupant_kind_of(node)
 	if kind != &"":

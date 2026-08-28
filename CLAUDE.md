@@ -76,6 +76,8 @@ headless run sees them.
 | `measure_tile_ink.gd` | Where a tile's art lands on its cell, in texels | [tiles](dev-notes/tiles.md) |
 | `preview_fence.gd` | A built fence run, in context | [tiles](dev-notes/tiles.md) |
 | `preview_grass_wear.gd` | A wear ramp across real terrain; audits generated grass rungs | [vegetation](dev-notes/vegetation.md) |
+| `report_flora_scatter.gd` | Per ecosystem × species: count, altitude, water distance, clumping; asserts the research orderings + plant budget. **Run after retuning any `resources/objects/*.tres` or ecosystem.** | [flora](dev-notes/flora.md) |
+| `preview_flora_scatter.gd` | One ecosystem's flora on the real map, aimed at the densest stand | [flora](dev-notes/flora.md) |
 | `index_character_sheet.gd` | Rebuild a visitor index sheet. **Re-run after any repaint.** | [visitors](dev-notes/visitors.md) |
 | `verify_visitor_palette.gd` | Diff the recolour shader against the rolled colours | [visitors](dev-notes/visitors.md) |
 | `preview_visitor_palettes.gd` | Wardrobe grid, or a crowd walking a real map | [visitors](dev-notes/visitors.md) |
@@ -116,6 +118,46 @@ to them. Generator, indexing and sim tools are headless.
   The effect scales with how much is revealed at once — a six-cell fire is pure
   noise. Deleting `.godot/shader_cache` does NOT get you back to cold, the driver
   caches by source; use `profile_fire_reveal --cold`. See [vfx](dev-notes/vfx.md).
+- **A run is one real paramo, not a blend.** `ObjectPainter` draws an
+  `EcosystemProfile` (`chingaza` / `guerrero` / `nevados`) as the FIRST draw of
+  the object rng, so the game, the sim and the harness agree per seed; the three
+  *Espeletia* never share a mountain (GBIF: allopatric) and the shop only sells
+  what grows here. level1 pins `chingaza` for the FTUE. Placement is one
+  weighted roll per cell — registry order is not a knob — and **water affinity
+  must be measured, not guessed**: two thirds of level1's ground is within 10
+  cells of water, so +0.02 empties the far half of the map. Grasses are
+  `displaceable` and `TileGrid.set_occupant` evicts them; the sold species and
+  rocks block. **The ecosystem draw reshuffles rock layouts, so a before/after
+  sim pair is not paired** — compare against a same-tree zero-flora arm
+  (measured: the reshuffle is noise; ~350 plants move fire ~6% at t −1.7, not
+  established). See [flora](dev-notes/flora.md).
+- **Feet damage the plant and the grass on a cell independently.**
+  `RegrowthManager.trample` forwards the footfall to the occupant (duck-typed
+  `trample(amount)`) BEFORE it touches the vegetation ledger, because the ledger
+  only tracks grass-source tiles and plants stand on dirt too. A plant drops a
+  growth stage per `trample_resistance` of damage and frees itself at stage 0;
+  damage heals at a flat 0.15/day, deliberately NOT scaled by resistance, so
+  break-even traffic is the same for every species. Measured ~36 plants a run,
+  and it moves no balance metric — see [vegetation](dev-notes/vegetation.md).
+- **A plant's cell count and its plant count are two different numbers.** A cell
+  holds one occupant, and `min(Σd, 1)` caps occupancy at 1, so one sprite per
+  cell was the densest stand the scatter could express.
+  `WorldObjectData.individuals_per_cell` is a **draw** count: `Frailejon._draw`
+  puts the extra tufts on the node's own CanvasItem, so N individuals cost one
+  item and `PLANT_BUDGET` (cells) still means what it says. The sprite must stay
+  the frontmost individual — a CanvasItem draws before its children — and the
+  burn material goes on the node as well as the sprite. Multi-cell footprints
+  (a tree over 3×3) are the unbuilt other half; see [flora](dev-notes/flora.md)
+  for the four things that block them.
+- **The patch gate's ramp width decides whether a stand has an interior.**
+  `TYPE_SIMPLEX_SMOOTH` only reaches ±0.75 (p90 = 0.33), so the old fixed 0.25
+  ramp meant a species authored at cut 0.25 never reached its density anywhere —
+  all patch, no plateau. `patch_edge` is per species now: wide-and-low is the
+  pajonal mosaic, narrow-and-high is a chuscal. Count is `density × mean
+  multiplier`, so **tightening a patch without raising `density_by_biome` in the
+  same edit deletes plants**; `patch_frequency` moves only the patch SIZE and is
+  free. Tables in [flora](dev-notes/flora.md); re-run `report_flora_scatter.gd`
+  after any of it.
 - **Generated dirt colonises, so the dirt band is no longer a free firebreak** —
   every walkable dirt cell climbs slowly to a short grass ceiling, and
   `can_ignite` reads the layer. `natural` on each regrowth record is what keeps

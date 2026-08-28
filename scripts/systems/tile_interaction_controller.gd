@@ -19,7 +19,7 @@ const _GROUP_ID_PREFIX: String = "group:"
 # before _ready(). Listing them explicitly here also makes the set of
 # registered actions easy to audit in one place.
 const _ACTION_INSPECT: GDScript = preload("res://scripts/systems/actions/action_inspect.gd")
-const _ACTION_PLANT_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_plant_frailejon.gd")
+const _ACTION_PLANT_SPECIES: GDScript = preload("res://scripts/systems/actions/action_plant_species.gd")
 const _ACTION_REMOVE_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_remove_frailejon.gd")
 const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_build_bridge.gd")
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
@@ -28,6 +28,17 @@ const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/a
 const _ACTION_BUILD_FENCE: GDScript = preload("res://scripts/systems/actions/action_build_fence.gd")
 const _ACTION_REMOVE_FENCE: GDScript = preload("res://scripts/systems/actions/action_remove_fence.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
+
+# The species the player can sow, with the glyph each shows in the radial and
+# the hotbar. Ids match ObjectPainter's registry and UnlockState's prices;
+# grasses are deliberately absent — they colonise, they are not sown.
+const _PLANTABLE: Array[Dictionary] = [
+	{"id": &"frailejon", "icon": preload("res://assets/sprites/UX/icons/frailejon.tres")},
+	{"id": &"espeletia_barclayana", "icon": preload("res://assets/sprites/UX/icons/espeletia_barclayana.tres")},
+	{"id": &"espeletia_hartwegiana", "icon": preload("res://assets/sprites/UX/icons/espeletia_hartwegiana.tres")},
+	{"id": &"hypericum", "icon": preload("res://assets/sprites/UX/icons/hypericum.tres")},
+	{"id": &"arcytophyllum", "icon": preload("res://assets/sprites/UX/icons/arcytophyllum.tres")},
+]
 const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
 const _ACTION_IGNITE_FIRE: GDScript = preload("res://scripts/systems/actions/action_ignite_fire.gd")
 
@@ -94,7 +105,12 @@ func _ready() -> void:
 
 	_registry = ActionRegistry.new()
 	_registry.register(_ACTION_INSPECT.new())
-	_registry.register(_ACTION_PLANT_FRAILEJON.new())
+	# One plant action per sellable species. Every one registers here; which
+	# of them the radial actually shows is decided by the unlock (and the
+	# unlock by the run's ecosystem — UnlockState.is_available), so an absent
+	# species is simply never unlockable rather than special-cased here.
+	for entry: Dictionary in _PLANTABLE:
+		_registry.register(_ACTION_PLANT_SPECIES.new(entry["id"], entry["icon"]))
 	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
 	_registry.register(_ACTION_BUILD_BRIDGE.new())
 	_registry.register(_ACTION_BUILD_LADDER.new())
@@ -445,26 +461,42 @@ func _deny(cell: Vector2i) -> void:
 # Actions called via ActionContext (previously private)
 # ---------------------------------------------------------------------------
 
+## The historical entry point — the FTUE and the sim bot plant the frailejón
+## by name. Same path as every other species.
 func plant_frailejon(cell: Vector2i) -> void:
+	plant_species(cell, &"frailejon")
+
+
+func plant_species(cell: Vector2i, kind: StringName) -> void:
+	var data: WorldObjectData = ObjectPainter.data_for(kind)
+	if not (data is PlantObjectData):
+		push_warning("TileInteractionController.plant_species: '%s' is not a plant kind." % kind)
+		return
 	# Charge at commit — 1 token AND 1 water, one cell (see UnlockState:
 	# planting is the only placement that spends the reserve). Instancing never
 	# fails after this point (no validate step — _applies already vetted the
 	# cell), so no refund path is needed.
 	var unlocks := _unlocks_node()
 	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
-		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
+		if not bool(unlocks.call(&"try_pay_placement", kind)):
 			return
-	var frailejon: Frailejon = _frailejon_scene.instantiate()
-	frailejon.cell = cell
+
+	# Natural ground cover on the cell (the action accepted it via
+	# is_displaceable) is evicted by TileGrid.set_occupant when the new plant
+	# claims the cell in its _ready — nothing to do here.
+	var plant: Frailejon = _frailejon_scene.instantiate()
+	plant.cell = cell
+	# The scene's authored `data` is the frailejón; every other species is the
+	# same scene with its own .tres swapped in before _ready (the rock pattern).
+	plant.data = data
 
 	# Place the Node2D at the altitude-0 world point for the cell. The plant
 	# itself lifts its sprite visually in _ready() so the sort key stays
-	# altitude-independent (same pattern as Player). Frailejone registers
-	# itself as TileGrid occupant in _ready — Pathfinder reads its
-	# walk_penalty() during step-cost calc, so no explicit set_cell_penalty
-	# call is needed here.
-	world.add_child(frailejon)
-	frailejon.global_position = pathfinder.cell_to_world(cell)
+	# altitude-independent (same pattern as Player). It registers itself as
+	# TileGrid occupant in _ready — Pathfinder reads its walk_penalty() during
+	# step-cost calc, so no explicit set_cell_penalty call is needed here.
+	world.add_child(plant)
+	plant.global_position = pathfinder.cell_to_world(cell)
 
 
 func remove_frailejon(cell: Vector2i) -> void:

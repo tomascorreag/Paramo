@@ -8,14 +8,21 @@
 
 [resource]
 script = ExtResource("1")
-water_affinity = 0.02
+growth_chance = 0.01
+water_affinity = 0.005
+casts_shadow = true
+trample_resistance = 3.0
 id = &"frailejon"
 density_by_biome = {
-0: 1.0,
-1: 0.8,
-2: 0.0,
+0: 0.57,
+1: 0.285,
+2: 0,
 3: 0.0
 }
-preferred_altitude = 18
+altitude_band = Vector2i(12, 26)
+patch_frequency = 0.07
+patch_cut = 0.22
+patch_edge = 0.08
+displaceable = false
 walk_penalty = 0.4
 variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])

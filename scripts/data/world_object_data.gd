@@ -71,6 +71,58 @@ extends Resource
 ## tile painter's `preferred_altitude` custom_data layer.
 @export var preferred_altitude: int = 0
 
+## Inclusive altitude plateau in TerrainCell.altitude half-steps, for kinds
+## whose real range is a band rather than a peak (every plant species). Inside
+## the band the density multiplier is 1; outside it decays as a Gaussian on the
+## distance to the nearest band edge (σ = ObjectPainter._SIGMA_ALT). `x < 0`
+## (default) disables the band and the kind falls back to `preferred_altitude`
+## (or to flat placement when that is also off). When both are set, the band
+## wins — a kind should author one or the other, not both.
+@export var altitude_band: Vector2i = Vector2i(-1, -1)
+
+## Clumping gate. When > 0, ObjectPainter samples one seeded FastNoiseLite
+## per kind at this frequency (in cells⁻¹) and multiplies the per-cell density
+## by `clamp((noise - patch_cut) / patch_edge, 0, 1)`, so the kind only appears
+## inside noise "patches" — community-scale stands (a chuscal, a matorral)
+## rather than a uniform sprinkle. Frequency sets the patch SIZE only (~0.06 →
+## 15-cell blobs, ~0.10 → 8-cell); the amplitude distribution is identical at
+## every frequency, so `patch_cut` and `patch_edge` mean the same thing
+## whatever size the patches are. Patches are seeded per kind from the object
+## rng, so they are part of the seed's identity and different species do not
+## share outlines.
+@export var patch_frequency: float = 0.0
+
+## Where the patch starts, on the noise value. TYPE_SIMPLEX_SMOOTH output
+## measured over 12 seeds × 48×48: range ±0.75, p50 0.00, p75 0.18, p90 0.33,
+## p99 0.54. So the fraction of the map at or above the cut is ≈ 0.65 at −0.1,
+## 0.50 at 0.0, 0.36 at 0.1, 0.22 at 0.2, 0.17 at 0.25.
+@export_range(-1.0, 0.99) var patch_cut: float = 0.0
+
+## Width of the ramp from `patch_cut` up to full density, on the same noise
+## scale. This is what decides whether a stand has an INTERIOR: the plateau
+## (cells at full density) is everything above `patch_cut + patch_edge`, and
+## because the noise only reaches ±0.75 a wide ramp means the kind never
+## reaches its authored density anywhere — the patch is all edge. Measured
+## plateau share of the map, by (cut, edge):
+##
+##     cut     edge 0.08   edge 0.12   edge 0.20   edge 0.25
+##     -0.20      0.67        0.62        0.50        0.43
+##      0.00      0.39        0.33        0.23        0.17
+##      0.20      0.14        0.11        0.05        0.03
+##      0.30      0.06        0.04        0.01        0.01
+##
+## A narrow edge with a high cut gives few, dense, sharp-edged stands (a
+## chuscal); a wide edge with a low cut gives a soft mosaic (the pajonal
+## matrix). Total count is `density × mean multiplier`, so tightening the
+## patch without raising `density_by_biome` just deletes plants.
+@export_range(0.01, 1.0) var patch_edge: float = 0.25
+
+## When true, placing something on this occupant's cell (planting, building)
+## frees it instead of being refused. Natural ground cover (tussock grasses,
+## bamboo) is displaceable; anything the player paid for, and rocks, are not.
+## Read through the occupant's `is_displaceable()` by the action layer.
+@export var displaceable: bool = false
+
 ## Extra enter cost added to any A* step that lands on a cell this object
 ## occupies. 0.0 = no penalty. >0 nudges paths around; >1 forces detours when
 ## an alternative exists. Ignored when blocks_movement = true.
@@ -90,3 +142,18 @@ extends Resource
 ## probability for cheap visual variety. Set false when a variant has a
 ## fixed orientation (e.g. directional signage).
 @export var randomize_flip_h: bool = true
+
+## How many plants of this kind stand on one cell, rolled per cell in
+## [x, y] inclusive. The GRID still holds exactly one occupant — this is a
+## DRAWING count, not an occupancy count: the frontmost individual is the
+## node's Sprite2D and the rest are drawn by the node's own _draw(), so a
+## four-tuft cell costs the same CanvasItem as a one-tuft cell and
+## ObjectPainter's plant budget (which counts cells) still means what it says.
+##
+## Why it exists: per-cell density saturates at 1 (ObjectPainter occupies a
+## cell with probability min(Σd, 1)), so one sprite per cell is the densest
+## stand the scatter can express. A real pajonal has tussocks ~0.5 m apart and
+## a cell is ~2 m across, so the honest count for ground cover is several.
+## Leave at (1, 1) for anything with a trunk or a rosette — an Espeletia is
+## one plant on one cell.
+@export var individuals_per_cell: Vector2i = Vector2i(1, 1)
