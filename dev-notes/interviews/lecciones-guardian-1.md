@@ -28,6 +28,8 @@ El GDD tiene **una** barra de apoyo comunitario, y eso colapsa un conflicto en u
 
 Su palabra para la solución es **gobernanza**: acuerdos entre público, privado y comunidad. No "ganarse a la gente", sino negociar entre partes que no quieren lo mismo ni tienen potestades iguales.
 
+La importancia del conocimiento, la sabiduría, y la educación. Por ejemplo, educar a los turistas es fundamental. Para educar hay que conocer el páramo. E.g. puede haber un componente de avistamiento en el juego, en el que le haces click derecho a una planta o animal para avistarlo por primera vez, esto llena una bitácora que facilita la educación de los turistas (Jaime menciona que las fotos de cámaras trampa son muy útiles para eso, para que el turista vea al animal en su habitat así no lo vea en vivo).
+
 ## Amenazas: su ranking real
 
 1. **Ganadería extensiva** — coincide con la prensa y con `Paramo_GDD.md:391`.

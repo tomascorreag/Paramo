@@ -11,7 +11,8 @@ This file keeps the rules, the commands, and a one-line hook per finding.
 Paramo is a tower defense / environmental strategy game in Godot 4.6 with
 GDScript. The player is a field coordinator protecting a Colombian paramo
 mountain ecosystem from environmental and human threats across 10 seasons. Full
-design in `design/Paramo_GDD.md`.
+design in `design/Paramo_GDD.md`. The 20 plant species the game draws from —
+and the CC BY-NC-ND terms on their source — are in `design/flora.md`.
 
 **Art style:** isometric pixel art (diamond tiles, 2:1). Dome Keeper's
 atmospheric density and tonal weight, reprojected into isometric. Locked
