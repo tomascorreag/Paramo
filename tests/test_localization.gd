@@ -33,6 +33,7 @@ const QUOTED_UPPER_SNAKE: String = "\"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\""
 # report them as missing translations.
 const KEY_PREFIXES: Array[String] = [
 	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_", "FLORA_",
+	"GRAMMAR_",
 ]
 
 # The lowercase-chrome convention covers UI copy. CLAUDE.md puts in-world
@@ -136,6 +137,42 @@ func test_every_plant_has_a_name_key() -> void:
 		var key := String((data as PlantObjectData).name_key)
 		assert_true(_csv.has(key),
 			"%s: name_key '%s' must be a CSV key" % [path, key])
+
+
+## Every plant needs an article word for BOTH genders in every locale, because
+## ActionInspect picks between them with WorldObjectData.name_gender. These keys
+## are indexed out of a table rather than written as literals at the call site,
+## so the scan above cannot see them.
+func test_article_words_exist_for_both_genders() -> void:
+	for slot: String in ["INDEFINITE", "AT_THE"]:
+		for gender: String in ["M", "F"]:
+			var key := "GRAMMAR_ARTICLE_%s_%s" % [slot, gender]
+			assert_true(_csv.has(key), "%s must be a CSV key" % key)
+
+
+## The Spanish articles have to actually differ by gender, or the whole
+## name_gender mechanism is inert and "una cortadera" silently becomes "un".
+func test_spanish_articles_differ_by_gender() -> void:
+	if not _locales.has("es_CO"):
+		return
+	for slot: String in ["INDEFINITE", "AT_THE"]:
+		var m: String = _csv["GRAMMAR_ARTICLE_%s_M" % slot]["es_CO"]
+		var f: String = _csv["GRAMMAR_ARTICLE_%s_F" % slot]["es_CO"]
+		assert_ne(m, f, "es_CO %s article must inflect" % slot)
+
+
+## The inspect lines are formatted with one positional argument. A line missing
+## its placeholder silently drops the species name and says only "This is ."
+func test_inspect_lines_carry_the_species_placeholder() -> void:
+	var found := 0
+	for key: String in _csv:
+		if not key.begins_with("NARRATIVE_INSPECT_"):
+			continue
+		found += 1
+		for locale: String in _locales:
+			assert_true(String(_csv[key][locale]).contains("{0}"),
+				"%s/%s must contain the {0} placeholder" % [key, locale])
+	assert_gt(found, 0, "the inspect lines must exist")
 
 
 func _keys_in(path: String) -> Array[String]:

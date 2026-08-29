@@ -16,6 +16,7 @@ trample_resistance = 0.8
 wind_material = ExtResource("wind")
 id = &"cortaderia"
 name_key = &"FLORA_CORTADERIA"
+name_gender = 1
 density_by_biome = {
 0: 0.35,
 1: 0.175,

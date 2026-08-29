@@ -16,6 +16,7 @@ trample_resistance = 0.6
 wind_material = ExtResource("wind")
 id = &"arcytophyllum"
 name_key = &"FLORA_ARCYTOPHYLLUM"
+name_gender = 0
 density_by_biome = {
 0: 0.31,
 1: 0.155,

@@ -38,6 +38,19 @@ UI_SKIP_TUTORIAL,hold to skip tutorial,mantén para saltar el tutorial
 NARRATIVE_WELCOME,Welcome to the páramo. This is our most sacred land. Its water feeds a whole valley.,Te damos la bienvenida al páramo. Esta tierra y su agua son sagradas.
 NARRATIVE_CHARGE,You have been sent to protect it. Fire reaches this ridge. So do cattle and careless visitors.,Te han enviado a protegerlo. El fuego y los visitantes descuidados dañan nuestro ecosistema.
 NARRATIVE_CLOSING,The páramo is in your hands now. Walk it. Listen to it. Keep it alive.,El páramo queda en tus manos. Recórrelo. Escúchalo. Mantenlo vivo.
+NARRATIVE_INSPECT_NEW_1,{0},{0}
+NARRATIVE_INSPECT_NEW_2,This is {0},Esto es {0}
+NARRATIVE_INSPECT_NEW_3,I think it is {0},Creo que es {0}
+NARRATIVE_INSPECT_NEW_4,New for the book: {0},Nuevo para el cuaderno: {0}
+NARRATIVE_INSPECT_KNOWN_1,Still {0},Sigue siendo {0}
+NARRATIVE_INSPECT_KNOWN_2,Already noted: {0},Ya anotado: {0}
+NARRATIVE_INSPECT_KNOWN_3,Another look at {0},Otra mirada {0}
+GRAMMAR_ARTICLE_INDEFINITE_M,a,un
+GRAMMAR_ARTICLE_INDEFINITE_F,a,una
+GRAMMAR_ARTICLE_AT_THE_M,the,al
+GRAMMAR_ARTICLE_AT_THE_F,the,a la
+GRAMMAR_STATEMENT,{0}.,{0}.
+GRAMMAR_EXCLAMATION,{0}!,¡{0}!
 TUTORIAL_MOVE,click the ground to walk there,haz clic en el suelo para caminar
 TUTORIAL_JOURNAL,press space to open your field journal,pulsa espacio para abrir tu cuaderno de campo
 TUTORIAL_CLOSE_JOURNAL,press space again to close the journal,pulsa espacio otra vez para cerrar el cuaderno

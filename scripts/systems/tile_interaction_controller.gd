@@ -596,9 +596,19 @@ func is_player_on_traversal(t: Traversal) -> bool:
 ## Control re-translates whatever sits in `text` on
 ## NOTIFICATION_TRANSLATION_CHANGED, so the toast follows a locale change for
 ## free, where `tr(key)` would freeze it in the language it was raised in.
-func show_toast(key: StringName, duration: float) -> void:
+## Print one already-translated line at the bottom of the screen for `duration`
+## seconds, then fade it.
+##
+## Takes TEXT, not a translation key, because its one caller composes a sentence
+## from two keys (a phrasing template and a species name) and there is no key
+## that names the result. The cost is the usual one: a Label holding a finished
+## string does not re-translate itself on a locale change. That is accepted here
+## and nowhere else — the line is on screen for 2.5s and the locale is chosen at
+## the title screen, so the window in which it could go stale does not occur in
+## play. Anything longer-lived must store the KEY and let Control translate it.
+func show_message(text: String, duration: float) -> void:
 	_ensure_toast()
-	_toast_label.text = String(key)
+	_toast_label.text = text
 	_toast_label.modulate.a = 1.0
 	_toast_label.visible = true
 	if _toast_tween and _toast_tween.is_valid():

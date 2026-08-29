@@ -16,6 +16,7 @@ trample_resistance = 1.5
 wind_material = ExtResource("wind")
 id = &"hypericum"
 name_key = &"FLORA_HYPERICUM"
+name_gender = 0
 density_by_biome = {
 0: 0.51,
 1: 0.255,

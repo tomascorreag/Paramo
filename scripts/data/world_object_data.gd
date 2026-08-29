@@ -50,6 +50,26 @@ extends Resource
 ## printing "FLORA_CHUSQUE" at the player.
 @export var name_key: StringName = &""
 
+## Grammatical gender of `name_key`'s noun, for the languages that inflect.
+## Spanish needs it twice over — the article agrees ("un chusque" but "una
+## cortadera") and so would any adjective — and getting it wrong ships broken
+## Spanish that nothing else detects. English ignores it.
+##
+## Stored rather than inferred from the ending. The usual -o/-a rule does not
+## decide the two words this project actually has trouble with: `chusque` and
+## `chite` both end in -e and are masculine, and Spanish is full of counter-
+## examples in any case (el día, la mano). One authored value per species is
+## cheaper than a heuristic that is right most of the time.
+##
+## One value per SPECIES, not per species-per-locale, which assumes a noun does
+## not change gender between the project's languages. True while es_CO is the
+## only gendered locale; a second one that disagrees would move this into the CSV.
+enum NameGender {
+	MASCULINE,
+	FEMININE,
+}
+@export var name_gender: NameGender = NameGender.MASCULINE
+
 ## When true, TileGrid.is_walkable returns false for any cell this object
 ## occupies. Pathfinder routes around. Set false for things like plants and
 ## signs that should be steppable.
