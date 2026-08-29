@@ -75,7 +75,7 @@ var _interaction_accept: Callable
 var _ux_overlay: Node2D  # UXOverlay
 var _frailejon_scene: PackedScene
 
-# --- Debug toast (used by ActionInspect) -----------------------------------
+# --- Toast (used by ActionInspect) ------------------------------------------
 var _toast_layer: CanvasLayer
 var _toast_label: Label
 var _toast_tween: Tween
@@ -234,15 +234,18 @@ func has_any_action(cell: Vector2i) -> bool:
 
 
 ## True iff right-clicking `cell` would offer at least one non-debug action
-## (plant, build, remove, extinguish, …). Inspect is excluded — it's a
-## dev-only readout and shouldn't promote a tile from "movable" to "actionable"
-## in the UX. Used by UXOverlay to choose between the solid and dim circle rows.
-## Proximity is enforced by each action, so far cells return false naturally.
+## (plant, build, remove, identify, extinguish, …). Used by UXOverlay to choose
+## between the solid and dim circle rows. Proximity is enforced by each action,
+## so far cells return false naturally.
+##
+## Inspect used to be excluded here as a dev-only readout. It identifies a plant
+## into the journal now, which is as real a verb as planting one — and the cells
+## it applies to already carried the trowel, so the reticle does not change.
 func has_meaningful_action(cell: Vector2i) -> bool:
 	if _registry == null:
 		return false
 	for action in _registry.available_for(_build_context(cell)):
-		if action.id != &"inspect" and not action.debug_only:
+		if not action.debug_only:
 			return true
 	return false
 
@@ -261,6 +264,7 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
 	ctx.unlocks = _unlocks_node()
+	ctx.flora_codex = _flora_codex_node()
 	# Cached BFS from the player's cell — lets is_offerable answer "can the player
 	# reach a cell to act from?" without a per-action flood fill.
 	ctx.reachable = pathfinder.reachable_from(player.current_cell)
@@ -278,6 +282,17 @@ func _unlocks_node() -> Node:
 	return _unlocks
 
 
+# The scene's FloraCodex, on the same lazy group lookup and the same null rule:
+# a scene without one has no discovery system, and ActionInspect treats every
+# species as already known there.
+var _codex: Node = null
+
+func _flora_codex_node() -> Node:
+	if _codex == null or not is_instance_valid(_codex):
+		_codex = get_tree().get_first_node_in_group(FloraCodex.GROUP)
+	return _codex
+
+
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
 # groups (group != &""). Group order follows registration order; within a
 # group, actions also keep registration order.
@@ -293,7 +308,9 @@ func _assemble_menu_items(actions: Array[TileAction], ctx: ActionContext) -> Arr
 	for a in actions:
 		var entry := {
 			"id": String(a.id),
-			"icon": a.icon,
+			# icon_for, not icon: inspect answers with a different glyph over a
+			# plant the journal has not recorded yet.
+			"icon": a.icon_for(ctx),
 			"enabled": a.is_enabled(ctx),
 		}
 		if a.group == &"":
@@ -571,14 +588,17 @@ func is_player_on_traversal(t: Traversal) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Debug toast (used by ActionInspect)
+# Toast (used by ActionInspect)
 # ---------------------------------------------------------------------------
 
-## Shows `text` as a bottom-screen label for `duration` seconds, then fades.
-## Cheap stand-in for a proper tile-info panel; tied to ActionInspect for now.
-func show_debug_toast(text: String, duration: float) -> void:
+## Names something at the bottom of the screen for `duration` seconds, then
+## fades. `key` is a TRANSLATION KEY, and it is assigned to the Label as-is: a
+## Control re-translates whatever sits in `text` on
+## NOTIFICATION_TRANSLATION_CHANGED, so the toast follows a locale change for
+## free, where `tr(key)` would freeze it in the language it was raised in.
+func show_toast(key: StringName, duration: float) -> void:
 	_ensure_toast()
-	_toast_label.text = text
+	_toast_label.text = String(key)
 	_toast_label.modulate.a = 1.0
 	_toast_label.visible = true
 	if _toast_tween and _toast_tween.is_valid():
@@ -587,8 +607,6 @@ func show_debug_toast(text: String, duration: float) -> void:
 	_toast_tween.tween_interval(duration)
 	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.35)
 	_toast_tween.tween_callback(func() -> void: _toast_label.visible = false)
-	# Also echo to stdout so the info is visible when UI is off.
-	print("[inspect] ", text)
 
 
 func _ensure_toast() -> void:

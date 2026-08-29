@@ -13,6 +13,7 @@ water_affinity = -0.3
 casts_shadow = false
 trample_resistance = 0.3
 id = &"calamagrostis"
+name_key = &"FLORA_CALAMAGROSTIS"
 density_by_biome = {
 0: 0.37,
 1: 0.185,

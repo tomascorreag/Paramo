@@ -43,6 +43,11 @@ var pathfinder: Pathfinder
 # unlocked and free" — bare test scenes don't carry the token economy.
 var unlocks: Node = null
 
+# The scene's FloraCodex ("flora_codex" group), or null. Null means "no discovery
+# system", i.e. everything already known — same rule as `unlocks`. Injected
+# rather than looked up because a TileAction is a RefCounted with no tree.
+var flora_codex: Node = null
+
 
 ## True iff every service this game currently expects is wired. Actions can
 ## short-circuit `is_available` against this when they don't want to list every

@@ -48,6 +48,67 @@ re-adding one is a decision, not a detail.
   `oh`, `rd`, `sh`). Details in
   [`docs/music/samples/README.md`](./docs/music/samples/README.md).
 
+### Herbarium specimen photographs — `assets/photos/flora/*_dry.jpg`
+- **License:** Creative Commons Zero v1.0 Universal (`CC0-1.0`) — public domain
+  dedication. **No attribution is legally owed**; the provenance below is
+  recorded because a field-log plate should be traceable to a real voucher, and
+  because CC0 status is a claim this project has to be able to defend.
+- **Verified at the media level, not the record level.** GBIF's
+  `license=CC0_1_0` filter describes the *occurrence record*, and the attached
+  photograph carries its own, different licence field — for *Hypericum
+  juniperinum*, 27 of 31 images on CC0-flagged records are in fact CC BY 4.0.
+  Every file below was checked against `media[].license`.
+- **Source:** GBIF (<https://www.gbif.org>), re-fetchable via
+  `scripts/tools/fetch_flora_photos.py`. Full per-image record, collector,
+  locality and date in `flora_photos/manifest.csv` (gitignored review folder).
+- Images are downscaled to 1024 px on the long edge and imported lossy
+  (`compress/mode=1`); at the project's default Lossless they cost 3.96 MB
+  against a 1.64 MB `index.pck`.
+
+| File | Species | Holder | Collector | Voucher locality |
+|---|---|---|---|---|
+| `frailejon_dry.jpg` | *Espeletia grandiflora* | Smithsonian NMNH (US) | S. Díaz Píedrahíta, A. M. Cleef, O. Rangel & S. Salamanca, 1981 | Macizo de Sumapáz; Cuchilla La Rabona |
+| `espeletia_hartwegiana_dry.jpg` | *Espeletia hartwegiana* | Smithsonian NMNH (US) | J. Betancur & S. Churchill, 1991 | Cauca-Huila, Municipio Coconuco-San Agustin:… |
+| `espeletia_barclayana_dry.jpg` | *Espeletia barclayana* | Smithsonian NMNH (US) | J. Cuatrecasas & R. Jaramillo M., 1978 | Páramo de Gorgua o Guargua. Páramo de Gorgua… |
+| `calamagrostis_dry.jpg` | *Calamagrostis effusa* | Naturalis Biodiversity Center | Naturalis Biodiversity Center, 1989 | Colombia, Risaralda, parque Los Nevados, Loma… |
+| `chusquea_dry.jpg` | *Chusquea tessellata* | Smithsonian NMNH (US) | B. G. Stergios & L. Zambrano, 1996 | Parque Nacional Guaramacal, Fila de Agua Fria |
+| `cortaderia_dry.jpg` | *Cortaderia nitida* | Smithsonian NMNH (US) | S. Lægaard, 1998 | Along road to Fierro Urcu, surroundings of th… |
+| `hypericum_dry.jpg` | *Hypericum juniperinum* | Smithsonian NMNH (US) | B. G. Stergios & R. Caracas, 2002 | Parque Nacional Guaramacal, páramo de Guaramacal |
+| `arcytophyllum_dry.jpg` | *Arcytophyllum nitidum* | Smithsonian NMNH (US) | B. G. Stergios, L. J. Dorr & K. Wurdack, 2003 | Laguna Larga, Páramo de Motumbo, Monumento Na… |
+
+Each row's GBIF occurrence URL is in the manifest; the eight are occurrences
+1456073482, 1456428550, 1319586021, 2514999371, 1317906058, 3062057526,
+1318331229 and 1320585531.
+
+**No CC0 photograph of a living *Espeletia barclayana* exists** in either GBIF or
+iNaturalist — the sole CC0 "live" record is a scientific line drawing, and the
+only photographs of the living plant are CC BY 4.0 (29 observations) or
+CC BY-NC. That species therefore has a dry plate and no live one; adding a live
+one is a licensing decision, not a sourcing problem.
+
+### Living-plant photographs — `assets/photos/flora/*_live.jpg`
+- **License:** CC0 1.0, verified per-photo (iNaturalist licences each photo
+  separately from its observation, so the observation-level field is not the
+  answer). No attribution owed; credited below anyway.
+- **Source:** iNaturalist (<https://www.inaturalist.org>) via
+  `scripts/tools/fetch_flora_photos.py`.
+
+| File | Species | Photographer | Where | When |
+|---|---|---|---|---|
+| `arcytophyllum_live.jpg` | *Arcytophyllum nitidum* | Andrew J. Crawford (crawfordaj) | Junin, Junin, Cundinamarca, CO | 2018-09-09 |
+| `calamagrostis_live.jpg` | *Calamagrostis effusa* | bat (Maria Vorontsova) (vorontsovams) | Belén, Boyaca, Colombia | 2017-11-22 |
+| `chusquea_live.jpg` | *Chusquea tessellata* | Alfredo F. Fuentes Claros (alfredo_f_fuentes) | Totoró, Puracé, CO-CA, CO | 2024-11-04 |
+| `cortaderia_live.jpg` | *Cortaderia nitida* | Quentin Groom (qgroom) | Tihuaque, Usme, Bogotá, Bogota, Colombia | 2025-10-25 |
+| `espeletia_hartwegiana_live.jpg` | *Espeletia hartwegiana* | Jean-Paul Boerekamps (jeanpaulboerekamps) | Villamaría, Caldas, CO | 2015-11-24 |
+| `frailejon_live.jpg` | *Espeletia grandiflora* | rebecca bachman (r_a_b) | Horizontes-Las Moyas, Bogotá, Bogotá, CO | 2023-07-08 |
+| `hypericum_live.jpg` | *Hypericum juniperinum* | Dimitri Brosens (dimitribrosens) | Choachí, Cundinamarca, Colombia | 2025-10-20 |
+
+**`espeletia_barclayana` has no live plate.** No CC0 photograph of the living
+plant exists in GBIF or iNaturalist: the species' only CC0 "live" record is a
+scientific line drawing, and every actual photograph is CC BY 4.0 (29
+observations) or CC BY-NC (65). Adding one means accepting a credit obligation,
+which is a decision rather than a fetch. Its dry plate above is unaffected.
+
 ## Removed
 
 Kept here so neither decision gets quietly reversed by someone reaching for the

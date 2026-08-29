@@ -38,6 +38,18 @@ extends Resource
 ## match the Node2D's occupant_kind() return value.
 @export var id: StringName = &""
 
+## TRANSLATION KEY for the name a player reads — what ActionInspect prints when
+## it identifies this thing. A key, not a string, so the name follows the locale
+## (assets/translations/paramo.csv, `FLORA_*`); empty means "nothing to say",
+## which is what the rocks author.
+##
+## It lives on the data rather than in a table beside the action because that is
+## how everything else about a kind is authored: a new species is a new .tres,
+## and this is one more line in it. tests/test_localization.gd scans
+## resources/objects for these keys, so an unlisted one fails there rather than
+## printing "FLORA_CHUSQUE" at the player.
+@export var name_key: StringName = &""
+
 ## When true, TileGrid.is_walkable returns false for any cell this object
 ## occupies. Pathfinder routes around. Set false for things like plants and
 ## signs that should be steppable.

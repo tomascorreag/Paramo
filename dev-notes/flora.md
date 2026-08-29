@@ -40,7 +40,7 @@ So a run is one real paramo, not a blend. `EcosystemProfile` (`scripts/data/ecos
 | `hypericum` | 0.8 | 1.0 | 0.3 |
 | `arcytophyllum` | 1.0 | 1.0 | 0.1 |
 
-**The profile is the FIRST draw of the object rng stream** (`ObjectPainter.assign_object_kinds`, `profile == null`), so `ProceduralWorld`, `SimWorld` and the invariants harness — which all seed that stream as `seed ^ OBJECT_SEED_XOR` — land on the same mountain per seed with no plumbing. It is written to `TerrainGrid.ecosystem` and copied to `ProceduralWorld.ecosystem`, which `UnlockState.is_available` reads (group `procedural_world`) to refuse unlocks of species that are not on this mountain; the journal greys them rather than hiding them, so `JournalShopInput`'s index arithmetic stays aligned. `ProceduralWorld.ecosystem_override` pins one; **level1 pins `chingaza`** so the FTUE's frailejón is always on sale. The `_PROFILES` array is draw-indexed: append, never reorder.
+**The profile is the FIRST draw of the object rng stream** (`ObjectPainter.assign_object_kinds`, `profile == null`), so `ProceduralWorld`, `SimWorld` and the invariants harness — which all seed that stream as `seed ^ OBJECT_SEED_XOR` — land on the same mountain per seed with no plumbing. It is written to `TerrainGrid.ecosystem` and copied to `ProceduralWorld.ecosystem`, which `UnlockState.is_available` reads (group `procedural_world`) to refuse unlocks of species that are not on this mountain. The journal never has to state that refusal any more: a species that does not grow here cannot be inspected, so it never enters the codex and never reaches the page. `ProceduralWorld.ecosystem_override` pins one; **level1 pins `chingaza`** so the FTUE's frailejón is always on sale. The `_PROFILES` array is draw-indexed: append, never reorder.
 
 ## Placement: one weighted roll per cell
 
@@ -155,15 +155,25 @@ The `flora_none` arm is a temporary edit of the three `.tres`, not a `sim_scenar
 | `preview_flora_scatter.gd` (rendering — no `--headless`) | Generates level1 with an ecosystem pinned, strips the atmosphere, aims at the densest stand, saves `preview_out/flora_<id>.png` (+@2x) and prints spawned counts and the shadow count. `-- --ecosystem nevados --seed 26 --out preview_out`. |
 | `verify_terrain_invariants.gd` | `_KNOWN_OBJECT_KINDS` must list every registered kind or `_check_object_kind_known` fails every seed. |
 
-Tests: `tests/test_object_painter.gd` (band/water terms, determinism, profile pinning, eligibility, profile ↔ registry consistency), `tests/test_frailejon.gd` (occupant interface off `data`, shadow opt-out), `tests/test_journal_pages.gd` (five swatches, `align_ink_bottom`), `tests/test_tutorial.gd` (every sold species has a build line).
+Tests: `tests/test_object_painter.gd` (band/water terms, determinism, profile pinning, eligibility, profile ↔ registry consistency), `tests/test_frailejon.gd` (occupant interface off `data`, shadow opt-out), `tests/test_journal_pages.gd` (five swatches, `align_ink_bottom`), `tests/test_tutorial.gd` (every sold species has a build line), `tests/test_flora_codex.gd` (inspect → codex → the page, and that a hidden entry closes the row up).
 
 ## Journal
 
-Five swatches in `KnownFlora` (5 × 24 = 120 px of 157). The section sets `align_ink_bottom = true`: with inks of 24 and 10 rows centred in a 30-row cell there is no header row at which both clear the warp seams (measured: hypericum and arcytophyllum straddled a block at every gap −36..36); with a shared baseline every run ends on the same row and one row top serves all heights. The buildings section keeps its hand-tuned centring. No text is drawn, so no CSV keys; the four `TUTORIAL_BUILD_*` lines are the only new copy (common names: frailejon motoso, chite, piojo).
+Five swatches in `KnownFlora` (5 × 24 = 120 px of 157). The section sets `align_ink_bottom = true`: with inks of 24 and 10 rows centred in a 30-row cell there is no header row at which both clear the warp seams (measured: hypericum and arcytophyllum straddled a block at every gap −36..36); with a shared baseline every run ends on the same row and one row top serves all heights. The buildings section keeps its hand-tuned centring.
+
+**The page starts blank and fills in.** `KnownFlora` sets `require_discovery`, so it draws only species the player has walked up to and identified with the inspect verb — `ActionInspect` → `FloraCodex` (scene-scoped, group `flora_codex`, beside `UnlockState` in `gameplay_base.tscn`) → the section's own filter. The buildings section is untouched: it lists what you CAN build and is complete from page one.
+
+Three consequences worth knowing:
+
+- **Discovery gates the shop.** The section IS the plant shop surface, so a species that has not been identified cannot be bought and therefore cannot be sown. Restoration follows the survey. `UnlockState` itself is not gated — `sim_bot` calls `try_unlock` directly and so still buys plants on sight, which is a deliberate divergence: the balance sim does not model the walk.
+- **Everything index-based on `JournalKnownSet` counts through the DRAWN entries** (`entries()`), not the authored arrays. Cell sizes and ids are read at the AUTHORED position and carried on the entry, so hiding one closes the row up without sliding the rest onto each other's widths — that is the off-by-one that would otherwise sell the player the wrong plant. No codex in the tree (preview tools, layout tests, the editor) means every authored entry draws, the same null-means-unrestricted rule the shop half uses for `UnlockState`.
+- **Every species is inspectable, including the three grasses**, and the codex records them; the page prints only what it has room for. The section is 5 × 24 of 157 px in a 72 px band, so a sixth entry needs a second row and a re-lay-out against `JournalBlocks` — the codex is already carrying the data for the day that happens.
+
+Copy: `FLORA_*` in the CSV, one per species, authored on the `.tres` as `WorldObjectData.name_key` and printed by the inspect toast. Common names are sourced (JBB Bogotá's `nombrescomunes` platform): paja de páramo, chusque, cortadera, chite, piojo, frailejón motoso. `tests/test_localization.gd` scans `resources/objects` for them, so an unnamed species fails there rather than printing `FLORA_CHUSQUEA` at the player.
 
 ## Not done, deliberately
 
-Fire fuel from plant biomass (`_fuel_for_cell` is still the seam — `individuals/seed` is the number it would read); runtime re-seeding after burns; the roadmap's SEASONAL growth mode; discovery of the unsold species in the journal (`set_known`); ecosystem names in the UI (`EcosystemProfile.display_key` is reserved, unwired — needs CSV keys and accent-free Eggmode forms).
+Fire fuel from plant biomass (`_fuel_for_cell` is still the seam — `individuals/seed` is the number it would read); runtime re-seeding after burns; the roadmap's SEASONAL growth mode; PRINTING the unsold species (they are recorded in `FloraCodex`, the page has no second row for them); ecosystem names in the UI (`EcosystemProfile.display_key` is reserved, unwired — needs CSV keys and accent-free Eggmode forms).
 
 **Multi-cell footprints (a tree over 3×3) are the other half of `individuals_per_cell` and are NOT built.** The occupancy half is nearly free — `TraversalBase._register_with_grid` already claims every cell in `occupied_cells()`, which is how a bridge spans a gorge — but four things around it are not:
 

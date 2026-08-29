@@ -20,6 +20,14 @@ JOURNAL_SEASON_LOG,season log,temporadas
 JOURNAL_KNOWN_BUILDINGS,known buildings,obras conocidas
 JOURNAL_KNOWN_FLORA,known flora,flora conocida
 JOURNAL_RESOURCES,resources,recursos
+FLORA_FRAILEJON,frailejon,frailejón
+FLORA_ESPELETIA_BARCLAYANA,frailejon motoso,frailejón motoso
+FLORA_ESPELETIA_HARTWEGIANA,frailejon,frailejón
+FLORA_HYPERICUM,chite,chite
+FLORA_ARCYTOPHYLLUM,piojo,piojo
+FLORA_CALAMAGROSTIS,paja de paramo,paja de páramo
+FLORA_CHUSQUEA,chusque,chusque
+FLORA_CORTADERIA,cortadera,cortadera
 LOADING_LOADING,loading…,cargando…
 LOADING_TERRAIN,generating terrain…,generando terreno…
 LOADING_PAINTING,drawing the world…,dibujando el mundo…

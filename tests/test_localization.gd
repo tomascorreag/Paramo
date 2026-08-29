@@ -19,6 +19,10 @@ const CSV_PATH: String = "res://assets/translations/paramo.csv"
 # being UPPER_SNAKE, which is the reason for that convention.
 const SCENE_DIRS: Array[String] = ["res://scenes/ui"]
 const SCRIPT_DIRS: Array[String] = ["res://scripts/ui", "res://scripts/tools", "res://scripts/systems"]
+# Data resources that carry keys. WorldObjectData.name_key is what ActionInspect
+# prints when it identifies a plant, and it is authored per species .tres — so
+# the .tres files are as much a source of copy as a scene is.
+const RESOURCE_DIRS: Array[String] = ["res://resources/objects"]
 
 # A QUOTED UPPER_SNAKE literal — the shape a translation key has in both .tscn
 # and .gd. Unquoted GDScript constants look the same but never match.
@@ -28,7 +32,7 @@ const QUOTED_UPPER_SNAKE: String = "\"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\""
 # strings exist (feature tags, shader defines), so without this the scan would
 # report them as missing translations.
 const KEY_PREFIXES: Array[String] = [
-	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_",
+	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_", "FLORA_",
 ]
 
 # The lowercase-chrome convention covers UI copy. CLAUDE.md puts in-world
@@ -114,12 +118,24 @@ func test_locales_are_registered_and_resolve() -> void:
 
 func test_every_key_used_in_scenes_and_scripts_exists() -> void:
 	var missing: Array[String] = []
-	for path: String in _collect_files(SCENE_DIRS, ["tscn"]) + _collect_files(SCRIPT_DIRS, ["gd"]):
+	for path: String in _collect_files(SCENE_DIRS, ["tscn"]) 			+ _collect_files(SCRIPT_DIRS, ["gd"]) 			+ _collect_files(RESOURCE_DIRS, ["tres"]):
 		for key: String in _keys_in(path):
 			if not _csv.has(key):
 				missing.append("%s: %s" % [path, key])
 	assert_eq(missing, [] as Array[String],
 		"translation keys used but not defined in the CSV")
+
+
+## Every plant in the object registry must be nameable: ActionInspect prints
+## `name_key`, and an unnamed species identifies into the journal silently.
+func test_every_plant_has_a_name_key() -> void:
+	for path: String in _collect_files(RESOURCE_DIRS, ["tres"]):
+		var data: Resource = load(path)
+		if not (data is PlantObjectData):
+			continue
+		var key := String((data as PlantObjectData).name_key)
+		assert_true(_csv.has(key),
+			"%s: name_key '%s' must be a CSV key" % [path, key])
 
 
 func _keys_in(path: String) -> Array[String]:

@@ -15,6 +15,7 @@ casts_shadow = true
 trample_resistance = 3.0
 wind_material = ExtResource("wind")
 id = &"espeletia_hartwegiana"
+name_key = &"FLORA_ESPELETIA_HARTWEGIANA"
 density_by_biome = {
 0: 0.66,
 1: 0.33,

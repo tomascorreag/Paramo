@@ -15,6 +15,7 @@ casts_shadow = false
 trample_resistance = 1.2
 wind_material = ExtResource("wind")
 id = &"chusquea"
+name_key = &"FLORA_CHUSQUEA"
 density_by_biome = {
 0: 1.46,
 1: 0.73,

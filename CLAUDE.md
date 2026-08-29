@@ -70,7 +70,7 @@ headless run sees them.
 | `preview_page_warp.gd` | **Measure** journal page-warp error per column | [journal](dev-notes/journal.md) |
 | `audit_page_blocks.gd` | Where the journal's warp seams are, what each section inks, and **how far a heading may move**. `--gap <n>` prices a tightening before authoring it | [journal](dev-notes/journal.md) |
 | `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette | [journal](dev-notes/journal.md) |
-| `preview_run_calendar.gd` | Journal pages in 4 run states, both locales | [journal](dev-notes/journal.md) |
+| `preview_run_calendar.gd` | Journal pages in 4 run states, both locales. `--known <ids>` renders the flora page part-discovered (or empty) | [journal](dev-notes/journal.md) |
 | `preview_language_gate.gd` | Title-screen language boxes in 4 states | [journal](dev-notes/journal.md) |
 | `preview_tutorial_strip.gd` | FTUE hint strip, 4 steps x both locales | [ftue](dev-notes/ftue.md) |
 | `preview_pause_menu.gd` | Pause modal: 3 views x both locales | [ui](dev-notes/ui.md) |
@@ -119,6 +119,16 @@ to them. Generator, indexing and sim tools are headless.
   The effect scales with how much is revealed at once — a six-cell fire is pure
   noise. Deleting `.godot/shader_cache` does NOT get you back to cold, the driver
   caches by source; use `profile_fire_reveal --cold`. See [vfx](dev-notes/vfx.md).
+- **The journal's flora page is a discovery list, and discovery gates the shop.**
+  `KnownFlora` draws only what the player has walked up to and identified with
+  the inspect verb (`ActionInspect` → `FloraCodex`, scene-scoped beside
+  `UnlockState`), and since that section IS the plant shop, an unidentified
+  species cannot be bought or sown. Inspect does nothing else now — the CellData
+  readout is gone. Every species is inspectable, grasses included, and the codex
+  records them; the PAGE prints only the five plantable ones because it has room
+  for no more. `JournalKnownSet` counts through its DRAWN entries, so hiding one
+  closes the row up; no codex in the tree (preview tools, layout tests) means the
+  whole authored list draws. See [flora](dev-notes/flora.md).
 - **A run is one real paramo, not a blend.** `ObjectPainter` draws an
   `EcosystemProfile` (`chingaza` / `guerrero` / `nevados`) as the FIRST draw of
   the object rng, so the game, the sim and the harness agree per seed; the three

@@ -149,6 +149,15 @@ func _applies(_ctx: ActionContext) -> bool:
 	return false
 
 
+## The glyph to draw for THIS click. Defaults to the fixed `icon`; override for
+## an action whose state the wheel should show (inspect goes gold over a plant
+## the journal has no entry for yet). Read once, when the menu is assembled —
+## the registry holds one action instance, so per-context art cannot live in the
+## `icon` field.
+func icon_for(_ctx: ActionContext) -> Texture2D:
+	return icon
+
+
 ## Called once when the player selects the action from the radial menu.
 func execute(_ctx: ActionContext) -> void:
 	pass

@@ -13,6 +13,7 @@ water_affinity = 0.005
 casts_shadow = true
 trample_resistance = 3.0
 id = &"frailejon"
+name_key = &"FLORA_FRAILEJON"
 density_by_biome = {
 0: 0.57,
 1: 0.285,

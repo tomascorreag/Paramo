@@ -46,8 +46,15 @@ extends Control
 ## rather than a shop UI. What this node still owns is the STATE behind the price
 ## — locked, cost, affordable — because the swatch's own fade is driven off it.
 ##
-## Contents are still authored in the scene: nothing tracks DISCOVERY — the
-## shop tracks PURCHASE (UnlockState). `set_known` remains the discovery hook.
+## DISCOVERY, when `require_discovery` is on. Contents are authored in the scene
+## as before, but a section with that flag asks the run's FloraCodex which of them
+## the player has actually identified in the world and draws only those — so the
+## flora page fills in as the mountain is walked. Everything index-based below
+## (cell sizes, hit rects, ink runs) is in DRAWN order, which is what makes
+## hiding an entry safe: the row closes up and the arithmetic never sees the
+## missing one. No codex in the tree (preview tools, layout tests, the editor)
+## means no discovery system and every authored entry is drawn, the same
+## null-means-unrestricted rule the shop half follows for UnlockState.
 ##
 ## @tool so both sections render in the editor. Unlike RunCalendar's preview mode
 ## there is nothing to fake here: the tileset scan is pure resource work and needs
@@ -87,6 +94,10 @@ extends Control
 @export var entry_ids: PackedStringArray = []:
 	set(value):
 		entry_ids = value
+		# _invalidate, not just queue_redraw: the ids are what the discovery
+		# filter matches on, so they decide WHICH entries exist, not only how
+		# they look.
+		_invalidate()
 		queue_redraw()
 
 ## The TileSet `tile_kinds` are cut out of. The journal's is base_tileset.tres,
@@ -152,6 +163,16 @@ extends Control
 @export var align_ink_bottom: bool = false:
 	set(value):
 		align_ink_bottom = value
+		_rebuild()
+
+## Draw only the entries the run's FloraCodex has recorded. Off for the buildings
+## section, which is a list of what the player CAN build and is complete from the
+## first page turn; on for the flora, which is a list of what they have FOUND.
+##
+## Inert without a FloraCodex in the tree — see the header.
+@export var require_discovery: bool = false:
+	set(value):
+		require_discovery = value
 		_rebuild()
 
 @export var block_px: int = 18:
@@ -291,6 +312,21 @@ static var _indices: Dictionary[String, TileKindIndex] = {}
 ## Fade applied to a locked entry's swatch, via the ink shader's `dim` uniform.
 const LOCKED_ALPHA: float = 0.4
 
+# The run's FloraCodex, bound in _ready when `require_discovery` is on. Null =
+# no discovery system = draw everything.
+var _codex: Node = null
+# Which entry ids the codex has recorded, or {} while nothing is bound. Guarded
+# by `_codex`, not by emptiness: an empty codex is a legitimate state (the run
+# has just started and the player has identified nothing), and it must hide every
+# entry rather than fall back to showing them all.
+var _known: Dictionary = {}
+
+# Draw-order entries, rebuilt lazily. Cached because `entry_at` walks every
+# entry_rect on every mouse-motion event and each rebuild cuts fresh AtlasTextures
+# out of the tileset.
+var _entries_cache: Array[Dictionary] = []
+var _entries_dirty: bool = true
+
 var _swatches: Array[TextureRect] = []
 # Where each swatch RESTS, before the hover lift and the denial shake are added.
 # Kept separately so those two offsets can be applied and removed without
@@ -312,6 +348,37 @@ func _ready() -> void:
 	# Ink on paper takes no input, and the page's SubViewport sets
 	# gui_disable_input anyway — IGNORE keeps this out of the picking pass.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if require_discovery and not Engine.is_editor_hint():
+		# Deferred: FloraCodex joins its group in its own _ready, and this node
+		# sits inside the journal's SubViewport several scenes down — order
+		# unknown, exactly as JournalShopInput finds UnlockState.
+		_bind_codex.call_deferred()
+	_rebuild()
+
+
+# Binds the run's discovery record, if the scene has one. Without it the section
+# keeps drawing every authored entry, which is what the preview tools and the
+# layout tests render.
+func _bind_codex() -> void:
+	if not is_inside_tree():
+		return
+	var codex: Node = get_tree().get_first_node_in_group(FloraCodex.GROUP)
+	if codex == null:
+		return
+	_codex = codex
+	codex.connect(&"discovered", _on_discovered)
+	_refresh_known()
+
+
+func _on_discovered(_species: StringName) -> void:
+	_refresh_known()
+
+
+func _refresh_known() -> void:
+	_known = {}
+	if _codex != null and is_instance_valid(_codex):
+		for id: String in _codex.call(&"known_ids"):
+			_known[StringName(id)] = true
 	_rebuild()
 
 
@@ -434,18 +501,69 @@ func active_header_font() -> Font:
 ## than silently rendering nothing.
 func swatch_textures() -> Array[Texture2D]:
 	var out: Array[Texture2D] = []
-	for kind: String in tile_kinds:
-		var tex := _tile_texture(StringName(kind))
-		if tex != null:
-			out.append(tex)
-	for tex: Texture2D in textures:
-		if tex != null:
-			out.append(tex)
+	for e: Dictionary in entries():
+		out.append(e["texture"])
 	return out
 
 
-## Replaces the authored contents at runtime. The hook a discovery system would
-## call; until one exists nothing invokes it.
+## What this section actually draws, in draw order: one
+## {texture, id, cell} per swatch. Everything index-based on this node counts
+## through THIS list, so a hidden entry costs no cell, no hit rect and no ink run.
+##
+## Authored order is tile_kinds then textures; the cell size and the id of an
+## entry are taken at its AUTHORED position, so hiding one does not slide the
+## others onto each other's sizes.
+func entries() -> Array[Dictionary]:
+	if not _entries_dirty:
+		return _entries_cache
+	var out: Array[Dictionary] = []
+	var authored: int = -1
+	for kind: String in tile_kinds:
+		authored += 1
+		var tex := _tile_texture(StringName(kind))
+		if tex != null and _is_shown(authored):
+			out.append(_entry(authored, tex))
+	for tex: Texture2D in textures:
+		authored += 1
+		if tex != null and _is_shown(authored):
+			out.append(_entry(authored, tex))
+	_entries_cache = out
+	_entries_dirty = false
+	return _entries_cache
+
+
+func _entry(authored: int, tex: Texture2D) -> Dictionary:
+	var cell: Vector2i = cell_size
+	if authored < cell_sizes.size():
+		var c: Vector2i = cell_sizes[authored]
+		if c.x > 0 and c.y > 0:
+			cell = c
+	var id: StringName = &""
+	if authored < entry_ids.size():
+		id = StringName(entry_ids[authored])
+	return {"texture": tex, "id": id, "cell": cell}
+
+
+# Whether the authored entry at this position is drawn. An entry with NO id is
+# hidden in a discovery-gated section rather than shown: it names nothing the
+# codex could ever record, so showing it would be an entry that never resolves.
+func _is_shown(authored: int) -> bool:
+	if _codex == null or not is_instance_valid(_codex):
+		return true
+	var id: StringName = &""
+	if authored < entry_ids.size():
+		id = StringName(entry_ids[authored])
+	return id != &"" and _known.has(id)
+
+
+func _invalidate() -> void:
+	_entries_dirty = true
+
+
+## Replaces the authored contents at runtime. Kept for a caller that wants to
+## swap the whole list; DISCOVERY does not go through here — it filters the
+## authored contents instead (see `require_discovery`), so the section keeps the
+## per-entry cell sizes and ids the scene authored.
 func set_known(kinds: PackedStringArray, texs: Array[Texture2D]) -> void:
 	tile_kinds = kinds
 	textures = texs
@@ -519,13 +637,13 @@ func entry_at(point: Vector2) -> int:
 	return -1
 
 
-## The cell allotted to one entry: its `cell_sizes` override if it has a usable
-## one, else the shared `cell_size`.
+## The cell allotted to one DRAWN entry: its `cell_sizes` override if it has a
+## usable one, else the shared `cell_size`.
 func cell_size_for(index: int) -> Vector2i:
-	if index < 0 or index >= cell_sizes.size():
+	var list := entries()
+	if index < 0 or index >= list.size():
 		return cell_size
-	var c: Vector2i = cell_sizes[index]
-	return c if c.x > 0 and c.y > 0 else cell_size
+	return list[index]["cell"]
 
 
 # Left edge of one entry's cell. Cells abut, so this is the sum of every cell
@@ -538,9 +656,10 @@ func _cell_left(index: int) -> int:
 
 
 func entry_id_at(index: int) -> StringName:
-	if index < 0 or index >= entry_ids.size():
+	var list := entries()
+	if index < 0 or index >= list.size():
 		return &""
-	return StringName(entry_ids[index])
+	return list[index]["id"]
 
 
 func _state_for(index: int) -> Dictionary:
@@ -700,6 +819,10 @@ static func _index_for(ts: TileSet, src_id: int) -> TileKindIndex:
 # that item draws, so hanging it on this node would push the title text through the
 # ramp too.
 func _rebuild() -> void:
+	# Before the tree check: a setter poked while the node is still loading must
+	# still drop the cached entries, or the first in-tree rebuild draws the list
+	# from before the edit.
+	_invalidate()
 	# Null-tolerant: every setter above fires during scene load, before the node is
 	# in the tree and before `tileset` is assigned.
 	if not is_inside_tree():

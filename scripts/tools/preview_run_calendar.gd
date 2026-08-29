@@ -39,6 +39,12 @@ extends SceneTree
 ##                  Use with --full. 20 is the interesting value: it makes the
 ##                  ladder and the bridge affordable and the fence not, which is
 ##                  the one state where the per-entry fade has anything to say.
+##   --known <ids>  comma-separated species the run has identified, e.g.
+##                  `frailejon,hypericum`. Installs a FloraCodex, which is what
+##                  puts the "known flora" section under discovery: with the flag
+##                  the page prints only those, without it there is no codex and
+##                  it prints every authored entry (the old picture). `--known ""`
+##                  is the empty book — the state a run actually opens in.
 ##   --hover <i>    park the pointer on "known buildings" entry `i` (0 = ladder),
 ##                  so the hover lift, the PRICE and the mouse-verb glyphs render.
 ##                  Needs --shop, and it is the only way to see a price at all:
@@ -75,6 +81,9 @@ var _locale: String = ""
 var _shop_tokens: float = -1.0
 ## Which "known buildings" entry to park the pointer on, or < 0 for none.
 var _hover_entry: int = -1
+## Species to pre-record, or null for "no codex in the tree".
+var _known: PackedStringArray = PackedStringArray()
+var _install_codex: bool = false
 var _vp: SubViewport
 var _journal: CanvasLayer
 var _frames: int = 0
@@ -104,6 +113,10 @@ func _initialize() -> void:
 			"--hover":
 				if i + 1 < argv.size():
 					_hover_entry = int(argv[i + 1])
+			"--known":
+				_install_codex = true
+				if i + 1 < argv.size():
+					_known = argv[i + 1].split(",", false)
 	if not _out_dir.ends_with("/"):
 		_out_dir += "/"
 	DirAccess.make_dir_recursive_absolute(_out_dir)
@@ -125,6 +138,7 @@ func _initialize() -> void:
 
 	_install_autoloads()
 	_install_shop()
+	_install_known()
 
 	var packed := load(JOURNAL_PATH) as PackedScene
 	if packed == null:
@@ -176,6 +190,24 @@ func _install_shop() -> void:
 	node.set_script(scr)
 	node.name = "UnlockState"
 	root.add_child(node)
+
+
+# Same group-lookup story as the shop: FloraCodex is scene-scoped, and the
+# section that reads it binds deferred, so parenting it to the root before the
+# journal is instantiated is enough.
+func _install_known() -> void:
+	if not _install_codex:
+		return
+	var scr := load("res://scripts/systems/flora_codex.gd") as Script
+	if scr == null:
+		push_warning("preview_run_calendar: could not load flora_codex.gd")
+		return
+	var node := Node.new()
+	node.set_script(scr)
+	node.name = "FloraCodex"
+	root.add_child(node)
+	for id: String in _known:
+		node.call(&"discover", StringName(id.strip_edges()))
 
 
 # On the first FRAME, not in _initialize: the shop reads the balance through

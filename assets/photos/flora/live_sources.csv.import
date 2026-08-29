@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://p8lvkbwhwx2x"
+
+[deps]
+
+files=["res://assets/photos/flora/live_sources.species.translation", "res://assets/photos/flora/live_sources.license.translation", "res://assets/photos/flora/live_sources.credit.translation", "res://assets/photos/flora/live_sources.record.translation", "res://assets/photos/flora/live_sources.locality.translation", "res://assets/photos/flora/live_sources.date.translation"]
+
+source_file="res://assets/photos/flora/live_sources.csv"
+dest_files=["res://assets/photos/flora/live_sources.species.translation", "res://assets/photos/flora/live_sources.license.translation", "res://assets/photos/flora/live_sources.credit.translation", "res://assets/photos/flora/live_sources.record.translation", "res://assets/photos/flora/live_sources.locality.translation", "res://assets/photos/flora/live_sources.date.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

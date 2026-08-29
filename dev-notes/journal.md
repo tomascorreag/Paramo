@@ -215,6 +215,7 @@ never re-author those numbers on the slit.
 Two `JournalKnownSet` sections (`scripts/ui/journal_known_set.gd`) listing what
 the player can put on the mountain, printed in brown ink. Render with `--full`.
 
+- **"known flora" is a discovery list; "known buildings" is not.** The flora section sets `require_discovery`, and then draws only the species the run's `FloraCodex` (group `flora_codex`) holds — filled by walking up to a plant and picking the magnifier (`ActionInspect`). The buildings section lists what you CAN build and is complete from the first page turn. Everything index-based on the node counts through `entries()`, the DRAWN list, so a hidden entry costs no cell, no hit rect and no ink run and the row closes up; cell sizes and ids are still read at the entry's AUTHORED position. With no codex in the tree — every preview tool, every layout test, the editor — the whole authored list draws, which is the premise `test_journal_pages.gd` and `test_journal_shop.gd` rest on. `preview_run_calendar.gd --known frailejon,hypericum` renders a partly-filled page; `--known ""` renders the empty one a run actually opens with.
 - **Two sources, because the two kinds of thing are built differently.** Bridges
   and ladders exist only as tiles in `resources/tiles/base_tileset.tres`
   (`scenes/traversals/bridge.tscn` is an empty Node2D — there is no Bridge
