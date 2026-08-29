@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_1.tres" id="4"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_3.tres" id="6"]
+[ext_resource type="Material" uid="uid://bwp1arcyto0000" path="res://resources/materials/wind_arcytophyllum.tres" id="wind"]
 
 [resource]
 script = ExtResource("1")
@@ -12,6 +13,7 @@ growth_chance = 0.028
 water_affinity = 0.0
 casts_shadow = true
 trample_resistance = 0.6
+wind_material = ExtResource("wind")
 id = &"arcytophyllum"
 density_by_biome = {
 0: 0.31,

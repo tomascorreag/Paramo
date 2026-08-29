@@ -122,6 +122,10 @@ Authored: *Calamagrostis* / *Chusquea* / *Arcytophyllum* 2–4, *Hypericum* 1–
 
 `report_flora_scatter.gd` prints both numbers — cells in the header, individuals on the line under it — and a `per` column on each row.
 
+## Wind
+
+The three grasses sway (`PlantObjectData.wind_material`); the *Espeletia* and the two shrubs do not, which is the botany. It is the ground's own `wind.gdshader` with a re-sized mask, not a plant-specific shader — 2.67x a plain draw per fragment, +0 draw calls, and under the noise floor on web. See [vfx](vfx.md#wind-on-plants-2026-08-28) for why the fork was wrong and why a still frame cannot tell you a sway is broken.
+
 ## Feet
 
 A plant on a walked cell loses growth stages and is eventually removed — `PlantObjectData.trample_resistance`, driven from `RegrowthManager.trample`, measured at ~36 plants destroyed a run. It is the same wear the grass under it takes, and it is the second thing (after fire) that removes flora the player did not place. Full model, the resistances, and the paired-seed numbers are in [vegetation](vegetation.md#feet-kill-plants-too-2026-08-28).

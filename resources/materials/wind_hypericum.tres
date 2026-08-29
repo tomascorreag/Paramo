@@ -1,0 +1,34 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://cmcbpwi8lirfb"]
+
+; wind.gdshader — THE GROUND'S OWN GRASS SHADER, not a plant fork. Its
+; per-fragment world-space noise is the effect: neighbouring texel columns
+; round to offsets differing by 0 or 1, so the silhouette ripples in place
+; instead of the sprite sliding. See dev-notes/vfx.md for why a per-plant
+; sample and a hand-rolled mask were both wrong.
+;
+; STRENGTH 0.4x wind_heavy.tres, the tall-grass tile material this whole set is
+; quoted against. Scaled in the strengths and not in wind_intensity, because
+; DayNightSceneController overwrites that every frame from the day's wind curve
+; for every material in its wind_materials array — this one included, so the
+; species gusts and settles with the ground underneath its own 0.4x.
+;
+; MASK dirt 2.0 / ramp 4.0. A small woody shrub: runs are 6-14, base pinned for 2px, saturating from 6.
+;
+; Re-check both if ISO_Plants.png is ever re-laid-out: the probe must saturate
+; before it can walk out of a 32px frame into the species below, and the
+; horizontal offset must not reach the growth stage alongside.
+
+[ext_resource type="Shader" uid="uid://2p4astgjsq3v" path="res://assets/shaders/wind.gdshader" id="1"]
+
+[resource]
+resource_name = "wind_hypericum"
+shader = ExtResource("1")
+shader_parameter/wind_strength = Vector2(1.2, 0.6)
+shader_parameter/wind_scale = 0.0150000007125
+shader_parameter/wind_scroll_per_second = Vector2(0.894, 0.447)
+shader_parameter/wind_tiling = Vector2(0.75, 1.5)
+shader_parameter/wind_strength_2 = Vector2(0.6, 0.3)
+shader_parameter/wind_scale_2 = 0.1200000057
+shader_parameter/wind_dirt_height_px = 2.0
+shader_parameter/wind_ramp_px = 4.0
+shader_parameter/wind_intensity = 1.0

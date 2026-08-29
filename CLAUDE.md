@@ -64,6 +64,7 @@ headless run sees them.
 | `verify_rain_equivalence.gd` | Prove a rain-shader edit is pixel-identical | [vfx](dev-notes/vfx.md) |
 | `verify_world_clock.gd` | Prove `world_time` reaches the GPU **and** freezes under pause | [vfx](dev-notes/vfx.md) |
 | `benchmark_rain.gd` / `benchmark_fire.gd` | Price a shader edit (the **ratio** is the number) | [vfx](dev-notes/vfx.md) |
+| `benchmark_wind_plant.gd` | Price the plant sway: per-fragment ratio (`--fill`) and the draw-call delta | [vfx](dev-notes/vfx.md) |
 | `preview_fire_blobs.gd` / `preview_fire_aura.gd` | Look at procedural fire / the off-screen aura | [vfx](dev-notes/vfx.md) |
 | `profile_fire_reveal.gd` | **Why revealing a fire stutters.** Ignite off screen, reveal, hide, re-reveal, one continuous recording | [vfx](dev-notes/vfx.md) |
 | `preview_page_warp.gd` | **Measure** journal page-warp error per column | [journal](dev-notes/journal.md) |
@@ -149,6 +150,42 @@ to them. Generator, indexing and sim tools are headless.
   burn material goes on the node as well as the sprite. Multi-cell footprints
   (a tree over 3×3) are the unbuilt other half; see [flora](dev-notes/flora.md)
   for the four things that block them.
+- **Plant sway is `wind.gdshader` itself, not a fork.** Its per-fragment
+  world-space noise IS the effect: neighbouring texel columns round to offsets
+  differing by 0 or 1, so the silhouette ripples. Sampling once per plant
+  instead (to stop a thin stem "tearing", which was never measured) slides the
+  whole sprite as a rigid block and reads as teleporting. Only the MASK differs
+  per material — the alpha probe gets 16-32 opaque pixels from a tile and 2-7
+  from a tussock, so the tile's `dirt 16 / ramp 16` leaves a mature
+  *Calamagrostis* at a mask of 0.06 and motionless; plants use `dirt 0 / ramp 2`.
+  Cost is 2.67x a plain draw per fragment, **+0 draw calls**, and **under the
+  noise floor on web** (0.00 ms over 202 items, floor +/-0.10). Five species
+  sway, one material each; the other three carry no material at all.
+- **`round()` puts a floor of ~0.6x wind_heavy under any sway strength.** Peak
+  displacement is about `f x 2.7` px, so below 0.5x it rounds to zero and the
+  plant is static however sensible the number looks — 0.5x measures 26% of the
+  motion, 0.3x measures none. The usable range is ~0.6x-1.2x, and a spread of
+  intensities has to fit inside it. Scale in the STRENGTHS:
+  `DayNightSceneController` overwrites `wind_intensity` every frame on every
+  material in `wind_materials`, and every sway material must BE in that array or
+  it ignores the day's wind while the ground gusts.
+- **Verify that a shader's pixels actually MOVE; nothing else catches it.** The
+  first plant sway shipped visibly static and passed every check — it compiled,
+  bound, rendered, benchmarked and profiled. `benchmark_wind_plant.gd --verify`
+  is the guard. Two traps in writing one: drive **WorldClock**, not the
+  `world_time` uniform (the autoload re-pushes it every frame and silently
+  overwrites a direct write), and count texels **redrawn**, not how far an edge
+  slid — a per-fragment ripple boils in place, so mature *Chusquea* redraws 17k
+  pixels while its edge never moves. Also: a framebuffer read-back is in
+  PHYSICAL pixels while the game is in logical ones.
+- **Shader `instance uniform`s come from ONE fixed global pool** (4096 items
+  here), not per-object storage, so they are wrong for anything there are
+  hundreds of — a few hundred plants exhausted it. `MODEL_MATRIX` does resolve
+  per item under `gl_compatibility` and is the safe way to vary a shared
+  material per instance.
+- **Do not A/B a web change by exporting twice.** Sequential runs are not
+  paired: two runs of `seed=26` came back at 5.00 and 11.20 ms. `profile_web.gd`
+  toggles a probe in place inside one frame; add a row there instead.
 - **The patch gate's ramp width decides whether a stand has an interior.**
   `TYPE_SIMPLEX_SMOOTH` only reaches ±0.75 (p90 = 0.33), so the old fixed 0.25
   ramp meant a species authored at cut 0.25 never reached its density anywhere —

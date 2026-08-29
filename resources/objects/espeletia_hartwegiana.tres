@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_hartwegiana_1.tres" id="4"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_hartwegiana_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_hartwegiana_3.tres" id="6"]
+[ext_resource type="Material" uid="uid://bwp1hartweg000" path="res://resources/materials/wind_hartwegiana.tres" id="wind"]
 
 [resource]
 script = ExtResource("1")
@@ -12,6 +13,7 @@ growth_chance = 0.01
 water_affinity = 0.005
 casts_shadow = true
 trample_resistance = 3.0
+wind_material = ExtResource("wind")
 id = &"espeletia_hartwegiana"
 density_by_biome = {
 0: 0.66,

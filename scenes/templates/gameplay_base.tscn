@@ -17,6 +17,11 @@
 [ext_resource type="Material" uid="uid://1amo6icgmdhh" path="res://resources/materials/wind_light.tres" id="15_wind1"]
 [ext_resource type="Material" uid="uid://cgvibl4w5t4r6" path="res://resources/materials/wind_medium.tres" id="16_wind2"]
 [ext_resource type="Material" uid="uid://d1tikc2puqx6j" path="res://resources/materials/wind_heavy.tres" id="17_wind3"]
+[ext_resource type="Material" uid="uid://bwp1hartweg000" path="res://resources/materials/wind_hartwegiana.tres" id="17_wp0"]
+[ext_resource type="Material" uid="uid://bwp1chusquea00" path="res://resources/materials/wind_chusquea.tres" id="17_wp1"]
+[ext_resource type="Material" uid="uid://bwp1cortader00" path="res://resources/materials/wind_cortaderia.tres" id="17_wp2"]
+[ext_resource type="Material" uid="uid://bwp1hyperic000" path="res://resources/materials/wind_hypericum.tres" id="17_wp3"]
+[ext_resource type="Material" uid="uid://bwp1arcyto0000" path="res://resources/materials/wind_arcytophyllum.tres" id="17_wp4"]
 [ext_resource type="Material" uid="uid://cngyo1chub5q8" path="res://resources/materials/water_still.tres" id="18_ws"]
 [ext_resource type="Material" uid="uid://c6mn6pv77d64n" path="res://resources/materials/water_flow_ne.tres" id="19_wne"]
 [ext_resource type="Material" uid="uid://dwhxjpbo62im4" path="res://resources/materials/water_flow_se.tres" id="20_wse"]
@@ -223,7 +228,7 @@ profile = ExtResource("12_dnprof")
 canvas_modulate = NodePath("../AmbientModulate")
 post_process_rect = NodePath("../PostProcessLayer/PostProcessRect")
 background_rect = NodePath("../BackgroundLayer/BG")
-wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3")])
+wind_materials = Array[ShaderMaterial]([ExtResource("15_wind1"), ExtResource("16_wind2"), ExtResource("17_wind3"), ExtResource("17_wp0"), ExtResource("17_wp1"), ExtResource("17_wp2"), ExtResource("17_wp3"), ExtResource("17_wp4")])
 water_materials = Array[ShaderMaterial]([ExtResource("18_ws"), ExtResource("19_wne"), ExtResource("20_wse"), ExtResource("21_wsw"), ExtResource("22_wnw")])
 
 [node name="WaterCycle" type="Node" parent="." unique_id=480862932]

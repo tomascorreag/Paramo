@@ -257,6 +257,13 @@ static func assign_object_kinds(
 
 ## The registered data for `kind`, or null. For the action layer, which
 ## spawns player-placed plants from the same .tres the painter scatters.
+## Every registered object kind. For tools and tests that need to sweep the
+## registry rather than restate it — a hardcoded species list in a checker is
+## a list that silently stops covering what was added after it.
+static func kinds() -> Array:
+	return _DATA_BY_KIND.keys()
+
+
 static func data_for(kind: StringName) -> WorldObjectData:
 	return _DATA_BY_KIND.get(kind)
 

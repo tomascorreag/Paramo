@@ -108,6 +108,93 @@ func test_shadow_is_kept_by_default() -> void:
 
 
 # ===========================================================================
+# Wind
+# ===========================================================================
+
+func test_ground_cover_carries_the_sway_material_on_both_canvas_items() -> void:
+	# A clumped cell draws its frontmost individual through the Sprite2D and
+	# the rest through the node's own _draw(), so one material on the sprite
+	# alone leaves most of the tufts standing still.
+	var inst := _instance_with("res://resources/objects/chusquea.tres")
+	await get_tree().process_frame
+	var mat: ShaderMaterial = inst.data.wind_material
+	assert_not_null(mat, "chusquea.tres must author a sway material")
+	assert_eq(inst._sprite.material, mat)
+	if not inst._extra_offsets.is_empty():
+		assert_eq(inst.material, mat, "the extras' CanvasItem needs it too")
+
+
+func test_the_material_is_shared_not_duplicated_per_plant() -> void:
+	# One resource and one compiled program however many are on the mountain;
+	# the per-plant phase comes from the item's own origin in the shader. A
+	# duplicate per instance would also be a duplicate shader compile.
+	var a := _instance_with("res://resources/objects/chusquea.tres")
+	var b := _instance_with("res://resources/objects/chusquea.tres")
+	await get_tree().process_frame
+	assert_same(a._sprite.material, b._sprite.material)
+
+
+func test_the_still_species_carry_no_material_at_all() -> void:
+	# Not an aesthetic detail: these three are the cheap path. Calamagrostis
+	# alone is ~180 plants a map, and dropping its material took the shaded
+	# CanvasItem count on level1 from 437 to 202.
+	for path in [
+		"res://resources/objects/frailejon.tres",
+		"res://resources/objects/espeletia_barclayana.tres",
+		"res://resources/objects/calamagrostis.tres",
+	]:
+		var inst := _instance_with(path)
+		await get_tree().process_frame
+		assert_null(inst.data.wind_material, "%s must not sway" % path)
+		assert_null(inst._sprite.material)
+		assert_null(inst.material)
+
+
+func test_exactly_the_authored_species_sway() -> void:
+	# Pins the set, so a retune cannot silently enrol or drop a species.
+	var swaying: Array[String] = []
+	for kind in ObjectPainter.kinds():
+		var d := ObjectPainter.data_for(kind) as PlantObjectData
+		if d != null and d.wind_material != null:
+			swaying.append(String(d.id))
+	swaying.sort()
+	assert_eq(swaying, [
+		"arcytophyllum", "chusquea", "cortaderia",
+		"espeletia_hartwegiana", "hypericum",
+	])
+
+
+func test_every_swaying_material_is_registered_for_the_day_wind_curve() -> void:
+	# DayNightSceneController drives wind_intensity on the materials in its
+	# wind_materials array. A sway material missing from it ignores the day's
+	# wind entirely while the ground gusts — which is how this shipped first.
+	var scene: PackedScene = load("res://scenes/templates/gameplay_base.tscn")
+	var state: SceneState = scene.get_state()
+	var registered: Array = []
+	for i in state.get_node_count():
+		for j in state.get_node_property_count(i):
+			if state.get_node_property_name(i, j) == &"wind_materials":
+				registered = state.get_node_property_value(i, j)
+	assert_gt(registered.size(), 0, "gameplay_base must set wind_materials")
+	for kind in ObjectPainter.kinds():
+		var d := ObjectPainter.data_for(kind) as PlantObjectData
+		if d != null and d.wind_material != null:
+			assert_true(registered.has(d.wind_material),
+				"%s's sway material is not in wind_materials" % d.id)
+
+
+func test_burning_takes_the_sway_and_dousing_gives_it_back() -> void:
+	var inst := _instance_with("res://resources/objects/chusquea.tres")
+	await get_tree().process_frame
+	var wind: ShaderMaterial = inst.data.wind_material
+	inst.apply_burn_material()
+	assert_ne(inst._sprite.material, wind, "a burning plant stops swaying")
+	inst.clear_burn_material()
+	assert_eq(inst._sprite.material, wind,
+		"rain putting the fire out has to give the sway back")
+
+
+# ===========================================================================
 # Trampling walks the plant back down its growth stages
 # ===========================================================================
 
@@ -261,8 +348,10 @@ func test_burning_a_clump_chars_the_extras_too() -> void:
 	assert_not_null(inst.material, "the clump's own CanvasItem needs the burn shader")
 	assert_eq(inst.material, inst._sprite.material)
 	inst.clear_burn_material()
+	# Calamagrostis does not sway, so both items go back to no material at all.
+	# The give-it-back case is test_burning_takes_the_sway_and_dousing_gives_it_back.
+	assert_eq(inst._sprite.material, inst.data.wind_material)
 	assert_null(inst.material)
-	assert_null(inst._sprite.material)
 
 
 # ===========================================================================

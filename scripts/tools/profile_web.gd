@@ -358,6 +358,17 @@ func _plan() -> void:
 		# a row cannot be silently mislabelled again.
 		["world: objects (painted)", func() -> Array:
 			return get_tree().get_nodes_in_group(&"procedural_object")],
+		# THE PLANT SWAY. Same shape as the tile-materials probe above and for
+		# the same reason: nulling the material keeps every plant drawn — same
+		# geometry, same pixels, same count — so what this isolates is the
+		# shader. It has to be measured HERE rather than by exporting twice and
+		# diffing, because sequential web runs are not paired: two runs of the
+		# same seed came back at 5.0 and 11.2 ms with 150 canvas items between
+		# them. Both CanvasItems of a clumped plant carry the material (the
+		# Sprite2D holds the frontmost individual, the node's own _draw holds
+		# the rest), so both have to be nulled.
+		["world: plant sway OFF", func() -> Array: return _swaying_plant_items(),
+			&"material", null],
 		["world: frailejones", func() -> Array: return _by_script(world, "frailejon")],
 		["world:   frailejon sprites", func() -> Array:
 			return _named_under(_by_script(world, "frailejon"), "Sprite2D")],
@@ -907,6 +918,23 @@ func _tile_material(layer: TileMapLayer, cell: Vector2i) -> Material:
 
 ## Every TileData that carries a material, across every tileset the ground layers
 ## use. Collected once; the A/B block nulls them and puts them back.
+# Every CanvasItem carrying a plant sway material: the Frailejon nodes whose
+# own _draw() renders the extra individuals of a clumped cell, plus their
+# Sprite2D children. Matched by "has a material", not by species, so a new
+# swaying species is picked up without touching this.
+func _swaying_plant_items() -> Array:
+	var out: Array = []
+	# `world` is a local in the row-building function, not a field.
+	for n in _by_script(_node("World"), "frailejon"):
+		var ci := n as CanvasItem
+		if ci != null and ci.material != null:
+			out.append(ci)
+		var spr := n.get_node_or_null("Sprite2D") as CanvasItem
+		if spr != null and spr.material != null:
+			out.append(spr)
+	return out
+
+
 func _shaded_tile_datas() -> Array:
 	var out: Array = []
 	var seen: Dictionary = {}

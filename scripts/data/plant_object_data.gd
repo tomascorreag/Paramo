@@ -82,3 +82,18 @@ extends WorldObjectData
 ## 0 makes the plant immune, which is the knob for isolating the mechanic in
 ## the balance sim.
 @export var trample_resistance: float = 1.0
+
+## Sway material, or null for a plant that does not move. Shared by every
+## instance of the species — the per-plant variation comes from the item's own
+## origin inside the shader, not from a duplicated material, so this stays one
+## resource and one shader program no matter how many are on the mountain.
+##
+## Only ground cover is authored with one. A frailejon is a thick woody trunk
+## under dense marcescent leaves and is the thing in a paramo that visibly does
+## NOT move; the grasses and the bamboo are what the wind is legible in. That
+## it is also the cheaper answer is a coincidence worth taking.
+##
+## Frailejon applies it to both of its CanvasItems (the Sprite2D and its own
+## _draw, which carries the extra individuals of a clumped cell) and pushes
+## `wind_region` per instance whenever the growth stage changes.
+@export var wind_material: ShaderMaterial = null

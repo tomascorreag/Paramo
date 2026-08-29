@@ -279,3 +279,111 @@ fragments. Do not quote the per-phase ms as "fire is fast" — the load-bearing
 number is the **area ratio** it prints (80 mature ≈ 1x a fullscreen frame of quad
 area). The real decision belongs on the web build; see
 [performance.md](performance.md).
+
+## Wind on plants (2026-08-28)
+
+The three grasses (*Calamagrostis*, *Chusquea*, *Cortaderia*) sway. The *Espeletia* and the two shrubs do not: a rosette is a thick woody trunk under dense marcescent leaves and is the thing in a paramo that visibly does not move. `PlantObjectData.wind_material` is the switch; null means still.
+
+**It is `wind.gdshader`, the tile shader, unmodified.** `resources/materials/wind_plant.tres` is a second material on it with the same amplitudes as `wind_heavy.tres` and a different mask. There is no plant-specific shader, and the attempt to write one is the substance of this section.
+
+### Why a fork was wrong
+
+A custom shader was written first, on two arguments that both turned out to be backwards:
+
+- **"Sample the noise once per plant, or a 3px stem tears in half."** The tile shader samples per fragment in world space, so neighbouring texel columns of one sprite round to offsets differing by 0 or 1. That is not tearing — **it is the ripple, and it is the entire effect.** Sampling once per plant makes the whole sprite jump 1–3 texels as a rigid block, which reads as a sprite teleporting rather than grass bending. The tearing was hypothesised and never measured; the ripple was real and got deleted.
+- **"Replace the alpha probe with frame-grid arithmetic, it's cheaper."** The probe counts opaque pixels below each fragment, which is precisely the measurement a cut-out needs: the ramp is taken from the plant's own ink, per column, with nothing to author per species. The replacement measured height from the *frame's bottom edge* instead, which is 5–9 transparent rows below where the plant actually starts.
+
+Both are visible in the measurement that matters. `--verify` reports the fraction of a plant's ink redrawn per sample:
+
+| | edge travel | ink redrawn/sample |
+|---|---|---|
+| one noise sample per plant | 2–3 texels | — (rigid slide) |
+| per-fragment noise (tile shader) | ~0 texels | 12–32% |
+
+An edge that does not move is CORRECT here. Mature *Chusquea* redraws 17k physical pixels while its leading edge never shifts at all — the silhouette boils rather than slides. An edge-travel metric scores that as static, which is how the first version got signed off.
+
+### What legitimately differs: the mask, and only the mask
+
+The probe's ramp has to be re-sized because a tussock is not a tile. Measured on ISO_Plants.png — the deepest opaque run in any column, which is what `opaque_below` saturates against:
+
+| species | stage 0 → 3 | ink width |
+|---|---|---|
+| calamagrostis | 3, 5, 6, 7 | 4–12 cols |
+| cortaderia | 7, 6, 10, 12 | 7–16 |
+| chusquea | 6, 9, 16, 17 | 8–17 |
+
+A grass tile gives the probe 16–32; a tussock gives it 2–7. At the tile's `dirt 16 / ramp 16` a mature *Calamagrostis* sits at a mask of **0.06** and never moves. The shipped material uses **`dirt 0 / ramp 2`**.
+
+### Who sways, and at what strength
+
+Five species carry a sway material, one each, all on `wind.gdshader`. The other three are `wind_material = null` — no material at all, the cheap path. `PlantObjectData.wind_material` is the switch and `test_exactly_the_authored_species_sway` pins the set.
+
+| sheet row | species | strength vs `wind_heavy` | mask (dirt / ramp) |
+|---|---|---|---|
+| 1 | *E. grandiflora* (frailejon) | — still | — |
+| 2 | *E. hartwegiana* | 0.5 | 4 / 6 |
+| 3 | *E. barclayana* | — still | — |
+| 4 | *Calamagrostis* | — still | — |
+| 5 | *Chusquea* | 0.3 | 0 / 2 |
+| 6 | *Cortaderia* | 0.6 | 0 / 2 |
+| 7 | *Hypericum* | 0.4 | 2 / 4 |
+| 8 | *Arcytophyllum* | 0.3 | 0 / 2 |
+
+Dropping *Calamagrostis* is the real optimisation of the three: it is ~180 plants a map, and the shaded-CanvasItem count on level1 went **437 → 202**.
+
+The masks differ because the alpha probe measures growth form. Deepest opaque run in any column, mature: *hartwegiana* 23 (a trunk — pinned for 4px so the crown sways and the base does not), *chusquea* 17, *cortaderia* 12, *hypericum* 14, *arcytophyllum* 7 (a cushion; at dirt 2 / ramp 4 it never saturated and read as static even at 0.6x).
+
+### The quantiser floor: below ~0.5x nothing moves at all
+
+**`round()` puts a hard floor under this scale, and four of those five strengths are under it.** Measured ink redrawn per sample at maturity, as authored:
+
+| species | strength | churn |
+|---|---|---|
+| cortaderia | 0.6 | **14%** |
+| hartwegiana | 0.5 | 2% |
+| hypericum | 0.4 | 0% |
+| chusquea | 0.3 | 0% |
+| arcytophyllum | 0.3 | 0% |
+
+And with every species forced to 0.6x, masks as authored, all five move (5 / 15 / 14 / 8 / 3%) — so this is the strength, not the masks.
+
+The reason is that the offset is quantised to whole texels. Peak displacement at factor *f* is about `f x 2.7` px, so 0.6x peaks at 1.6 (rounds to 1, often 2), 0.5x at 1.3 (rounds to 1, rarely), and 0.3x at 0.8 (rounds to 0, essentially always). Churn against factor, on the tussock mask, calamagrostis / chusquea / cortaderia:
+
+| factor | churn | vs 1.0x |
+|---|---|---|
+| 1.0x | 16 / 29 / 27 % | — |
+| 0.8x | 11 / 24 / 22 % | 78% |
+| 0.7x | 7 / 21 / 19 % | 62% |
+| 0.6x | 5 / 15 / 14 % | 47% |
+| 0.5x | 4 / 7 / 8 % | 26% |
+
+**The usable range is roughly 0.6x to 1.2x.** A set of five distinct intensities has to be expressed inside it — the ratios can be preserved by scaling the whole set (x2 turns 0.3/0.4/0.5/0.6 into 0.6/0.8/1.0/1.2), at the price of the strongest species swaying more than the ground rather than less.
+
+Scaled in the **strengths**, not in `wind_intensity`: `DayNightSceneController` writes `wind_intensity` on every material in its `wind_materials` array each frame from the day's wind curve and would overwrite it. All five ARE in that array (`gameplay_base.tscn`) — they were not at first, so plants ignored the day's wind entirely while the ground gusted, and `test_every_swaying_material_is_registered_for_the_day_wind_curve` now guards it.
+
+### Cost
+
+**Per fragment**, `benchmark_wind_plant.gd --fill --passes 96` (199 Mpx, RTX 3080). A single 2 Mpx pass is useless — all arms sit at the ~0.45 ms CPU floor and the *shaded* ones come out faster. Stack passes until the sweep responds:
+
+| arm | ms/frame | vs plain |
+|---|---|---|
+| plain, no material | 1.437 | 1.00× |
+| `wind_plant.tres` | 3.836 | 2.67× |
+| `wind_heavy.tres` (tile) | 3.872 | 2.69× |
+
+Identical, as it must be — it is the same shader. The probe's early-out does not save anything measurable at `ramp 2` versus the tile's 32.
+
+**Draw calls and canvas items: +0.** Every plant shares one material, so there is nothing to break a batch, and the extras of a clumped cell ride the CanvasItem the node already had.
+
+**On web: under the noise floor.** `profile_web.gd` has a `world: plant sway OFF` row that nulls the material in place, so it is paired inside one frame: **0.00 ms across 202 CanvasItems, against a ±0.10 ms floor** (and +0.10 ms across 437 when *Calamagrostis* still swayed). For scale in the same run, `tile materials OFF` is −0.70 ms (13%) over 42 tile datas.
+
+**Do not A/B this by exporting twice.** Sequential web runs are not paired: two runs of `seed=26` came back at 5.00 and 11.20 ms with 150 canvas items between them. That is what the in-run A/B row exists for.
+
+### `--verify` is the guard, and it has two traps
+
+`benchmark_wind_plant.gd --verify` drives the clock across a span and reports ink churn per species per growth stage. It exists because the first version shipped visibly static and *everything else passed*: the shader compiled, the material bound, the preview render looked right, the fill benchmark priced it, the web profile ran. None of them asked whether the pixels move.
+
+- **Drive `WorldClock`, never `RenderingServer.global_shader_parameter_set(&"world_time", …)`.** The autoload re-pushes the value from its own accumulator every frame, so a direct write is overwritten before anything renders and the test's whole time axis is a lie — it reported zero motion for a shader that was working.
+- **Count texels REDRAWN, not how far an edge slid.** See the ripple table above.
+- **Seed the global rng.** `Frailejon._roll_clump` draws from it in `_ready`, so without seeding each run gets a different tuft count and ink area; the same settings measured 9% and then 5% on *Calamagrostis*. It is bit-repeatable now, and the sweep above was re-run after the fix — the first version of that table was noise.
+

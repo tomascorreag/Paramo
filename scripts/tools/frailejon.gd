@@ -80,6 +80,7 @@ func _ready() -> void:
 
 	_sprite.flip_h = (data != null and data.randomize_flip_h and randf() < 0.5)
 	_roll_clump()
+	_apply_wind_material()
 
 	# Ground cover opts out of the shadow: it is a second CanvasItem with its
 	# own shader per plant, and canvas-item count is what the web frame pays
@@ -218,6 +219,27 @@ func _process(_delta: float) -> void:
 			_trample_damage = maxf(_trample_damage - per_hour, 0.0)
 		if growth_stage < max_stage and randf() <= data.growth_chance:
 			set_growth_stage(growth_stage + 1)
+
+
+# --- Wind ------------------------------------------------------------------
+
+## Attach the species' sway material to both of this plant's CanvasItems.
+##
+## BOTH items, because a clumped cell draws its frontmost individual through
+## the child Sprite2D and the rest through this node's own _draw() — one
+## material on the sprite alone would leave three tufts of four standing still.
+## The material itself is SHARED (no duplicate per plant): the per-plant phase
+## comes from the item's own origin inside the shader, which is the whole
+## reason the shader needs nothing pushed to it per instance. Instance uniforms
+## were the first design and they do not survive this many objects — see the
+## wind_plant.gdshader header.
+func _apply_wind_material() -> void:
+	if data == null or data.wind_material == null:
+		return
+	if _sprite != null:
+		_sprite.material = data.wind_material
+	if not _extra_offsets.is_empty():
+		material = data.wind_material
 
 
 # --- Trampling (duck-typed by RegrowthManager) ------------------------------
@@ -486,3 +508,7 @@ func clear_burn_material() -> void:
 		_sprite.material = null
 	material = null
 	_burn_mat = null
+	# Burning replaced the sway material on both items; rain putting the fire
+	# out has to give it back, or an extinguished plant is the only one on the
+	# mountain standing still.
+	_apply_wind_material()
