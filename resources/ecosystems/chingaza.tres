@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"chingaza"
+display_key = "ECOSYSTEM_CHINGAZA"
 density_scale = {
 &"frailejon": 1.0,
 &"calamagrostis": 1.0,

@@ -109,6 +109,7 @@ step 8 asks for the second click. Concretely:
 - **Escape or a right click drops the placement without building.** Step 8 then
   rewinds to step 7 (`_on_placement_ended` → `_show_step(_step - 1)`) rather than
   waiting forever on a click the player can no longer make.
+- **The placement opens from anywhere, and the walk comes after the aim** (2026-09-12). The build actions carry `TileAction.executes_from_afar`, so picking one on a far tile enters `AWAITING_ENDPOINT` at once. A valid second click either builds on the spot (player already beside the origin) or enters `APPROACHING`: the ghost stays, the player walks to a cell beside the origin that the validator will accept them on (never inside a fence run or a bridge span), and the traversal is re-validated, **charged** and built on arrival. `is_placing()` is true in both modes, so step 8 stays up during the walk and `placement_paid` still completes it, just later. Right click / Escape stop the walk and cancel; a left-click move cancels through `ClickToMoveController.path_dispatched`; both emit `placement_ended(built = false)`, so step 8 rewinds as above.
 
 That rewind is why `TraversalPlacementController` gained **two** signals rather
 than one. `cancel()` is its single teardown for success, cancellation AND
@@ -152,7 +153,7 @@ run ever introduces. The arc is one scripted meeting with it.
 ### The quiet beat
 
 Step 9 has **no copy at all**, and that is its content. `"quiet": true` fades the
-strip *and the skip button* away and leaves them away for 12 s. An FTUE that
+strip away and leaves it away for 12 s; the skip button stays. An FTUE that
 never lets go teaches the player to wait for the next line rather than to look at
 the world — and the aura only works on a player who has stopped watching the
 bottom of the screen. It is also what buys the arc its distance: the fire is lit
@@ -248,9 +249,7 @@ hangs.
 No new `TutorialGate` bit. Dousing goes through the tile action menu, which
 `BUILD` opened three steps earlier — there is nothing left to withhold.
 
-Every step that shows a panel carries a **hold to skip tutorial** button in its
-own row under it (the quiet beat shows neither — for those seconds there is no
-tutorial on screen to end), centred, with `_SKIP_GAP` (5px) of clear air between
+A **hold to skip tutorial** button sits in its own row under the strip for the whole FTUE: it fades in once in `_begin` and never fades out — not on the hand-off beats, not on the quiet step (since 2026-09-12; before that it followed the strip's fades). Centred, with `_SKIP_GAP` (5px) of clear air between
 the two — they are
 separate objects (one is the tutorial talking, the other is a control that ends
 it) and touching edges read as one widget. It ends the whole FTUE; the tutorial

@@ -7,9 +7,12 @@ extends Node
 #
 # Second-click placement mode for traversal structures. Invoked by
 # TileInteractionController once the player picks a traversal kind from the
-# radial menu. Enters AWAITING_ENDPOINT; the next left-click resolves the far
-# endpoint, validates, and (on success) instantiates & builds the traversal.
-# Right-click or Escape cancels.
+# radial menu — wherever the player stands. Enters AWAITING_ENDPOINT; the next
+# left-click resolves the far endpoint and validates it. If the player is not
+# next to the origin, it enters APPROACHING and walks them there first; the
+# traversal is re-validated, PAID FOR and built on arrival, so a walk that gets
+# interrupted costs nothing. Right-click or Escape cancels in either mode, and a
+# left-click move redirects the walk and drops the placement.
 #
 # This node should sit BEFORE TileInteractionController in the scene tree so
 # its `_unhandled_input` runs first while placement mode is active.
@@ -29,7 +32,9 @@ signal placement_began(kind: StringName)
 signal placement_ended(kind: StringName, built: bool)
 
 
-enum Mode { IDLE, AWAITING_ENDPOINT }
+## APPROACHING: the endpoint is aimed and accepted, and the player is walking to
+## a cell beside the origin. Nothing is charged or built until they arrive.
+enum Mode { IDLE, AWAITING_ENDPOINT, APPROACHING }
 
 
 @export var pathfinder: Pathfinder
@@ -57,6 +62,11 @@ var _preview_valid: bool = false
 ## Whether the open placement got as far as being charged for. Read by cancel()
 ## to tell a finished structure from an abandoned one.
 var _paid_this_placement: bool = false
+## The accepted endpoint, held across the APPROACHING walk.
+var _far_cell: Vector2i = Pathfinder.NO_CELL
+## Whether the last placement to close was paid for. Lets the arrival path tell
+## a build from a rejection after cancel() has already reset the live flag.
+var _last_ended_paid: bool = false
 var _blocked_cells: Dictionary = {}
 var _tile_interaction: TileInteractionController
 var _player: Player
@@ -94,6 +104,14 @@ func _ready() -> void:
 		TileInteractionController.GROUP_NAME
 	) as TileInteractionController
 	_player = get_tree().get_first_node_in_group(&"player") as Player
+	# A left-click move during APPROACHING is the player changing their mind.
+	# path_dispatched fires only for user clicks; our own approach calls
+	# player.follow_path directly, so it cannot cancel itself.
+	var c2m := get_tree().get_first_node_in_group(
+		ClickToMoveController.GROUP_NAME
+	) as ClickToMoveController
+	if c2m:
+		c2m.path_dispatched.connect(_on_user_path_dispatched)
 
 
 # ----------------------------------------------------------------------------
@@ -196,7 +214,8 @@ func cancel() -> void:
 	# cancel() is also the success teardown and is called defensively from paths
 	# that were never placing, so the signal is raised only for a placement that
 	# was actually open, and carries whether it got built.
-	var was_placing: bool = _mode == Mode.AWAITING_ENDPOINT
+	var was_placing: bool = _mode != Mode.IDLE
+	var was_approaching: bool = _mode == Mode.APPROACHING
 	var ended_kind: StringName = _traversal_kind
 	var was_paid: bool = _paid_this_placement
 	_clear_preview()
@@ -204,18 +223,26 @@ func cancel() -> void:
 		structure_layer_manager.reset_preview_tint()
 	_mode = Mode.IDLE
 	_traversal_kind = &""
+	_far_cell = Pathfinder.NO_CELL
 	_preview_hover_cell = Pathfinder.NO_CELL
 	_preview_valid = false
 	_blocked_cells = {}
 	_paid_this_placement = false
+	_last_ended_paid = was_paid
 	if ux_overlay:
 		ux_overlay.exit_placement_mode()
+		# The walk marker is ours only while approaching; any other LOCKED state
+		# belongs to TileInteractionController's walk-then-act and is left alone.
+		if was_approaching:
+			ux_overlay.unlock()
 	if was_placing:
 		placement_ended.emit(ended_kind, was_paid)
 
 
+## True while aiming AND while walking to build: both keep the FTUE's second-click
+## step up and keep TileInteractionController's right-click out of the way.
 func is_placing() -> bool:
-	return _mode == Mode.AWAITING_ENDPOINT
+	return _mode != Mode.IDLE
 
 
 # ----------------------------------------------------------------------------
@@ -223,6 +250,12 @@ func is_placing() -> bool:
 # ----------------------------------------------------------------------------
 
 func _process(_delta: float) -> void:
+	if _mode == Mode.APPROACHING:
+		# is_moving() stays true between steps, so false means arrived or the path
+		# aborted; _arrive tells the two apart by range.
+		if _player == null or not _player.is_moving():
+			_arrive()
+		return
 	if _mode != Mode.AWAITING_ENDPOINT:
 		return
 	if pathfinder == null:
@@ -407,6 +440,9 @@ func _mouse_global_position() -> Vector2:
 # ----------------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _mode == Mode.APPROACHING:
+		_approach_input(event)
+		return
 	if _mode != Mode.AWAITING_ENDPOINT:
 		return
 
@@ -446,6 +482,78 @@ func _unhandled_input(event: InputEvent) -> void:
 			structure_layer_manager.flash_invalid()
 		return
 
+	_approach_or_place(far_cell)
+
+
+# While walking to build, only cancels are ours. A left-click is deliberately NOT
+# consumed: ClickToMoveController takes it, and its path_dispatched drops the
+# placement (_on_user_path_dispatched).
+func _approach_input(event: InputEvent) -> void:
+	var cancel_pressed: bool = false
+	if event is InputEventKey:
+		var k := event as InputEventKey
+		cancel_pressed = k.pressed and k.keycode == KEY_ESCAPE
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		cancel_pressed = mb.pressed and mb.button_index == MOUSE_BUTTON_RIGHT
+	if not cancel_pressed:
+		return
+	if _player != null:
+		_player.stop()
+	cancel()
+	get_viewport().set_input_as_handled()
+
+
+func _on_user_path_dispatched(_cells: Array[Vector2i]) -> void:
+	if _mode == Mode.APPROACHING:
+		cancel()
+
+
+# ----------------------------------------------------------------------------
+# Approach (walk to the origin, then build)
+# ----------------------------------------------------------------------------
+
+# Build now if the player already stands beside the origin; otherwise walk them
+# there and build on arrival. An aim with no reachable standing cell stays in
+# AWAITING_ENDPOINT with a red flash, so the player can re-aim.
+func _approach_or_place(far_cell: Vector2i) -> void:
+	var avoid := _standing_exclusions(far_cell)
+	if _player == null or _in_build_range(_player.current_cell, avoid):
+		_place(far_cell)
+		return
+	var path := _approach_path(avoid)
+	if path.size() < 2:
+		if not _preview_cells.is_empty():
+			structure_layer_manager.flash_invalid()
+		return
+	path.remove_at(0)  # the player already stands on the start cell
+	_far_cell = far_cell
+	_mode = Mode.APPROACHING
+	# The ghost stays painted as the promise of what gets built; the endpoint
+	# hints and cursor X go, and a lock marks where the player is heading.
+	if ux_overlay:
+		ux_overlay.exit_placement_mode()
+		ux_overlay.lock_at(_origin_cell)
+	_player.follow_path(path)
+
+
+func _arrive() -> void:
+	var origin := _origin_cell
+	var far := _far_cell
+	var pcell: Vector2i = _player.current_cell if _player != null else Pathfinder.NO_CELL
+	# Out of range = the path aborted (the graph changed under the walk).
+	if _player != null and not _in_build_range(pcell, _standing_exclusions(far)):
+		cancel()
+		_flash_denied(origin)
+		return
+	_place(far)
+	# _place always closes the placement. Unpaid = rejected on arrival (blocked
+	# meanwhile, or the balance dropped): say so, since the player walked for it.
+	if not _last_ended_paid:
+		_flash_denied(origin)
+
+
+func _place(far_cell: Vector2i) -> void:
 	match _traversal_kind:
 		&"bridge":
 			_place_bridge(far_cell)
@@ -456,6 +564,54 @@ func _unhandled_input(event: InputEvent) -> void:
 		_:
 			push_warning("Traversal placement: unknown kind '%s'." % _traversal_kind)
 			cancel()
+
+
+# Cells the player must not build from, because the validator refuses a build
+# with the player on them: every cell of a fence run, and a bridge's span (its
+# interior is checked; the ends cost nothing to avoid). A ladder ignores the
+# player's cell, so standing on its landing stays legal.
+func _standing_exclusions(far_cell: Vector2i) -> Dictionary:
+	var out: Dictionary = {}
+	match _traversal_kind:
+		&"fence":
+			for c in Fence.plan_cells(_origin_cell, far_cell):
+				out[c] = true
+		&"bridge":
+			for entry in Bridge.plan_tiles(_origin_cell, far_cell, 0):
+				out[entry["cell"]] = true
+	return out
+
+
+# Same range rule as the build actions' TileAction._range_ok: one of the 8 cells
+# around the origin.
+func _in_build_range(cell: Vector2i, avoid: Dictionary) -> bool:
+	if cell == Pathfinder.NO_CELL or avoid.has(cell):
+		return false
+	var d: Vector2i = _origin_cell - cell
+	return maxi(absi(d.x), absi(d.y)) == 1
+
+
+# Shortest path (start included) to a walkable cell beside the origin that is not
+# in `avoid`, or [] when none is reachable.
+func _approach_path(avoid: Dictionary) -> Array[Vector2i]:
+	var best: Array[Vector2i] = []
+	var start: Vector2i = _player.current_cell
+	var reachable := pathfinder.reachable_from(start)
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var s: Vector2i = _origin_cell + Vector2i(dx, dy)
+			if not _in_build_range(s, avoid) or not reachable.has(s):
+				continue
+			var p := pathfinder.find_path(start, s)
+			if p.size() >= 2 and (best.is_empty() or p.size() < best.size()):
+				best = p
+	return best
+
+
+# flash_denied renders only in the overlay's HOVER state, so call after cancel().
+func _flash_denied(cell: Vector2i) -> void:
+	if ux_overlay and ux_overlay.has_method(&"flash_denied"):
+		ux_overlay.flash_denied(cell)
 
 
 # ----------------------------------------------------------------------------
@@ -503,7 +659,10 @@ func _place_bridge(far_cell: Vector2i) -> void:
 	var inst: Bridge = bridge_scene.instantiate()
 	world.add_child(inst)
 	Bridge.configure(inst, _origin_cell, far_cell, base_alt, _placer, pathfinder)
-	if not inst.build():
+	if inst.build():
+		# Grows away from the first click, which is the end the player stands at.
+		SpawnFlash.flash_built([inst], _placer, _origin_cell)
+	else:
 		# build() rolls back its own paint state and leaves no traversal edge;
 		# just drop the node so we don't accumulate orphans. Successful builds
 		# self-register on the occupant registry — no controller-side tracking
@@ -559,7 +718,9 @@ func _place_ladder(target_cell: Vector2i) -> void:
 	var inst: Ladder = ladder_scene.instantiate()
 	world.add_child(inst)
 	Ladder.configure(inst, lower_cell, upper_cell, base_alt, _placer, pathfinder)
-	if not inst.build():
+	if inst.build():
+		SpawnFlash.flash_built([inst], _placer, _origin_cell)
+	else:
 		# Successful builds self-register; only failures need cleanup + refund.
 		_refund_placements(&"ladder", span)
 		inst.queue_free()
@@ -617,14 +778,20 @@ func _place_fence(far_cell: Vector2i) -> void:
 	# later crossing run lose the tie at the junction and the first line read as
 	# continuous.
 	var built: int = 0
+	var fences: Array = []
 	for c in cells:
 		var inst: Fence = fence_scene.instantiate()
 		world.add_child(inst)
 		Fence.configure(inst, c, alt, _placer, pathfinder)
 		if inst.build():
 			built += 1
+			fences.append(inst)
 		else:
 			inst.queue_free()
+	# The whole run at once, after every fence is down: each build turns its
+	# neighbours' art, and the flash overlay takes a cell's picture over for a
+	# second (see SpawnFlash). One sweep from the first click outward.
+	SpawnFlash.flash_built(fences, _placer, _origin_cell)
 	# Refund only what failed. A partial run is still a fence the player owns, so
 	# tearing the successful ones back down would be worse than keeping them.
 	if built < cells.size():

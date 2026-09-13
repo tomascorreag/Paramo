@@ -97,3 +97,40 @@ extends WorldObjectData
 ## _draw, which carries the extra individuals of a clumped cell) and pushes
 ## `wind_region` per instance whenever the growth stage changes.
 @export var wind_material: ShaderMaterial = null
+
+@export_group("Bitacora")
+## Latin binomial, printed on the journal's bitacora page under the common
+## name. Capitalised genus is botanical convention; it is NOT a translation
+## key (a binomial is the same in every language) and the lowercase-UI test
+## never sees it because it lives here, not in the CSV.
+@export var scientific_name: String = ""
+
+## Botanical family, lowercase ("asteraceae"). Printed as data, untranslated.
+@export var family: String = ""
+
+## Typical mature height in metres, from design/flora.md's species table.
+@export var height_m: float = 0.0
+
+## Translation keys of the species' field notes, one per fact, in print
+## order. 2-3 per species; the page holds 12 Tiny5-8 lines of them in total
+## (tests/test_journal_bitacora.gd measures the wrapped height in both
+## locales). NARRATIVE_-prefixed: these are prose in the notebook's voice,
+## written in sentence case with proper nouns ("Colombia", "Sphagnum"), which
+## the lowercase-chrome rule exempts by that prefix. tests/test_localization.gd
+## scans the .tres for the keys, so an unlisted one fails there rather than
+## printing as "NARRATIVE_FLORA_FACT_X_1".
+@export var fact_keys: PackedStringArray = []
+
+## The page's first polaroid — the species' herbarium sheet (a GBIF CC0
+## voucher), baked to 216x216 by scripts/tools/bake_flora_photos.gd
+## (assets/sprites/flora/photos/<id>.png, or the `_palette` copy: the one
+## pointed at is the one shown). Printed AS A PHOTOGRAPH, over the page, not
+## through the ink shader. Null prints no polaroid and leaves its quadrant
+## empty. Provenance is in THIRD-PARTY-NOTICES.md.
+@export var photo: Texture2D = null
+
+## The page's second polaroid — the field photograph (iNaturalist CC0, see
+## assets/photos/flora/live_sources.csv), `<id>_live.png`. A species with no
+## CC0 field photo gets a DETAIL of its herbarium sheet from the bake instead,
+## so both polaroids are always there.
+@export var photo_live: Texture2D = null

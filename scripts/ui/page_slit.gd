@@ -22,6 +22,11 @@ extends SubViewportContainer
 ## @tool so the cut composites live in the editor — drag this node and the band
 ## re-derives its position on the page immediately.
 
+## Which spread of the book this cut belongs to: the wheel shows through the
+## run's left page only. FieldJournal.show_spread hides the whole slit — the
+## cut and the wheel behind it — on the bitacora.
+@export var spread: StringName = &"run"
+
 ## The page this slot is cut into. Supplies the curves, the amplitudes, the row
 ## quantisation and the content rect the band is positioned against.
 @export var page: PageWarp:

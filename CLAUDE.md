@@ -66,11 +66,14 @@ headless run sees them.
 | `benchmark_rain.gd` / `benchmark_fire.gd` | Price a shader edit (the **ratio** is the number) | [vfx](dev-notes/vfx.md) |
 | `benchmark_wind_plant.gd` | Price the plant sway: per-fragment ratio (`--fill`) and the draw-call delta | [vfx](dev-notes/vfx.md) |
 | `preview_fire_blobs.gd` / `preview_fire_aura.gd` | Look at procedural fire / the off-screen aura | [vfx](dev-notes/vfx.md) |
+| `preview_spawn_flash.gd` | The planting / building / discovery flash as a strip of stills; **exits 1 if a row never lights or an overlay outlives its tween**. Run after touching `flash_common.gdshaderinc`, `SpawnFlash`, or a structure layer's y-sort | [vfx](dev-notes/vfx.md) |
 | `profile_fire_reveal.gd` | **Why revealing a fire stutters.** Ignite off screen, reveal, hide, re-reveal, one continuous recording | [vfx](dev-notes/vfx.md) |
 | `preview_page_warp.gd` | **Measure** journal page-warp error per column | [journal](dev-notes/journal.md) |
 | `audit_page_blocks.gd` | Where the journal's warp seams are, what each section inks, and **how far a heading may move**. `--gap <n>` prices a tightening before authoring it | [journal](dev-notes/journal.md) |
-| `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette | [journal](dev-notes/journal.md) |
+| `verify_journal_palette.gd` | Audit every **rendered** journal pixel against the ink palette. `--spread bitacora` audits that spread per pair of pages, photographs exempt | [journal](dev-notes/journal.md) |
 | `preview_run_calendar.gd` | Journal pages in 4 run states, both locales. `--known <ids>` renders the flora page part-discovered (or empty) | [journal](dev-notes/journal.md) |
+| `preview_bitacora.gd` | The bitácora, one still per pair of pages (or the closed book with `--known ""`), both locales; prints seam crossings per still. `--hires` renders through the 4x canvas transform, the only still that shows the photographs; `--corner br` lifts a page corner, `--tab` extends the fore-edge tab. **Render both locales after touching any fact.** | [journal](dev-notes/journal.md) |
+| `bake_flora_photos.gd` | Shrink the CC0 herbarium sheets AND field photos to the 216x216 PNGs the bitácora's polaroids print (4x the window), plain and palette-snapped; a species with no field photo gets a detail of its sheet. Headless. **Re-run after swapping a photo**, then `--headless --import` | [flora](dev-notes/flora.md) |
 | `preview_language_gate.gd` | Title-screen language boxes in 4 states | [journal](dev-notes/journal.md) |
 | `preview_tutorial_strip.gd` | FTUE hint strip, 4 steps x both locales | [ftue](dev-notes/ftue.md) |
 | `preview_pause_menu.gd` | Pause modal: 3 views x both locales | [ui](dev-notes/ui.md) |
@@ -188,6 +191,22 @@ to them. Generator, indexing and sim tools are headless.
   slid — a per-fragment ripple boils in place, so mature *Chusquea* redraws 17k
   pixels while its edge never moves. Also: a framebuffer read-back is in
   PHYSICAL pixels while the game is in logical ones.
+- **The action flash ARRIVES by dither and FLASHES by fade, and a child of a
+  y-sorted `TileMapLayer` does not inherit the layer's `y_sort_origin`.**
+  `SpawnFlash`: a planted/built thing sweeps in at its real colours as a 4x4
+  Bayer gradient from the cell nearest the player to the furthest (every texel
+  is either there or not, nothing off-palette), snaps white once whole, and the
+  white fades off (a plain mix = alpha, which the palette rule leaves free); a
+  first-identified plant fades to gold and back. Plants flash inside a per-plant
+  DUPLICATE of their sway material (never the shared one, never an instance
+  uniform). Structures get one overlay node per painted cell that ERASES the
+  cell, draws the tile itself, and repaints it after; the node must add the
+  layer's origin + the tile's `y_sort_origin` to its own y or it draws behind
+  where the tile was (measured: invisible at every shift below +96 at altitude
+  12). A tile's art is centred on `map_to_local` minus `texture_origin`,
+  nothing more — `BurningCellVFX` adds half a tile on top and is flagged, not
+  fixed. A fence RUN flashes after the whole run is down. See
+  [vfx](dev-notes/vfx.md).
 - **Shader `instance uniform`s come from ONE fixed global pool** (4096 items
   here), not per-object storage, so they are wrong for anything there are
   hundreds of — a few hundred plants exhausted it. `MODEL_MATRIX` does resolve
@@ -221,6 +240,52 @@ to them. Generator, indexing and sim tools are headless.
   FTUE concessions with knock-on effects (unlocks are priced per type now —
   ladder/frailejon 10, bridge 20, fence 30 — which moves every balance-sim arm).
   See [ftue](dev-notes/ftue.md) before retuning any of them.
+- **The journal has two spreads on the same two pages, and the bitácora is the
+  second.** Every section under a page's `Content` (and the season slit beside
+  the pages) carries a `spread` tag; `FieldJournal.show_spread` flips `visible`
+  by it, so the SubViewports, the warp and the ink are shared and the audits
+  that walk `Content`'s children see both spreads for free. ONE SPECIES PER
+  PAGE, two per spread, turned in pairs (`JournalSpeciesPlate` on both pages):
+  title-face name, the Tiny5-8 binomial under it, the four
+  inked growth stages in ONE ROW packed by ink, then the page CUT IN FOUR
+  (78x79 quadrants from row 54) holding the six colon-free phrases
+  (`hasta 3 m de alto`, `suelo seco`, `crecimiento lento`; no price), the
+  HERBARIUM SHEET and the FIELD PHOTO each in a POLAROID, and ONE researched
+  field note that word-wraps and ROTATES per showing
+  (`FieldJournal._fact_cursor`); which quadrant holds what is hashed from the
+  species id (`arrangement()`, note always on the bottom row), so pages
+  differ but a page is stable. The polaroids are NOT drawn in the page (the page's SubViewport
+  is one texel per logical pixel, so anything in it is pixel art): per
+  picture two `JournalPhotoFloat`s over `BookArt` show a 216x216 texture
+  through the frame's 54x54 window and the 68x79 frame sprite at 1:1, both
+  bent by `photo_warp.gdshader` with the page's own curves, and exempt from
+  the palette audit like the disc. 79 rows is a quadrant, so a polaroid fills
+  its quadrant and the bottom row ends on row 212 of 213. The copies shown
+  are snapped to the palette (`<id>_palette.png`, `<id>_live_palette.png`, an
+  experiment; `PlantObjectData.photo` / `photo_live` pick).
+  `test_journal_bitacora.gd` measures every fact of every species on both
+  page widths in both locales against the quadrant's eight lines. The pages
+  TURN BY THEIR BENT CORNERS (`JournalPageCorners`: `BookPageCrease.png` drawn
+  by region, one corner lifts while the pointer is in the strip along a
+  page's OUTER edge — 20 px into the paper, that corner's half of the page —
+  and a click anywhere in that strip turns it; left = the page before, right
+  = the page after, along `FieldJournal.page_index()` — run
+  spread, then the pairs — no wrap); ONE fore-edge tab JUMPS to the OTHER
+  spread, hanging off the side that spread lies — the bitácora tab off the
+  right page on the run spread, the run tab off the left page on the bitácora
+  (`JournalForeEdge`: `BookTab.png`, a tucked and an extended frame — the
+  pointer over it extends it — one texel off the page, stretched along to
+  its label, mirrored on the left, the label anchored to the outer edge and
+  reading away from the page on both sides; `_has_point` so the paper beside
+  it still closes the book) — and RIGHT-clicking a plant on the shop row opens
+  its page (`JournalShopInput.handle_read`); buildings have no page and lose
+  the read glyph. Browsable = the codex's known species in AUTHORED order,
+  all of them with no codex; with NOTHING identified the bitácora is CLOSED
+  (`FieldJournal.has_bitacora()`: no tab, no page after the calendar,
+  `show_spread` refuses, and a book open on it when the codex clears turns
+  back to the run spread). `browsable_changed` is what tells the tab and the
+  corners about a find. Facts live on `PlantObjectData` (`fact_keys`,
+  `NARRATIVE_FLORA_FACT_*`) and their sources in [flora](dev-notes/flora.md).
 - **`toggle_journal` is Space, which the language gate also answers** — the
   journal ignores it until the run is ACTIVE *and* the cinematic is gone.
 - **Pausing the tree does NOT silence hotkeys on a `PROCESS_MODE_ALWAYS` node.**
@@ -363,14 +428,19 @@ tint. See [journal](dev-notes/journal.md).
 
 ### Copy convention: lowercase UI text
 
-All player-facing chrome is **lowercase** — menu items, buttons, headers, section
-titles (`paused`, `settings`, `volume`, `resume`). A deliberate typographic
+All player-facing chrome is **lowercase** IN THE CSV — menu items, buttons,
+headers, section titles (`paused`, `settings`, `volume`, `resume`). The
+journal's headings and the bitácora's species name are the one place cased at
+DRAW time, by the locale's convention (`JournalTitle.cased`: Spanish sentence
+case `Temporadas`, English title case `Season Log`); the keys stay
+lowercase, and the width tests measure the cased text. A deliberate typographic
 choice for the pixel-art look; don't Title-Case or ALL-CAPS. Applies in **every
 language** (`pausa`, `ajustes`), guarded by `tests/test_localization.gd`. Proper
 nouns and in-world narrative copy are out of scope — and the `NARRATIVE_` key
 prefix is what marks that exemption. It is the FTUE's prose (see
-[ftue](dev-notes/ftue.md)), written in sentence case, and the lowercase test
-skips that prefix and nothing else.
+[ftue](dev-notes/ftue.md)) and the bitácora's field notes
+(`NARRATIVE_FLORA_FACT_*`, which carry proper nouns), both written in sentence
+case, and the lowercase test skips that prefix and nothing else.
 
 ### Localization: es-CO and en-GB
 
@@ -398,11 +468,15 @@ pre-committed.
   and `Control` re-translates + `queue_redraw()`s. Custom `_draw` gets this free
   **provided it calls `tr()` inside `_draw`** — a string cached outside it needs
   its own `_notification` handler.
-- **Eggmode has no Spanish glyphs** (107 glyphs: no accented vowel, no ñ, no ¿,
-  no ellipsis). Every string drawn in it (`RunCalendar.header_text`,
-  `JournalKnownSet.title`) must be accent-free in Spanish — hence `temporadas` /
-  `obras conocidas` / `flora conocida`. Tiny5 has the full set.
-  `tests/test_journal_pages.gd` asserts glyph coverage.
+- **The journal's title face is FantasticBoogaloo at 16** (since 2026-09-11; a
+  true outline face, legal at any size, full Spanish set, 17-row box in the
+  18-row block with `JournalTitle`'s 1-row inset). It replaced **Eggmode, which
+  has no Spanish glyphs** (107 glyphs: no accented vowel, no ñ, no ¿, no
+  ellipsis) — the reason the headings were worded accent-free (`temporadas` /
+  `obras conocidas` / `flora conocida`, since shortened to `obras` / `flora`)
+  and the bitácora's species name could not be set in it.
+  `tests/test_journal_pages.gd` asserts glyph coverage of every heading in
+  whatever the title face is.
 - **Spanish runs ~25% longer, and this project pins widgets to exact pixels.**
   Two real overflows were caught by measurement, not by eye (a 199px heading on a
   156px page; the calendar gutter widened 30 → 38 to hold `4 lluvia`).
@@ -512,7 +586,9 @@ configurations match. Everything below describes "Web":
   since every sample is vendored, nothing cross-origin is left to block. It stays
   off because turning it on would need COOP/COEP headers GitHub Pages cannot set.
 - **VRAM texture compression flags are inert** — every texture imports Lossless
-  (`compress/mode=0`), correct for nearest-filter pixel art.
+  (`compress/mode=0`), correct for nearest-filter pixel art. The one exception
+  is the bitácora's thirty-two photograph plates (`assets/sprites/flora/photos/`),
+  imported lossy because they are photographs.
 - **`exclude_filter`** drops `addons/gut/*` (~1.7 MB), `tests/*`,
   `assets/screenshots/*`, `assets/audio_all/*`, and — added 2026-08-11 — the
   three **output** directories that sit under `res://` and were being imported

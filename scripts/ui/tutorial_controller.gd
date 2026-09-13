@@ -350,6 +350,7 @@ func _begin() -> void:
 	_running = true
 	visible = true
 	_resolve_peers()
+	_fade_skip_in()
 	_show_step(0)
 
 
@@ -378,8 +379,7 @@ func _show_step(index: int) -> void:
 	_connect_step_signal()
 	# A quiet step fades the strip AWAY and leaves it away — it has no copy, and
 	# an empty panel sitting at the bottom of the screen is worse than no panel.
-	# The skip button goes with it: it is the tutorial's control, and for these
-	# seconds there is no tutorial on screen to end.
+	# The skip button stays: the FTUE is still running, gate and all.
 	_fade_strip_to(0.0 if _is_quiet() else 1.0)
 	if _is_narrative():
 		_start_dwell()
@@ -939,9 +939,15 @@ func _fade_strip_to(target: float) -> void:
 	t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	t.set_parallel(true)
 	t.tween_property(_strip, "modulate:a", target, _FADE)
-	# The button is the strip's SIBLING, not its child, so it doesn't inherit the
-	# panel's modulate and needs the same fade driven at it.
-	t.tween_property(_skip_button, "modulate:a", target, _FADE)
+
+
+## The skip button is the strip's SIBLING, not its child, so the strip's fades
+## never reach it: it comes up once with the FTUE and stays for all of it —
+## hand-off beats and the quiet step included.
+func _fade_skip_in() -> void:
+	var t := create_tween()
+	t.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	t.tween_property(_skip_button, "modulate:a", 1.0, _FADE)
 
 
 # --- Hold to skip -----------------------------------------------------------

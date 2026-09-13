@@ -110,6 +110,8 @@ func execute(ctx: ActionContext) -> void:
 	var first_sighting := false
 	if ctx.flora_codex != null and ctx.flora_codex.has_method(&"discover"):
 		first_sighting = bool(ctx.flora_codex.call(&"discover", species))
+	if first_sighting:
+		_flash_plant(ctx)
 	var data: WorldObjectData = ObjectPainter.data_for(species)
 	if ctx.tile_interaction == null or data == null or data.name_key == &"":
 		return
@@ -161,6 +163,18 @@ func _sentence_case(s: String) -> String:
 		if c.to_lower() != c:
 			return s
 	return s
+
+
+# The gold flare on the plant itself (SpawnFlash), first sighting only. Duck-typed
+# like everything else on the occupant registry; a stub occupant in a test has no
+# flash and that is fine.
+func _flash_plant(ctx: ActionContext) -> void:
+	var grid := ctx.pathfinder.grid()
+	if grid == null:
+		return
+	var occ: Node2D = grid.occupant_at(ctx.cell)
+	if occ != null and occ.has_method(&"play_discovery_flash"):
+		occ.call(&"play_discovery_flash")
 
 
 ## The plant species occupying `ctx.cell`, or &"" when there is nothing to

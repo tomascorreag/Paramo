@@ -37,10 +37,14 @@ const CONTENT_AMPLITUDE_PX := 5.0
 const FONT_EM_PX := {
 	"res://assets/fonts/Tiny5-Regular.ttf": 8,
 	"res://assets/fonts/Eggmode-Pd8g.ttf": 16,
+	# A true outline face (~8% of points on any grid): no native em, legal at
+	# any size, so 1.
+	"res://assets/fonts/FantasticBoogaloo-GDlq.ttf": 1,
 }
-## Body copy is the theme's Tiny5; Eggmode is reserved for TITLES.
+## Body copy is the theme's Tiny5; the title face is reserved for TITLES
+## (FantasticBoogaloo since 2026-09-11, Eggmode before).
 const BODY_FONT := "res://assets/fonts/Tiny5-Regular.ttf"
-const TITLE_FONT := "res://assets/fonts/Eggmode-Pd8g.ttf"
+const TITLE_FONT := "res://assets/fonts/FantasticBoogaloo-GDlq.ttf"
 ## Every sprite printed on a page goes through this, so it can only ever emit a
 ## colour one of the four ink ramps contains.
 const INK_SHADER := "res://assets/shaders/journal_ink.gdshader"
@@ -808,7 +812,7 @@ func test_journal_titles_are_drawable_in_the_title_face() -> void:
 	# written accent-free ON PURPOSE ("construcciones conocidas", not
 	# "construcción"). Nothing else enforces that, so this does.
 	var face: Font = _cal().active_header_font()
-	assert_eq(face.resource_path, TITLE_FONT, "titles must be the Eggmode face")
+	assert_eq(face.resource_path, TITLE_FONT, "titles must be the title face")
 
 	var keys: Array[String] = [_cal().header_text]
 	for s: JournalKnownSet in _sections():
@@ -823,7 +827,7 @@ func test_journal_titles_are_drawable_in_the_title_face() -> void:
 			for i: int in text.length():
 				assert_true(
 					face.has_char(text.unicode_at(i)),
-					"%s/%s: Eggmode has no glyph for '%s' — the journal's titles must be accent-free"
+					"%s/%s: the title face has no glyph for '%s'"
 						% [key, locale, text[i]])
 			assert_eq(text, text.to_lower(),
 				"%s/%s: UI copy is lowercase, per the project convention" % [key, locale])
@@ -865,20 +869,49 @@ func test_journal_titles_fit_their_page() -> void:
 
 		var cal := _cal()
 		var cal_face: Font = cal.active_header_font()
+		# The CASED text, which is what draws: a capital is wider.
+		var cal_text := JournalTitle.cased(tr(cal.header_text))
 		var cal_w: float = cal_face.get_string_size(
-			tr(cal.header_text), HORIZONTAL_ALIGNMENT_LEFT, -1, cal.header_font_size).x
+			cal_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cal.header_font_size).x
 		assert_lte(cal_w, cal.size.x,
 			"%s: calendar title '%s' is %.0fpx on a %.0fpx page"
-				% [locale, tr(cal.header_text), cal_w, cal.size.x])
+				% [locale, cal_text, cal_w, cal.size.x])
 
 		for s: JournalKnownSet in _sections():
 			var face: Font = s.active_header_font()
-			var w: float = face.get_string_size(
-				tr(s.title), HORIZONTAL_ALIGNMENT_LEFT, -1, s.header_font_size).x
+			var w: float = face.get_string_size(JournalTitle.cased(tr(s.title)),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, s.header_font_size).x
 			# The heading starts at the section's own left inset, so that inset is
 			# not available to the text.
 			var budget: float = s.size.x - 8.0
 			assert_lte(w, budget,
 				"%s: '%s' is %.0fpx in a %.0fpx column"
-					% [locale, tr(s.title), w, budget])
+					% [locale, JournalTitle.cased(tr(s.title)), w, budget])
+	TranslationServer.set_locale(previous)
+
+
+func test_journal_titles_are_cased_by_the_locales_convention() -> void:
+	# The CSV stays lowercase (the chrome convention); the headings put their
+	# casing on at draw time — Spanish sentence case, English title case — and
+	# the glyphs that adds must exist in the title face.
+	var previous := TranslationServer.get_locale()
+	TranslationServer.set_locale("es_CO")
+	assert_eq(JournalTitle.cased("obras conocidas"), "Obras conocidas")
+	assert_eq(JournalTitle.cased("bitácora"), "Bitácora")
+	assert_eq(JournalTitle.cased(""), "")
+	TranslationServer.set_locale("en_GB")
+	assert_eq(JournalTitle.cased("known buildings"), "Known Buildings")
+	assert_eq(JournalTitle.cased("season log"), "Season Log")
+	var face: Font = _cal().active_header_font()
+	var keys: Array[String] = [_cal().header_text]
+	for s: JournalKnownSet in _sections():
+		keys.append(s.title)
+	for locale: String in LOCALES:
+		TranslationServer.set_locale(locale)
+		for key: String in keys:
+			var text := JournalTitle.cased(tr(key))
+			assert_ne(text, tr(key), "%s/%s: the heading is cased" % [key, locale])
+			for i: int in text.length():
+				assert_true(face.has_char(text.unicode_at(i)),
+					"%s/%s: no glyph for '%s'" % [key, locale, text[i]])
 	TranslationServer.set_locale(previous)

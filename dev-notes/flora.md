@@ -171,9 +171,57 @@ Three consequences worth knowing:
 
 Copy: `FLORA_*` in the CSV, one per species, authored on the `.tres` as `WorldObjectData.name_key` and printed by the inspect toast. Common names are sourced (JBB Bogotá's `nombrescomunes` platform): paja de páramo, chusque, cortadera, chite, piojo, frailejón motoso. `tests/test_localization.gd` scans `resources/objects` for them, so an unnamed species fails there rather than printing `FLORA_CHUSQUEA` at the player.
 
+## Bitácora
+
+Every species has a PAGE in the journal's second spread (see [journal](journal.md#bitácora-spread--scriptstoolspreview_bitacoragd)): its herbarium sheet, its growth stages, six fact phrases and one rotating field note. The data lives on `PlantObjectData` (`scientific_name`, `family`, `height_m`, `fact_keys`, `photo`) — `name_key` set the precedent that a species' copy is one more line in its `.tres`, and `test_localization.gd` already scans that directory for keys.
+
+**Facts are licence-free facts.** Binomial, family and height come from `design/flora.md`'s table (facts, not covered by the source book's CC BY-NC-ND). The field notes were researched per species and are cited here; anything that could not be sourced was dropped. Budget: ≤90 chars en_GB / ≤110 es_CO, written in sentence case under the `NARRATIVE_` prefix (they carry proper nouns). The page prints ONE per showing and rotates through them.
+
+| Species | Fact | Source |
+|---|---|---|
+| *E. grandiflora* | ~7.6 cm/yr, bumblebee-pollinated | Fagua & González 2007 (PubMed 17066366) |
+| | pith stores water; marcescent leaves insulate | <https://pmc.ncbi.nlm.nih.gov/articles/PMC12034633/> |
+| | Cordillera Oriental only, 2120–4100 m | ColPlanta 205109-1 |
+| *E. barclayana* | endemic Boyacá/Cundinamarca, NT | ColPlanta 97628-2 |
+| | to 2.5 m, marcescent leaves | <https://herbariovaa.org/taxa/index.php?taxon=146151> |
+| | 3100–3785 m, all in Colombia | ColPlanta 97628-2 |
+| *E. hartwegiana* | Cordillera Central, to 5 m | Banco de Occidente páramos; es.wikipedia |
+| | radiocarbon growth 3.8–6.9 cm/yr | <https://link.springer.com/article/10.1007/s11258-017-0787-x> |
+| | to 4500 m | ColPlanta 97690-2 |
+| *H. juniperinum* | brooms; fuel for brick kilns | <https://www.redalyc.org/journal/449/44965908005/html/> |
+| | needle leaves, thick cuticle | SciELO CR S0034-77442019000601160 |
+| | 2200–3800 m, CO–VE | UNAL repository (Pattinson 2017); POWO 433524-1 |
+| *A. nitidum* | shrub <2 m, whitish stems, bicolour leaves | JBB specimen 16863 |
+| | a dozen common names | ColPlanta 743608-1 |
+| | Andes CO–VE to 4500 m, folk medicine | ColPlanta 743608-1 |
+| *C. effusa* | dominant tussock, 40–60 cm | PhytoKeys 2019, PMC6548746 |
+| | (genus) buds survive fire in the tussock base | bioRxiv 10.1101/2020.04.25.061036 |
+| | thatch/basketry, 2500–4500 m | en.wikipedia *Paramochloa effusa* |
+| *C. tessellata* | true bamboo of wet páramo, culms to 3 m | Frontiers Plant Sci 2025, 10.3389/fpls.2025.1529852 |
+| | rhizomes, no seed bank found | Insuasty-Torres et al. 2011 (redalyc 180322995007) |
+| | half the growth after cut + burn | Cárdenas 2013, TDX 10803/120219 |
+| *C. nitida* | Sphagnum lake margins, continuous patches | JBB specimen 29722 |
+| | "cortadera" from the serrated leaf edge | es.wikipedia *Cortaderia nitida* |
+| | Ecuador: thatch and kite frames | GBIF species 4148794 descriptions |
+
+Caveats carried from the research: *E. hartwegiana*'s endemism is disputed (ColPlanta says endemic; WFO extends it to Carchi); the 5 m figure is a photo caption, es.wikipedia says 4 m. *A. nitidum*'s 630 m lower bound in the Catálogo looks like a lowland outlier and is not printed.
+
+**The game facts are phrases, bucketed, with thresholds set from the authored range** (`JournalSpeciesPlate`). No colons, no price.
+
+| Phrase | Source field | Buckets |
+|---|---|---|
+| `hasta 3 m de alto` | `height_m` | the table's figure |
+| `3450-4000 m` | `altitude_band` | `3000 + 37.5·h`, rounded to 50 m (the placement formula above) |
+| `junto al agua` / `suelo seco` / `cualquier suelo` | sign of `water_affinity` | >0 · <0 · 0 |
+| `frágil` / `firme` / `resiste el pisoteo` | `trample_resistance` | <0.7 (calamagrostis 0.3, arcytophyllum 0.6) · <1.6 (cortaderia 0.8, chusquea 1.2, hypericum 1.5) · else (the *Espeletia*, 3.0) |
+| `crecimiento rápido` / `constante` / `lento` | `growth_chance` | ≥0.05 (the grasses) · ≥0.025 (the shrubs) · else (the rosettes) |
+| `en chingaza, guerrero y nevados` | `EcosystemProfile.density_scale` > 0 | `display_key`, now wired: `ECOSYSTEM_*`; joined with `JOURNAL_VAL_AND` so three mountains stay one line |
+
+**Photos.** Two per page. `bake_flora_photos.gd` bakes the sheet slot from `<id>_dry.jpg` (the GBIF herbarium sheet) and the field slot from `<id>_live.jpg` (iNaturalist CC0), each falling back to the other — the field slot's fallback is a DETAIL, the central half of the sheet at 2x, which is what *E. barclayana* gets (GBIF, 2026-09-11: twelve observations with images, all CC BY-NC) — enumerating species from the photo FILENAMES (the `.tres` reference the baked PNGs, so loading them before the first bake fails). Output `assets/sprites/flora/photos/<id>.png`, `<id>_live.png`, and `<id>_palette.png` / `<id>_live_palette.png` (the same, snapped to the nearest palette2 entry by RGB — the copies shown, as an experiment), **216x216** square (four times the polaroid's 54x54 window: the page prints it over the book at window resolution, see [journal](journal.md#bitácora-spread--scriptstoolspreview_bitacoragd)), imported LOSSY (`compress/mode=1`, quality 0.75 — photographs, and eight lossless PNGs were 0.8 MB against a 1.5 MB pck; a new species' PNGs get the project's lossless default, copy an existing `.import`). The JPGs are excluded from both export presets (`assets/photos/*`, and the gitignored review folder `flora_photos/*` stays excluded too) and `live_sources.csv` is `importer="keep"` (it was being imported as six bogus `.translation` files).
+
 ## Not done, deliberately
 
-Fire fuel from plant biomass (`_fuel_for_cell` is still the seam — `individuals/seed` is the number it would read); runtime re-seeding after burns; the roadmap's SEASONAL growth mode; PRINTING the unsold species (they are recorded in `FloraCodex`, the page has no second row for them); ecosystem names in the UI (`EcosystemProfile.display_key` is reserved, unwired — needs CSV keys and accent-free Eggmode forms).
+Fire fuel from plant biomass (`_fuel_for_cell` is still the seam — `individuals/seed` is the number it would read); runtime re-seeding after burns; the roadmap's SEASONAL growth mode; PRINTING the unsold species on the SHOP row (they are recorded in `FloraCodex` and have a bitácora page each; the shop row has no second row for them).
 
 **Multi-cell footprints (a tree over 3×3) are the other half of `individuals_per_cell` and are NOT built.** The occupancy half is nearly free — `TraversalBase._register_with_grid` already claims every cell in `occupied_cells()`, which is how a bridge spans a gorge — but four things around it are not:
 

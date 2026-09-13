@@ -6,6 +6,8 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_3.tres" id="6"]
 [ext_resource type="Material" uid="uid://bwp1arcyto0000" path="res://resources/materials/wind_arcytophyllum.tres" id="wind"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/arcytophyllum_palette.png" id="photo"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/arcytophyllum_live_palette.png" id="photo_live"]
 
 [resource]
 script = ExtResource("1")
@@ -31,3 +33,9 @@ individuals_per_cell = Vector2i(2, 4)
 displaceable = false
 walk_penalty = 0.3
 variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])
+scientific_name = "Arcytophyllum nitidum"
+family = "rubiaceae"
+height_m = 1.0
+fact_keys = PackedStringArray("NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_1", "NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_2", "NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_3")
+photo = ExtResource("photo")
+photo_live = ExtResource("photo_live")

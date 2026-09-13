@@ -234,3 +234,26 @@ func test_the_page_prints_everything_without_a_codex() -> void:
 	var h := _open_journal()
 	await get_tree().process_frame
 	assert_eq(h.flora.swatch_textures().size(), 5)
+
+
+func test_the_bitacora_browses_only_discovered_species() -> void:
+	var h := _open_journal()
+	await get_tree().process_frame
+	var fj := h.journal as FieldJournal
+	assert_eq(fj.browsable_species().size(), 0, "nothing identified, nothing to read")
+	_codex.discover(&"arcytophyllum")
+	_codex.discover(&"frailejon")
+	_codex.discover(&"calamagrostis")
+	assert_eq(fj.browsable_species(),
+		PackedStringArray(["frailejon", "calamagrostis", "arcytophyllum"]),
+		"authored order, not discovery order — the ring must not reshuffle")
+	assert_true(fj.is_readable(&"calamagrostis"),
+		"a grass has a page even though the shop row has no room for it")
+	assert_false(fj.is_readable(&"chusquea"))
+
+
+func test_the_bitacora_browses_everything_without_a_codex() -> void:
+	_codex.remove_from_group(FloraCodex.GROUP)
+	var h := _open_journal()
+	await get_tree().process_frame
+	assert_eq((h.journal as FieldJournal).browsable_species().size(), 8)

@@ -25,8 +25,11 @@ extends Control
 ## the pointer is.
 ##
 ## A hovered entry also gets two lines of mouse glyphs (JournalTooltip): left
-## click and the price UNDER it, right click and info OVER it (a stub — nothing
-## is wired to right click yet). They say the one thing the page cannot: the
+## click and the price UNDER it, right click and info OVER it. RIGHT CLICK
+## READS: it turns the book to the bitacora at that species (FieldJournal
+## .show_species), so the read line is only offered where that can happen — a
+## species the codex has recorded. Buildings have no page to turn to and get
+## no read line. They say the one thing the page cannot: the
 ## price is what it costs, but nothing on a book says a picture in it is a button
 ## or which button. The price travels with the click glyph rather than staying in
 ## the page, which is what took it out of the paper's warp blocks and cell widths.
@@ -75,10 +78,14 @@ func _gui_input(event: InputEvent) -> void:
 		handle_hover(_to_page(motion.position))
 		return
 	var mb := event as InputEventMouseButton
-	if mb == null or mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
+	if mb == null or not mb.pressed:
 		return
-	if handle_click(_to_page(mb.position)):
-		accept_event()
+	if mb.button_index == MOUSE_BUTTON_LEFT:
+		if handle_click(_to_page(mb.position)):
+			accept_event()
+	elif mb.button_index == MOUSE_BUTTON_RIGHT:
+		if handle_read(_to_page(mb.position)):
+			accept_event()
 
 
 # BookHit-local -> canvas -> PageRight-local. Both live on the same CanvasLayer,
@@ -101,7 +108,9 @@ func handle_hover(pr_local: Vector2) -> void:
 	if TutorialGate.allows(TutorialGate.Action.SHOP) and content != null \
 			and Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
 		for section: JournalKnownSet in sections:
-			if section == null:
+			# A section on the spread that is NOT showing takes no pointer: the
+			# bitacora's plate sits over the same texels the shop row does.
+			if section == null or not section.is_visible_in_tree():
 				continue
 			var idx: int = section.entry_at(
 					pr_local - content.position - section.position)
@@ -132,13 +141,53 @@ func handle_click(pr_local: Vector2) -> bool:
 	if not Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
 		return false
 	for section: JournalKnownSet in sections:
-		if section == null:
+		if section == null or not section.is_visible_in_tree():
 			continue
 		var local: Vector2 = pr_local - content.position - section.position
 		var idx: int = section.entry_at(local)
 		if idx >= 0:
 			return _try_buy(section, idx)
 	return false
+
+
+## The READ path: a right click on an entry turns the book to that species'
+## bitacora page. Same arithmetic as `handle_click`, so what the info glyph
+## sits on is what a right click opens. Not gated by the tutorial's SHOP bit —
+## reading is not buying, and during the FTUE the hover gate already keeps the
+## glyph off the page. False for anything that is not a browsable species
+## (a building, an unidentified plant), and then the event is not consumed.
+func handle_read(pr_local: Vector2) -> bool:
+	if content == null:
+		return false
+	if not Rect2(Vector2.ZERO, page_right.size).has_point(pr_local):
+		return false
+	var journal := _journal()
+	if journal == null:
+		return false
+	for section: JournalKnownSet in sections:
+		if section == null or not section.is_visible_in_tree():
+			continue
+		var local: Vector2 = pr_local - content.position - section.position
+		var idx: int = section.entry_at(local)
+		if idx >= 0:
+			return journal.show_species(section.entry_id_at(idx))
+	return false
+
+
+## Whether the info verb has anywhere to go for this entry.
+func _is_readable(section: JournalKnownSet, index: int) -> bool:
+	var journal := _journal()
+	return journal != null and index >= 0 and section != null \
+			and journal.is_readable(section.entry_id_at(index))
+
+
+# The journal this input belongs to: `owner` when authored inside
+# field_journal.tscn (it is), else whatever is in the "journal" group.
+func _journal() -> FieldJournal:
+	var j := owner as FieldJournal
+	if j == null and is_inside_tree():
+		j = get_tree().get_first_node_in_group(&"journal") as FieldJournal
+	return j
 
 
 # --- the mouse-verb tag ------------------------------------------------------
@@ -170,13 +219,15 @@ func _can_afford(section: JournalKnownSet, index: int) -> bool:
 	return id != &"" and bool(_unlocks.call(&"can_afford_unlock", id))
 
 
-## Whether the tag has anything at all to say: any entry that IS a shop entry.
-## Broader than `_is_for_sale` because the right-click/info half of the tag is
-## about the thing, not about the transaction — an owned frailejon is still
-## something to read about, and a fence you cannot afford yet is the entry a
-## player is most likely to want to read about.
+## Whether the tag has anything at all to say: a line to read, a line to buy,
+## or a price to show. An owned building has none of the three and gets no tag;
+## an owned plant still has its read line, and a fence you cannot afford still
+## has the price that says why.
 func _has_verbs(section: JournalKnownSet, index: int) -> bool:
-	return section != null and index >= 0 and section.entry_id_at(index) != &""
+	if section == null or index < 0 or section.entry_id_at(index) == &"":
+		return false
+	return _is_readable(section, index) or _is_for_sale(section, index) \
+			or _is_locked(section, index)
 
 
 func _update_tooltip(section: JournalKnownSet, index: int) -> void:
@@ -206,7 +257,7 @@ func _update_tooltip(section: JournalKnownSet, index: int) -> void:
 	tip.show_for(art, _tag_bounds(section, parent, to_local, offset),
 			section.text_color, _is_for_sale(section, index),
 			section.cost_of(index) if locked else 0,
-			_can_afford(section, index))
+			_can_afford(section, index), _is_readable(section, index))
 
 
 # Where the tag is allowed to go: the book, with its TOP raised to the section's

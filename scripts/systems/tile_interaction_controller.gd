@@ -383,8 +383,10 @@ func _on_item_selected(id: String) -> void:
 	if not action.is_enabled(ctx):
 		_deny(_pending_cell)
 		return
-	# Already standing next to the target -> act immediately (unchanged UX).
-	if action.is_available(ctx):
+	# Already standing next to the target -> act immediately (unchanged UX). A
+	# traversal build acts immediately from anywhere: it opens the second click
+	# now, and TraversalPlacementController walks the player over once it is aimed.
+	if action.is_available(ctx) or action.executes_from_afar:
 		action.execute(ctx)
 		if _ux_overlay:
 			_ux_overlay.unlock()
@@ -514,6 +516,10 @@ func plant_species(cell: Vector2i, kind: StringName) -> void:
 	# step-cost calc, so no explicit set_cell_penalty call is needed here.
 	world.add_child(plant)
 	plant.global_position = pathfinder.cell_to_world(cell)
+	# The player did this, so it gets the flash; the scatter at load does not.
+	# It grows away from where they stand.
+	plant.play_placed_flash(
+		player.global_position if player != null else plant.global_position)
 
 
 func remove_frailejon(cell: Vector2i) -> void:

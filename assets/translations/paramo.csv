@@ -17,9 +17,51 @@ UI_ABOUT_LICENCE,mit licence,licencia mit
 UI_ABOUT_NOTICES,third-party licences,licencias de terceros
 UI_BACK,back,volver
 JOURNAL_SEASON_LOG,season log,temporadas
-JOURNAL_KNOWN_BUILDINGS,known buildings,obras conocidas
-JOURNAL_KNOWN_FLORA,known flora,flora conocida
+JOURNAL_KNOWN_BUILDINGS,buildings,obras
+JOURNAL_KNOWN_FLORA,flora,flora
 JOURNAL_RESOURCES,resources,recursos
+JOURNAL_TAB_RUN,run,partida
+JOURNAL_TAB_BITACORA,bitacora,bitácora
+JOURNAL_VAL_WHERE,in {0},en {0}
+JOURNAL_VAL_AND, and , y 
+JOURNAL_VAL_ALTITUDE,{0}-{1} m,{0}-{1} m
+JOURNAL_VAL_HEIGHT,up to {0} m tall,hasta {0} m de alto
+JOURNAL_VAL_WATER_NEAR,near water,junto al agua
+JOURNAL_VAL_WATER_DRY,dry ground,suelo seco
+JOURNAL_VAL_WATER_ANY,any ground,cualquier suelo
+JOURNAL_VAL_TRAMPLE_FRAGILE,fragile underfoot,frágil al pisoteo
+JOURNAL_VAL_TRAMPLE_STURDY,sturdy underfoot,firme al pisoteo
+JOURNAL_VAL_TRAMPLE_TOUGH,tough underfoot,resiste el pisoteo
+JOURNAL_VAL_GROWTH_FAST,fast growth,crecimiento rápido
+JOURNAL_VAL_GROWTH_STEADY,steady growth,crecimiento constante
+JOURNAL_VAL_GROWTH_SLOW,slow growth,crecimiento lento
+ECOSYSTEM_CHINGAZA,chingaza,chingaza
+ECOSYSTEM_GUERRERO,guerrero,guerrero
+ECOSYSTEM_NEVADOS,nevados,nevados
+NARRATIVE_FLORA_FACT_FRAILEJON_1,Grows about 7.6 cm a year; bumblebees are its main pollinators.,"Crece unos 7,6 cm al año; sus principales polinizadores son los abejorros."
+NARRATIVE_FLORA_FACT_FRAILEJON_2,Its pith stores water and a coat of dead leaves shields the stem from frost.,La médula del tallo guarda agua y las hojas muertas lo protegen de las heladas.
+NARRATIVE_FLORA_FACT_FRAILEJON_3,"Found only in Colombia's Cordillera Oriental, between 2120 and 4100 m.","Solo vive en la cordillera Oriental de Colombia, entre 2120 y 4100 m."
+NARRATIVE_FLORA_FACT_ESPELETIA_BARCLAYANA_1,Endemic to the páramos of Boyacá and Cundinamarca; listed near threatened.,Endémico de los páramos de Boyacá y Cundinamarca; catalogado casi amenazado.
+NARRATIVE_FLORA_FACT_ESPELETIA_BARCLAYANA_2,Reaches 2.5 m; its dead leaves stay wrapped around the stem.,"Alcanza 2,5 m; las hojas muertas se quedan cubriendo el tallo."
+NARRATIVE_FLORA_FACT_ESPELETIA_BARCLAYANA_3,"A narrow altitude band, 3100 to 3785 m, all of it inside Colombia.","Una franja estrecha de altitud, de 3100 a 3785 m, toda dentro de Colombia."
+NARRATIVE_FLORA_FACT_ESPELETIA_HARTWEGIANA_1,The frailejón of the Cordillera Central; it can reach 5 m tall.,El frailejón de la cordillera Central; puede alcanzar 5 m de altura.
+NARRATIVE_FLORA_FACT_ESPELETIA_HARTWEGIANA_2,Radiocarbon dating puts its growth at 3.8 to 6.9 cm a year.,"La datación por radiocarbono estima su crecimiento en 3,8 a 6,9 cm al año."
+NARRATIVE_FLORA_FACT_ESPELETIA_HARTWEGIANA_3,"Climbs to 4500 m, higher than any other frailejón in this notebook.","Sube hasta 4500 m, más alto que cualquier otro frailejón de esta libreta."
+NARRATIVE_FLORA_FACT_HYPERICUM_1,Its branches were tied into brooms and burned to fire brick kilns.,Con sus ramas se hacían escobas y se calentaban los hornos de ladrillo.
+NARRATIVE_FLORA_FACT_HYPERICUM_2,Needle-like leaves with a thick waxy cuticle cut water loss in the páramo.,Hojas como agujas con cutícula gruesa y cerosa reducen la pérdida de agua.
+NARRATIVE_FLORA_FACT_HYPERICUM_3,"Grows in open and boggy páramo from 2200 to 3800 m, Colombia to Venezuela.","Crece en páramo abierto y pantanoso entre 2200 y 3800 m, de Colombia a Venezuela."
+NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_1,"A shrub under 2 m with whitish stems; leaves green above, white beneath.",Arbusto de menos de 2 m con tallos blanquecinos; hojas verdes arriba y blancas abajo.
+NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_2,"Goes by piojo, romero de páramo, sanalotodo and a dozen other names.","Lo llaman piojo, romero de páramo, sanalotodo y una docena de nombres más."
+NARRATIVE_FLORA_FACT_ARCYTOPHYLLUM_3,"Found from Colombia's Andes to Venezuela, up to 4500 m; used in folk medicine.","Vive de los Andes colombianos a Venezuela, hasta 4500 m; se usa en medicina popular."
+NARRATIVE_FLORA_FACT_CALAMAGROSTIS_1,The tussock that dominates páramo biomass; clumps 40 to 60 cm tall.,La macolla que domina la biomasa del páramo; matas de 40 a 60 cm de alto.
+NARRATIVE_FLORA_FACT_CALAMAGROSTIS_2,"Like other Calamagrostis, its buds sit deep in the tussock base and survive fire.","Como otras Calamagrostis, sus yemas están en la base de la macolla y sobreviven al fuego."
+NARRATIVE_FLORA_FACT_CALAMAGROSTIS_3,Cut for thatch roofing and basketry; grows from 2500 to 4500 m.,Se corta para techos de paja y cestería; crece entre 2500 y 4500 m.
+NARRATIVE_FLORA_FACT_CHUSQUEA_1,A true bamboo of wet páramos; culms reach 3 m on waterlogged ground.,Un bambú verdadero de páramos húmedos; sus tallos llegan a 3 m en suelos encharcados.
+NARRATIVE_FLORA_FACT_CHUSQUEA_2,"Spreads by rhizomes, not seed: no seed bank or seedlings have been found.","Se expande por rizomas, no por semilla: no se han hallado plántulas ni banco de semillas."
+NARRATIVE_FLORA_FACT_CHUSQUEA_3,After cutting and burning it grew at half the pace of untouched stands.,Tras corte y quema creció a la mitad del ritmo de los rodales intactos.
+NARRATIVE_FLORA_FACT_CORTADERIA_1,"Grows on the Sphagnum edges of páramo lakes, forming continuous patches.","Crece en las orillas de Sphagnum de las lagunas de páramo, formando parches continuos."
+NARRATIVE_FLORA_FACT_CORTADERIA_2,"Its name means cutter, after its sharp serrated leaf edges.","Su nombre viene de cortar, por los bordes afilados y aserrados de sus hojas."
+NARRATIVE_FLORA_FACT_CORTADERIA_3,In Ecuador the leaves thatch roofs and the stalks become kite frames.,En Ecuador las hojas techan casas y con los tallos se arman cometas.
 FLORA_FRAILEJON,frailejon,frailejón
 FLORA_ESPELETIA_BARCLAYANA,frailejon motoso,frailejón motoso
 FLORA_ESPELETIA_HARTWEGIANA,frailejon,frailejón

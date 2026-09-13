@@ -23,7 +23,7 @@ extends Control
 ##
 ## THE TITLE IS DRAWN, NOT A LABEL, and that is not a style preference. This sits
 ## inside a page's SubViewport, so page_warp.gdshader translates each `block_px`
-## band of it rigidly. The journal's title face is Eggmode at 16, whose line height
+## band of it rigidly. The journal's title face is FantasticBoogaloo at 16 (Eggmode until 2026-09-11), whose line height
 ## is 16 — and 18 % 16 != 0, so a Label carrying it fails
 ## tests/test_journal_pages.gd's "row_block_px must be a whole number of text
 ## lines". RunCalendar hit the same wall and solved it the same way. If you ever
@@ -60,10 +60,16 @@ extends Control
 ## there is nothing to fake here: the tileset scan is pure resource work and needs
 ## no autoloads, so the editor shows the real swatches.
 
+## Which spread of the book this section belongs to. FieldJournal.show_spread
+## flips every section's visibility by this tag; "run" is the spread the book
+## opens on.
+@export var spread: StringName = &"run"
+
 ## Section heading — a TRANSLATION KEY, resolved in _draw. Lowercase in every
 ## locale, per the project's UI copy convention.
 ##
-## The Spanish here must be ACCENT-FREE. This heading is drawn in Eggmode, which
+## The Spanish here was chosen ACCENT-FREE for Eggmode, the title face until
+## 2026-09-11 (FantasticBoogaloo, the face now, has the full set), which
 ## ships 107 glyphs and has no á é í ó ú ü ñ ¿ … — a heading with one would render
 ## tofu. tests/test_journal_pages.gd asserts the coverage; see the CSV for the
 ## accent-free wording actually used.
@@ -227,13 +233,14 @@ extends Control
 
 @export_group("Type")
 ## Title face. Leave null to fall back to the theme's Label font. The journal sets
-## Eggmode — a section heading is something you WROTE at the top of the list.
+## the title face — a section heading is something you WROTE at the top of the list.
 @export var header_font: Font = null:
 	set(value):
 		header_font = value
 		_rebuild()
 
-## Must be a multiple of the face's native em (16 for Eggmode) or the rasteriser
+## Must be a multiple of the face's native em (16 for Eggmode; FantasticBoogaloo
+## is an outline face, legal at any size) or the rasteriser
 ## duplicates roughly one pixel row per em at a different place in every glyph and
 ## the line visibly staggers. See tests/test_journal_pages.gd.
 @export var header_font_size: int = 16:
@@ -437,7 +444,7 @@ func content_ink_runs() -> Array[Vector2i]:
 ## One swatch's (offset from the row's top, inked height).
 func swatch_ink_run(index: int, tex: Texture2D) -> Vector2i:
 	var cell := cell_size_for(index)
-	var ink := _ink_rect(tex)
+	var ink := ink_rect(tex)
 	# The row's top is a whole texel, so it factors out of the floor _rebuild does.
 	var off: int = int(floorf(_ink_top_in_cell(cell, ink)))
 	return Vector2i(off, int(ink.size.y))
@@ -622,7 +629,7 @@ func entry_ink_rect(index: int) -> Rect2:
 			or not is_instance_valid(_swatches[index]):
 		return entry_rect(index)
 	var r: TextureRect = _swatches[index]
-	var ink := _ink_rect(r.texture)
+	var ink := ink_rect(r.texture)
 	return Rect2(r.position + ink.position, ink.size)
 
 
@@ -774,7 +781,8 @@ func _tile_texture(kind: StringName) -> AtlasTexture:
 	return tex
 
 
-# Opaque bounds of a swatch texture, in its own texture space. Falls back to the
+## Opaque bounds of a swatch texture, in its own texture space. Public: the
+## bitacora's plate stands its growth stages by the same measure. Falls back to the
 # whole texture when nothing can be read (a texture whose image isn't available)
 # so layout degrades to the old texture-centred behaviour rather than collapsing.
 #
@@ -783,7 +791,7 @@ func _tile_texture(kind: StringName) -> AtlasTexture:
 static var _ink_rects: Dictionary[String, Rect2] = {}
 
 
-static func _ink_rect(tex: Texture2D) -> Rect2:
+static func ink_rect(tex: Texture2D) -> Rect2:
 	var full := Rect2(Vector2.ZERO, tex.get_size())
 	# Keyed by the REGION, not by get_rid(): an AtlasTexture reports the RID of
 	# the atlas it cuts from, so every swatch sharing a spritesheet returns the
@@ -864,7 +872,7 @@ func _rebuild() -> void:
 		# enough to touch. Measured: at 18 and 26 texel cells the ladder and fence
 		# ink overlapped by 4 texels while both cells stayed clear of each other.
 		var art := tex.get_size()
-		var ink := _ink_rect(tex)
+		var ink := ink_rect(tex)
 		r.position = Vector2(
 			floorf(x + (float(cell.x) - ink.size.x) * 0.5 - ink.position.x),
 			floorf(top + _ink_top_in_cell(cell, ink) - ink.position.y))

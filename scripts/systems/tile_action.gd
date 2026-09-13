@@ -40,6 +40,12 @@ var debug_only: bool = false
 ## unaffordable action in place.
 var unlock_id: StringName = &""
 
+## True = execute() runs the moment the action is picked, wherever the player
+## stands, and the action owns the walk itself. For the two-click placements:
+## the second click is aimed from afar, and the walk (and the charge) follow it.
+## Offering is unchanged — is_offerable still demands a reachable standing cell.
+var executes_from_afar: bool = false
+
 
 ## "Can I act on this cell from where I stand RIGHT NOW?" gate. Combines the
 ## proximity rule with the subclass predicate. Unchanged contract: the controller

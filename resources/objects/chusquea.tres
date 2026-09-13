@@ -6,6 +6,8 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/chusquea_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/chusquea_3.tres" id="6"]
 [ext_resource type="Material" uid="uid://bwp1chusquea00" path="res://resources/materials/wind_chusquea.tres" id="wind"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/chusquea_palette.png" id="photo"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/chusquea_live_palette.png" id="photo_live"]
 
 [resource]
 script = ExtResource("1")
@@ -31,3 +33,9 @@ individuals_per_cell = Vector2i(2, 4)
 displaceable = true
 walk_penalty = 0.6
 variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])
+scientific_name = "Chusquea tessellata"
+family = "poaceae"
+height_m = 1.5
+fact_keys = PackedStringArray("NARRATIVE_FLORA_FACT_CHUSQUEA_1", "NARRATIVE_FLORA_FACT_CHUSQUEA_2", "NARRATIVE_FLORA_FACT_CHUSQUEA_3")
+photo = ExtResource("photo")
+photo_live = ExtResource("photo_live")

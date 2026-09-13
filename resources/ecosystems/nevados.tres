@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"nevados"
+display_key = "ECOSYSTEM_NEVADOS"
 density_scale = {
 &"espeletia_hartwegiana": 1.0,
 &"calamagrostis": 1.2,

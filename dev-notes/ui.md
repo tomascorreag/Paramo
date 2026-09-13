@@ -102,3 +102,7 @@ buttons deep-link to the repo, `LICENSE` and `THIRD-PARTY-NOTICES.md` on `main`.
 - **Link targets are tested against the files in the repo**
   (`test_about_links_point_at_the_licence_documents`). Renaming `LICENSE` or
   `THIRD-PARTY-NOTICES.md` breaks the in-game links, and that test is what says so.
+
+## The walk reticle — `UXOverlay.State.WALKING` (2026-09-12)
+
+While the player walks to a clicked cell, the hover reticle (BaseX + Circle) stays PINNED on that cell and ignores the mouse; a new click re-pins, and arrival hands it back. Entry is `ClickToMoveController.path_dispatched` (user clicks only: walk-then-act approaches call `Player.follow_path` directly and lock the reticle on their target themselves). Exit is the new `Player.arrived`, which `GridWalker` fires once on the first idle frame after ANY end of a walk — path ran out, `stop()`, or an aborted step into a wall — so there is no separate "cancelled" path to forget. A `lock_at` (radial menu) or a build mode takes precedence and `unlock()` returns to WALKING rather than HOVER while the player is still moving. `hovered_cell` reads the destination for the duration, so a consumer that keys off it sees what the reticle shows. `tests/test_walk_reticle.gd` drives it on the tileset test map.

@@ -48,6 +48,17 @@ re-adding one is a decision, not a detail.
   `oh`, `rd`, `sh`). Details in
   [`docs/music/samples/README.md`](./docs/music/samples/README.md).
 
+### Flora plates — `assets/sprites/flora/photos/*.png`
+- 216x216 derivatives of the herbarium photographs and the living-plant
+  photographs in the sections below, baked by
+  `scripts/tools/bake_flora_photos.gd` (centre-crop + LANCZOS downscale;
+  `_palette` copies additionally snapped to the project palette; `_live`
+  plates from the living-plant photographs, except `espeletia_barclayana_live`,
+  which is a 2x detail of that species' herbarium sheet) and printed as
+  polaroids in the journal's bitácora. These are what ships;
+  the source JPGs under `assets/photos/` are excluded from the export. Same
+  CC0 status as their sources.
+
 ### Herbarium specimen photographs — `assets/photos/flora/*_dry.jpg`
 - **License:** Creative Commons Zero v1.0 Universal (`CC0-1.0`) — public domain
   dedication. **No attribution is legally owed**; the provenance below is
@@ -107,7 +118,9 @@ one is a licensing decision, not a sourcing problem.
 plant exists in GBIF or iNaturalist: the species' only CC0 "live" record is a
 scientific line drawing, and every actual photograph is CC BY 4.0 (29
 observations) or CC BY-NC (65). Adding one means accepting a credit obligation,
-which is a decision rather than a fetch. Its dry plate above is unaffected.
+which is a decision rather than a fetch. Its dry plate above is unaffected, and
+its `_live` plate is a detail crop of that same sheet, not a photograph of the
+living plant.
 
 ## Removed
 

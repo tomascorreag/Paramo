@@ -33,7 +33,7 @@ const QUOTED_UPPER_SNAKE: String = "\"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\""
 # report them as missing translations.
 const KEY_PREFIXES: Array[String] = [
 	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_", "FLORA_",
-	"GRAMMAR_",
+	"GRAMMAR_", "ECOSYSTEM_",
 ]
 
 # The lowercase-chrome convention covers UI copy. CLAUDE.md puts in-world
@@ -215,3 +215,20 @@ func _walk(path: String, extensions: Array[String], out: Array[String]) -> void:
 			out.append(full)
 		name = dir.get_next()
 	dir.list_dir_end()
+
+
+## Every plant's field notes must resolve: the bitacora prints `fact_keys`
+## through tr(), and a missing one would print as its own key. Two or three per
+## species is the page's budget (tests/test_journal_bitacora.gd measures it).
+func test_every_plant_has_field_notes() -> void:
+	for path: String in _collect_files(RESOURCE_DIRS, ["tres"]):
+		var data: Resource = load(path)
+		if not (data is PlantObjectData):
+			continue
+		var keys: PackedStringArray = (data as PlantObjectData).fact_keys
+		assert_between(keys.size(), 2, 3, "%s: two or three facts" % path)
+		for key: String in keys:
+			assert_true(_csv.has(key), "%s: fact key '%s' must be a CSV key" % [path, key])
+			assert_true(key.begins_with(SENTENCE_CASE_PREFIX),
+				"%s: field notes are in-world prose, and only %s exempts them from lowercase"
+					% [key, SENTENCE_CASE_PREFIX])

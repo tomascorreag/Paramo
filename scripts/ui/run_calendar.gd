@@ -63,6 +63,11 @@ extends Control
 ## @tool for editor preview only: autoloads do not run in the editor, so the
 ## editor draws the `preview_*` shape instead of the live run.
 
+## Which spread of the book this section belongs to. FieldJournal.show_spread
+## flips every section's visibility by this tag; "run" is the spread the book
+## opens on.
+@export var spread: StringName = &"run"
+
 ## Cell footprint including its own top-left rule, in texels. The Y must be a
 ## multiple of PageWarp.row_block_px on the page this sits in (see the class
 ## comment) — on the journal that is 18. The X is unconstrained by the warp, but
@@ -95,7 +100,8 @@ extends Control
 ## Lowercase in every locale, per the project's UI copy convention. Empty drops the
 ## title (and its rule) and pulls the grid up by one block.
 ##
-## Drawn in Eggmode, so its Spanish must be ACCENT-FREE — that face has no
+## Chosen ACCENT-FREE in Spanish for Eggmode, the title face until 2026-09-11
+## (FantasticBoogaloo has the full set) — that face had no
 ## accented glyphs at all (see JournalKnownSet.title for the full note).
 @export var header_text: String = "JOURNAL_SEASON_LOG":
 	set(value):
@@ -147,7 +153,7 @@ extends Control
 		queue_redraw()
 
 ## Title face, used for `header_text` alone. Leave null to reuse the body face.
-## The journal sets this to Eggmode — a title is a thing you WROTE at the top of
+## The journal sets this to the title face — a title is a thing you WROTE at the top of
 ## the page, the grid below it is a thing you ruled and stamped.
 @export var header_font: Font = null:
 	set(value):

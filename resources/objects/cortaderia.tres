@@ -6,6 +6,8 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/cortaderia_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/cortaderia_3.tres" id="6"]
 [ext_resource type="Material" uid="uid://bwp1cortader00" path="res://resources/materials/wind_cortaderia.tres" id="wind"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/cortaderia_palette.png" id="photo"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/cortaderia_live_palette.png" id="photo_live"]
 
 [resource]
 script = ExtResource("1")
@@ -30,3 +32,9 @@ patch_cut = 0.0
 displaceable = true
 walk_penalty = 0.1
 variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])
+scientific_name = "Cortaderia nitida"
+family = "poaceae"
+height_m = 1.0
+fact_keys = PackedStringArray("NARRATIVE_FLORA_FACT_CORTADERIA_1", "NARRATIVE_FLORA_FACT_CORTADERIA_2", "NARRATIVE_FLORA_FACT_CORTADERIA_3")
+photo = ExtResource("photo")
+photo_live = ExtResource("photo_live")

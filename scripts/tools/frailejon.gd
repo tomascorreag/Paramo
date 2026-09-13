@@ -51,6 +51,12 @@ var cell: Vector2i
 var growth_stage: int = 0
 var _shadow_scale: float = 1.0
 var _burn_mat: ShaderMaterial
+# The placement / discovery flash (see SpawnFlash). A per-plant duplicate of the
+# species' sway material (or a bare flash material) that holds the sprite and
+# the clump extras for the length of one tween, then hands back to the shared
+# one. Null outside a flash.
+var _flash_mat: ShaderMaterial
+var _flash_tween: Tween
 # Accumulated footfall damage in RegrowthManager wear units; see trample().
 var _trample_damage: float = 0.0
 
@@ -481,7 +487,88 @@ func _position_shadow() -> void:
 
 # --- Burn API (driven by FireManager) --------------------------------------
 
+# --- Spawn / discovery flash (see SpawnFlash) ------------------------------
+
+## Just planted by the player: arrive as a dithered gradient travelling away
+## from `from_world` (where the player stands), flash white, settle. Not for
+## the scatter at load — ObjectPainter never calls it.
+func play_placed_flash(from_world: Vector2) -> void:
+	if not _begin_flash():
+		return
+	# The sweep crosses the sprite itself: from its near edge to its far edge
+	# along the player -> plant line, so a tussock grows away from your feet.
+	var dir: Vector2 = global_position - from_world
+	dir = dir.normalized() if dir.length_squared() > 0.001 else Vector2(0.0, -1.0)
+	var mid: Vector2 = global_position + _sprite.offset + _sprite.position
+	_flash_tween = SpawnFlash.placed_tween(
+		self, _flash_mat, mid - dir * _FLASH_HALF_SPAN, mid + dir * _FLASH_HALF_SPAN)
+	_flash_tween.finished.connect(_end_flash)
+
+
+## Half the reveal sweep across one plant, in pixels: a sprite is 32 wide.
+const _FLASH_HALF_SPAN: float = 18.0
+
+
+## Identified for the first time: flare gold and settle back.
+func play_discovery_flash() -> void:
+	if not _begin_flash():
+		return
+	_flash_tween = SpawnFlash.discovered_tween(self, _flash_mat)
+	_flash_tween.finished.connect(_end_flash)
+
+
+## True while a flash tween is running. For tests and tools.
+func is_flashing() -> bool:
+	return _flash_tween != null and _flash_tween.is_valid()
+
+
+# Swap both CanvasItems onto a private material that carries the flash
+# uniforms. The sway material is DUPLICATED rather than written to: it is shared
+# by every plant of the species, and an instance uniform is the trap the
+# wind_plant header describes. The copy freezes wind_intensity at today's value
+# for half a second, which nobody can see. False while burning — the char
+# material owns the sprite then, and a flash is not the plant's news.
+func _begin_flash() -> bool:
+	if _sprite == null or _burn_mat != null:
+		return false
+	_kill_flash()
+	var base: ShaderMaterial = data.wind_material if data != null else null
+	if base != null:
+		_flash_mat = base.duplicate() as ShaderMaterial
+	else:
+		_flash_mat = ShaderMaterial.new()
+		_flash_mat.shader = SpawnFlash.SHADER
+	_sprite.material = _flash_mat
+	material = _flash_mat
+	return true
+
+
+func _end_flash() -> void:
+	_flash_tween = null
+	modulate.a = 1.0
+	if _flash_mat == null:
+		return
+	# Only hand back what is still ours: a burn that started mid-flash has
+	# already replaced the material, and _apply_wind_material would undo it.
+	if _sprite != null and _sprite.material == _flash_mat:
+		_sprite.material = null
+	if material == _flash_mat:
+		material = null
+	_flash_mat = null
+	if _burn_mat == null:
+		_apply_wind_material()
+
+
+func _kill_flash() -> void:
+	if _flash_tween != null and _flash_tween.is_valid():
+		_flash_tween.kill()
+	_end_flash()
+
+
 func apply_burn_material() -> void:
+	# A flash in progress would restore the sway material over the char when its
+	# tween ended; settle it first so the burn is the last word.
+	_kill_flash()
 	_burn_mat = ShaderMaterial.new()
 	_burn_mat.shader = _BURN_SHADER
 	_burn_mat.set_shader_parameter(&"burn_amount", 0.0)

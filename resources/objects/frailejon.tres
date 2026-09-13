@@ -5,6 +5,8 @@
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_1.tres" id="4"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_2.tres" id="5"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="6"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/frailejon_palette.png" id="photo"]
+[ext_resource type="Texture2D" path="res://assets/sprites/flora/photos/frailejon_live_palette.png" id="photo_live"]
 
 [resource]
 script = ExtResource("1")
@@ -28,3 +30,9 @@ patch_edge = 0.08
 displaceable = false
 walk_penalty = 0.4
 variants = Array[Texture2D]([ExtResource("3"), ExtResource("4"), ExtResource("5"), ExtResource("6")])
+scientific_name = "Espeletia grandiflora"
+family = "asteraceae"
+height_m = 3.0
+fact_keys = PackedStringArray("NARRATIVE_FLORA_FACT_FRAILEJON_1", "NARRATIVE_FLORA_FACT_FRAILEJON_2", "NARRATIVE_FLORA_FACT_FRAILEJON_3")
+photo = ExtResource("photo")
+photo_live = ExtResource("photo_live")

@@ -240,7 +240,7 @@ func _build(locale: String, step: int, bought: StringName) -> void:
 	var strip := _tutorial.get_node_or_null(^"StripAnchor/Column/Strip") as Control
 	if strip != null:
 		strip.modulate.a = 1.0
-	var skip := _tutorial.get_node_or_null(^"Skip") as Control
+	var skip := _tutorial.get_node_or_null(^"StripAnchor/Column/Skip") as Control
 	if skip != null:
 		skip.modulate.a = 1.0
 
