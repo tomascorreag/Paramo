@@ -130,16 +130,6 @@ func _ready() -> void:
 	_interaction_accept = func(c: Vector2i) -> bool:
 		return pathfinder.is_terrain_walkable(c) or has_any_action(c)
 
-	# Cancel any in-flight walk-then-act when the player is redirected by a
-	# left-click. Our own approach walks call player.follow_path directly (not
-	# through ClickToMoveController), so path_dispatched fires only for genuine
-	# user clicks — no self-cancel.
-	var c2m := get_tree().get_first_node_in_group(
-		ClickToMoveController.GROUP_NAME
-	) as ClickToMoveController
-	if c2m:
-		c2m.path_dispatched.connect(_on_user_path_dispatched)
-
 
 func _unhandled_input(event: InputEvent) -> void:
 	if pathfinder == null or player == null:
@@ -154,7 +144,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	# Right-click while the player is moving = brake: stop where it is and drop
-	# any in-flight walk-then-act, WITHOUT opening a menu. The pending action
+	# any in-flight walk-then-act, WITHOUT opening a menu. During walk-then-act
+	# this is the ONLY way out — ClickToMoveController refuses left-clicks. The pending action
 	# must be cancelled before the movement ends so the arrival poll (_process)
 	# doesn't fire it. A second right-click, now that the player is static,
 	# brings up the action menu normally (handled below).
@@ -227,6 +218,11 @@ func interaction_accept() -> Callable:
 ## gate: any available action makes the tile interactable (opens the menu / shows
 ## a reticle). Availability is each action's own call over the four inputs
 ## (proximity, occupants, tile type, inventory).
+## True while the player walks to perform an action picked from the menu.
+func is_walk_committed() -> bool:
+	return _pending_action != null
+
+
 func has_any_action(cell: Vector2i) -> bool:
 	if _registry == null:
 		return false
@@ -356,8 +352,7 @@ func _close_menu() -> void:
 		_menu.closed.disconnect(_on_menu_closed)
 		_menu.queue_free()
 		_menu = null
-		# Keep the lock while a walk-then-act is pending — the marker rides the
-		# target tile until the player arrives (or the walk is cancelled).
+		# A walk-then-act has already swapped the lock for its committed pin.
 		if _ux_overlay and _pending_action == null:
 			_ux_overlay.unlock()
 
@@ -400,10 +395,12 @@ func _on_item_selected(id: String) -> void:
 	_pending_action = action
 	_pending_target = _pending_cell
 	player.follow_path(approach)
-	# Keep a marker on the target tile for the duration of the walk. The menu's
-	# `closed` signal won't tear it down (guarded by _pending_action above).
+	# The menu's lock becomes the committed pin: the live circle on the target
+	# for the whole walk. The menu's `closed` signal can't tear it down
+	# (unlock is a no-op outside LOCKED).
 	if _ux_overlay:
-		_ux_overlay.lock_at(_pending_target)
+		_ux_overlay.unlock()
+		_ux_overlay.pin_destination(_pending_target, true)
 
 
 func _on_menu_closed() -> void:
@@ -433,10 +430,10 @@ func _process(_delta: float) -> void:
 	# time they arrive.
 	if action.is_available(ctx) and action.is_enabled(ctx):
 		action.execute(ctx)
-		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
-		# for plant/remove it clears the walk marker.
+		# Player.arrived releases the pin too, but its frame order against this
+		# _process is not fixed; release_destination is idempotent.
 		if _ux_overlay:
-			_ux_overlay.unlock()
+			_ux_overlay.release_destination()
 	else:
 		_deny(target)
 
@@ -459,19 +456,16 @@ func _cancel_pending() -> void:
 		return
 	_pending_action = null
 	if _ux_overlay:
-		_ux_overlay.unlock()
+		_ux_overlay.release_destination()
 
 
-func _on_user_path_dispatched(_cells: Array[Vector2i]) -> void:
-	_cancel_pending()
-
-
-# Clear any lock and flash a denied reticle on `cell`. flash_denied only renders
-# in HOVER state, so unlock() must run first.
+# Clear any lock or walk pin and flash a denied reticle on `cell`. flash_denied
+# only renders in HOVER state, so both must be dropped first.
 func _deny(cell: Vector2i) -> void:
 	if _ux_overlay == null:
 		return
 	_ux_overlay.unlock()
+	_ux_overlay.release_destination()
 	if _ux_overlay.has_method(&"flash_denied"):
 		_ux_overlay.flash_denied(cell)
 

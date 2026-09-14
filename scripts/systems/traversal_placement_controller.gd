@@ -11,8 +11,9 @@ extends Node
 # left-click resolves the far endpoint and validates it. If the player is not
 # next to the origin, it enters APPROACHING and walks them there first; the
 # traversal is re-validated, PAID FOR and built on arrival, so a walk that gets
-# interrupted costs nothing. Right-click or Escape cancels in either mode, and a
-# left-click move redirects the walk and drops the placement.
+# interrupted costs nothing. Right-click or Escape cancels in either mode; a
+# left-click during the walk is refused (ClickToMoveController asks
+# is_approaching()).
 #
 # This node should sit BEFORE TileInteractionController in the scene tree so
 # its `_unhandled_input` runs first while placement mode is active.
@@ -104,14 +105,6 @@ func _ready() -> void:
 		TileInteractionController.GROUP_NAME
 	) as TileInteractionController
 	_player = get_tree().get_first_node_in_group(&"player") as Player
-	# A left-click move during APPROACHING is the player changing their mind.
-	# path_dispatched fires only for user clicks; our own approach calls
-	# player.follow_path directly, so it cannot cancel itself.
-	var c2m := get_tree().get_first_node_in_group(
-		ClickToMoveController.GROUP_NAME
-	) as ClickToMoveController
-	if c2m:
-		c2m.path_dispatched.connect(_on_user_path_dispatched)
 
 
 # ----------------------------------------------------------------------------
@@ -231,10 +224,10 @@ func cancel() -> void:
 	_last_ended_paid = was_paid
 	if ux_overlay:
 		ux_overlay.exit_placement_mode()
-		# The walk marker is ours only while approaching; any other LOCKED state
-		# belongs to TileInteractionController's walk-then-act and is left alone.
+		# The walk pin is ours only while approaching; otherwise it belongs to a
+		# plain click-to-move and is left alone.
 		if was_approaching:
-			ux_overlay.unlock()
+			ux_overlay.release_destination()
 	if was_placing:
 		placement_ended.emit(ended_kind, was_paid)
 
@@ -243,6 +236,11 @@ func cancel() -> void:
 ## step up and keep TileInteractionController's right-click out of the way.
 func is_placing() -> bool:
 	return _mode != Mode.IDLE
+
+
+## True while walking to build — a committed walk, which refuses left-click moves.
+func is_approaching() -> bool:
+	return _mode == Mode.APPROACHING
 
 
 # ----------------------------------------------------------------------------
@@ -485,9 +483,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	_approach_or_place(far_cell)
 
 
-# While walking to build, only cancels are ours. A left-click is deliberately NOT
-# consumed: ClickToMoveController takes it, and its path_dispatched drops the
-# placement (_on_user_path_dispatched).
+# While walking to build, only cancels are ours. A left-click is not consumed
+# here: ClickToMoveController refuses it itself (is_approaching).
 func _approach_input(event: InputEvent) -> void:
 	var cancel_pressed: bool = false
 	if event is InputEventKey:
@@ -502,11 +499,6 @@ func _approach_input(event: InputEvent) -> void:
 		_player.stop()
 	cancel()
 	get_viewport().set_input_as_handled()
-
-
-func _on_user_path_dispatched(_cells: Array[Vector2i]) -> void:
-	if _mode == Mode.APPROACHING:
-		cancel()
 
 
 # ----------------------------------------------------------------------------
@@ -530,10 +522,10 @@ func _approach_or_place(far_cell: Vector2i) -> void:
 	_far_cell = far_cell
 	_mode = Mode.APPROACHING
 	# The ghost stays painted as the promise of what gets built; the endpoint
-	# hints and cursor X go, and a lock marks where the player is heading.
+	# hints go, and the committed pin marks where the player is heading.
 	if ux_overlay:
 		ux_overlay.exit_placement_mode()
-		ux_overlay.lock_at(_origin_cell)
+		ux_overlay.pin_destination(_origin_cell, true)
 	_player.follow_path(path)
 
 

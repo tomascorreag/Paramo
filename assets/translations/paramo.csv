@@ -20,7 +20,7 @@ JOURNAL_SEASON_LOG,season log,temporadas
 JOURNAL_KNOWN_BUILDINGS,buildings,obras
 JOURNAL_KNOWN_FLORA,flora,flora
 JOURNAL_RESOURCES,resources,recursos
-JOURNAL_TAB_RUN,run,partida
+JOURNAL_TAB_RUN,resources,recursos
 JOURNAL_TAB_BITACORA,bitacora,bitácora
 JOURNAL_VAL_WHERE,in {0},en {0}
 JOURNAL_VAL_AND, and , y 

@@ -75,6 +75,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
 	if mb.button_index != MOUSE_BUTTON_LEFT or not mb.pressed:
 		return
+	# A walk that ends in an action the player picked owns the mouse until it
+	# lands; right-click is its only exit. Consumed, so nothing else acts either.
+	if _is_walk_committed():
+		get_viewport().set_input_as_handled()
+		return
 
 	var global_pos := _event_global_position(mb)
 	var target := pathfinder.resolve_click(global_pos)
@@ -106,6 +111,21 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Consume the event so lower-priority input handlers don't also react.
 	get_viewport().set_input_as_handled()
+
+
+# Walk-then-act (TileInteractionController) or walking to build
+# (TraversalPlacementController). Looked up per click, not cached: clicks are
+# rare and both are optional in a scene.
+func _is_walk_committed() -> bool:
+	var tic := get_tree().get_first_node_in_group(
+		TileInteractionController.GROUP_NAME
+	) as TileInteractionController
+	if tic != null and tic.is_walk_committed():
+		return true
+	var tpc := get_tree().get_first_node_in_group(
+		TraversalPlacementController.GROUP_NAME
+	) as TraversalPlacementController
+	return tpc != null and tpc.is_approaching()
 
 
 # Resolve the click's global position. InputEventMouseButton.position is in
