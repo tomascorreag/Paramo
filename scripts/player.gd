@@ -298,6 +298,16 @@ func _on_path_blocked(cell: Vector2i) -> void:
 	push_warning("Player: path step into non-walkable cell %s; aborting path." % cell)
 
 
+## The walk is over: the path ran out, was stopped, or was aborted at a wall —
+## GridWalker fires its hook once on the first idle frame after any of those.
+## UXOverlay releases the pinned reticle on it.
+signal arrived
+
+
+func _on_arrived() -> void:
+	arrived.emit()
+
+
 ## The camera and the lantern follow the player's FEET, so both ride the same
 ## lift that undoes altitude and the sort offset on the sprite.
 func _on_visual_lift(lift: float) -> void:

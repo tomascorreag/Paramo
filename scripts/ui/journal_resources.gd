@@ -17,7 +17,7 @@ extends Control
 ##     of Tiny5's 8px em; anything between the two would stagger the glyphs.
 ##
 ## DRAWN, not a container of Labels, for the same two reasons JournalKnownSet and
-## RunCalendar are: the Eggmode title cannot be a Label on an 18-texel warp block
+## RunCalendar are: the title cannot be a Label on an 18-texel warp block
 ## (18 % 16 != 0 fails test_journal_pages.gd), and drawing calls tr() per frame so
 ## a locale switch repaints for free. See JournalTitle for the full argument.
 ##
@@ -33,8 +33,14 @@ extends Control
 ## stay flat ink. That is also what makes the water glyph (blues) and the visitor
 ## glyph (a flat black silhouette) read as things drawn on paper.
 
+## Which spread of the book this section belongs to. FieldJournal.show_spread
+## flips every section's visibility by this tag; "run" is the spread the book
+## opens on.
+@export var spread: StringName = &"run"
+
 ## Section heading — a TRANSLATION KEY, resolved at draw time. Lowercase in every
-## locale, and ACCENT-FREE in Spanish: this is drawn in Eggmode, which ships no
+## locale, and chosen ACCENT-FREE in Spanish for Eggmode (the title face until
+## 2026-09-11; FantasticBoogaloo has the full set), which shipped no
 ## accented glyph at all and would render tofu. tests/test_journal_pages.gd asserts
 ## the coverage.
 @export var title: String = "JOURNAL_RESOURCES":
@@ -119,13 +125,14 @@ extends Control
 
 @export_group("Type")
 ## Title face. Leave null to fall back to the theme's Label font. The journal sets
-## Eggmode — a heading is something you WROTE at the top of the list.
+## the title face — a heading is something you WROTE at the top of the list.
 @export var header_font: Font = null:
 	set(value):
 		header_font = value
 		queue_redraw()
 
-## Must be a multiple of the face's native em (16 for Eggmode).
+## Must be a multiple of the face's native em (16 for Eggmode; FantasticBoogaloo is
+## an outline face, legal at any size).
 @export var header_font_size: int = 16:
 	set(value):
 		header_font_size = value

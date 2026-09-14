@@ -40,6 +40,12 @@ var debug_only: bool = false
 ## unaffordable action in place.
 var unlock_id: StringName = &""
 
+## True = execute() runs the moment the action is picked, wherever the player
+## stands, and the action owns the walk itself. For the two-click placements:
+## the second click is aimed from afar, and the walk (and the charge) follow it.
+## Offering is unchanged — is_offerable still demands a reachable standing cell.
+var executes_from_afar: bool = false
+
 
 ## "Can I act on this cell from where I stand RIGHT NOW?" gate. Combines the
 ## proximity rule with the subclass predicate. Unchanged contract: the controller
@@ -147,6 +153,15 @@ func _range_ok(target: Vector2i, standing: Vector2i) -> bool:
 ## Side-effect free.
 func _applies(_ctx: ActionContext) -> bool:
 	return false
+
+
+## The glyph to draw for THIS click. Defaults to the fixed `icon`; override for
+## an action whose state the wheel should show (inspect goes gold over a plant
+## the journal has no entry for yet). Read once, when the menu is assembled —
+## the registry holds one action instance, so per-context art cannot live in the
+## `icon` field.
+func icon_for(_ctx: ActionContext) -> Texture2D:
+	return icon
 
 
 ## Called once when the player selects the action from the radial menu.

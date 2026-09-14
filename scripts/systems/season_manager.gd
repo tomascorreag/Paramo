@@ -78,13 +78,15 @@ var days_per_season: int:
 ## call (2026-08-13): its last step is "buy a tool, then build it", and a player
 ## who cannot complete the tutorial on day one has no smooth first day.
 ##
-## 15 buys the cheap end of the shop (a ladder or a frailejon at 10) and leaves
-## 5 tiles of placement, but NOT a bridge or a fence — so the opening choice is
-## still a real one, and the expensive verbs still cost a day of visitors.
-## Roughly one perfect day's income (6 visitors x 2 tokens) handed over at
-## spawn: rerun sim/balance_sim.gd against the old arm before treating any
-## downstream number as unchanged. Migrate to a RunConfig .tres later.
-@export var starting_tokens: float = 15.0
+## 25 since 2026-09-14, when the FTUE started teaching BOTH halves of the shop
+## on day one: a frailejón bought and planted (10 + 1 tile) and then a ladder
+## bought and built (10 + 2 tiles) is 23, and income only arrives at day end.
+## The 2 left over absorb one extra planting on the way. It still does not buy
+## a fence (30). Was 15, which covered one of the two. Roughly two perfect days'
+## income (6 visitors x 2 tokens) handed over at spawn: rerun sim/balance_sim.gd
+## against the old arm before treating any downstream number as unchanged.
+## Migrate to a RunConfig .tres later.
+@export var starting_tokens: float = 25.0
 
 ## One full bimodal year, applied by index modulo its length: Dry, Wet, Dry, Wet.
 ## Its length doubles as seasons-per-year — it drives both the days_per_season

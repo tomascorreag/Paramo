@@ -169,37 +169,50 @@ func test_pause_menu_buttons_fit_their_text_in_every_locale() -> void:
 					% [locale, text, w, padding, available])
 
 
-func test_fullscreen_button_fits_both_of_its_labels_in_every_locale() -> void:
-	# This one stretches to the Settings column rather than carrying a minimum
-	# size, so its budget is the panel's inner width, and it has to hold BOTH of
-	# the keys it swaps between (see PauseMenu._refresh_fullscreen_label) — the
-	# label the player never sees at boot is the one that silently clips.
+func test_fullscreen_row_fits_its_label_and_checkbox_in_every_locale() -> void:
+	# The row is a Button holding an HBox: the setting's name on the left and the
+	# checkbox on the right. Its budget is the panel's inner width MINUS the box,
+	# the HBox separation and the row's own inset, so the Spanish label ("pantalla
+	# completa", 17 characters) is measured against what is actually left.
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	var btn := pause.get_node(
-		"Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn") as Button
-	assert_not_null(btn)
+	var row_path := "Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row"
+	var label := pause.get_node(row_path + "/Label") as Label
+	var check := pause.get_node(row_path + "/Check") as Panel
+	var row := pause.get_node(row_path) as HBoxContainer
+	assert_not_null(label)
+	assert_not_null(check)
 
 	var panel := pause.get_node("Center/Panel") as Panel
 	var margin := pause.get_node("Center/Panel/Margin") as MarginContainer
-	var available: float = panel.custom_minimum_size.x \
-		- margin.get_theme_constant(&"margin_left") \
-		- margin.get_theme_constant(&"margin_right")
-	var padding: float = btn.get_theme_stylebox(&"normal").get_margin(SIDE_LEFT) \
-		+ btn.get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
-	var font: Font = btn.get_theme_font(&"font")
-	var font_size: int = btn.get_theme_font_size(&"font_size")
+	var available: float = panel.custom_minimum_size.x 		- margin.get_theme_constant(&"margin_left") 		- margin.get_theme_constant(&"margin_right") 		- absf(row.offset_left) - absf(row.offset_right) 		- check.custom_minimum_size.x 		- row.get_theme_constant(&"separation")
+	var font: Font = label.get_theme_font(&"font")
+	var font_size: int = label.get_theme_font_size(&"font_size")
 
 	for locale: String in ["en_GB", "es_CO"]:
 		TranslationServer.set_locale(locale)
-		for key: String in ["UI_FULLSCREEN", "UI_WINDOWED"]:
-			var text := tr(key)
-			assert_ne(text, key, "%s has no %s translation" % [key, locale])
-			var w: float = font.get_string_size(
-				text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size).x
-			assert_lte(w + padding, available,
-				"%s: '%s' needs %.0fpx (+%.0f padding) in a %.0fpx row"
-					% [locale, text, w, padding, available])
+		var text := tr(label.text)
+		assert_ne(text, label.text, "%s has no %s translation" % [label.text, locale])
+		var w: float = font.get_string_size(
+			text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		assert_lte(w, available,
+			"%s: '%s' needs %.0fpx in a %.0fpx row" % [locale, text, w, available])
+
+
+func test_fullscreen_checkbox_shows_the_window_mode() -> void:
+	# The fill IS the state readout — the row's words no longer change — so a
+	# fill that does not follow the window mode is a silently wrong setting.
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
+	var fill := pause.get_node(
+		"Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row/Check/CheckFill") as Panel
+	assert_not_null(fill)
+
+	var mode := DisplayServer.window_get_mode()
+	var fullscreen: bool = mode == DisplayServer.WINDOW_MODE_FULLSCREEN 		or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+	pause.call(&"_refresh_fullscreen_toggle")
+	assert_eq(fill.visible, fullscreen,
+		"the checkbox fill must match the actual window mode")
 
 
 func test_pause_panel_is_tall_enough_for_its_settings() -> void:
@@ -237,15 +250,18 @@ func test_about_button_opens_the_about_view() -> void:
 	var about := _about_view(pause)
 	assert_false(about.visible, "the about view starts hidden")
 
-	(pause.get_node("Center/Panel/Margin/Stack/Main/Settings/AboutBtn") as Button).pressed.emit()
+	(pause.get_node("Center/Panel/Margin/Stack/Main/Info/AboutBtn") as Button).pressed.emit()
 	assert_true(about.visible, "pressing about must show it")
 	assert_false((pause.get_node("Center/Panel/Margin/Stack/Main") as VBoxContainer).visible,
 		"and hide the settings column")
 	assert_eq((pause.get_node("Center/Panel/Margin/Stack/Title") as Label).text, "UI_ABOUT",
 		"the header names the view")
 
-	(pause.get_node(ABOUT_PATH + "/BackBtn") as Button).pressed.emit()
+	var back := pause.get_node("Center/Panel/BackBtn") as Button
+	assert_true(back.visible, "a submenu must offer the way out")
+	back.pressed.emit()
 	assert_false(about.visible, "back returns to the main view")
+	assert_false(back.visible, "and the arrow goes with the submenu")
 
 
 func test_about_links_point_at_the_licence_documents() -> void:
@@ -266,7 +282,7 @@ func test_about_view_fits_the_panel() -> void:
 	# outside the frame with no error. The panel holds the TALLEST view.
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	(pause.get_node("Center/Panel/Margin/Stack/Main/Settings/AboutBtn") as Button).pressed.emit()
+	(pause.get_node("Center/Panel/Margin/Stack/Main/Info/AboutBtn") as Button).pressed.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -291,7 +307,7 @@ func test_about_rows_fit_their_text_in_every_locale() -> void:
 	var available: float = panel.custom_minimum_size.x 		- margin.get_theme_constant(&"margin_left") 		- margin.get_theme_constant(&"margin_right")
 
 	var rows: Array[Control] = []
-	for name: String in ["Author", "SourceBtn", "LicenceBtn", "NoticesBtn", "Url", "BackBtn"]:
+	for name: String in ["Author", "SourceBtn", "LicenceBtn", "NoticesBtn", "Url"]:
 		var row := pause.get_node(ABOUT_PATH + "/" + name) as Control
 		assert_not_null(row, name)
 		rows.append(row)
@@ -315,6 +331,28 @@ func test_about_rows_fit_their_text_in_every_locale() -> void:
 					% [locale, text, w, padding, available])
 
 
+func test_author_line_translates_its_preposition_and_keeps_the_name() -> void:
+	# "by Tomás Correa" / "por Tomás Correa": the preposition is copy and comes
+	# from the CSV, the name is a proper noun and is capitalised, which is why the
+	# line is composed in code instead of being one CSV row (a capitalised row
+	# would fail the lowercase-chrome check in test_localization.gd).
+	#
+	# The locale is switched through TranslationServer rather than LocaleManager
+	# on purpose: composed text does not follow a locale change on its own, and
+	# NOTIFICATION_TRANSLATION_CHANGED is the only thing that refreshes it.
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
+	var author := pause.get_node(ABOUT_PATH + "/Author") as Label
+
+	for locale: String in ["en_GB", "es_CO"]:
+		TranslationServer.set_locale(locale)
+		await get_tree().process_frame
+		assert_eq(author.text, "%s %s" % [tr("UI_ABOUT_BY"), PauseMenu.AUTHOR],
+			"the %s line must use that locale's preposition" % locale)
+		assert_true(author.text.contains("Tomás Correa"),
+			"the name is a proper noun and stays capitalised")
+
+
 func test_about_labels_are_literal_not_keys() -> void:
 	# The author line and the URL are proper nouns, not copy: nothing to
 	# translate, and a key-shaped literal here would fail the CSV scan instead.
@@ -329,75 +367,123 @@ func test_about_labels_are_literal_not_keys() -> void:
 		"the URL follows the lowercase-chrome convention")
 
 
-# --- The in-run language toggle ----------------------------------------------
+# --- The in-run language dropdown --------------------------------------------
+
+const LANG_ROW: String = "Center/Panel/Margin/Stack/Main/Settings/LanguageBtn"
 
 func _language_button(pause: CanvasLayer) -> Button:
-	return pause.get_node(
-		"Center/Panel/Margin/Stack/Main/Settings/LanguageBtn") as Button
+	return pause.get_node(LANG_ROW) as Button
 
 
-func test_language_button_offers_the_other_language() -> void:
-	# The label names the language the press SWITCHES TO, written in that
-	# language — a player stuck in the wrong locale has to be able to read it.
+func _language_value(pause: CanvasLayer) -> Label:
+	return pause.get_node(LANG_ROW + "/Row/Value") as Label
+
+
+func _language_options(pause: CanvasLayer) -> Array[Button]:
+	var out: Array[Button] = []
+	for child: Node in pause.get_node("Center/Panel/LangPopup/Options").get_children():
+		out.append(child as Button)
+	return out
+
+
+func test_language_row_names_the_language_in_use() -> void:
+	# The dropdown states what is ACTIVE (the old toggle stated what a press
+	# would switch TO). Written in that language, so it is readable to a player
+	# who cannot read the one currently on screen.
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	var btn := _language_button(pause)
-	assert_not_null(btn)
 
 	for entry: Dictionary in LocaleManager.SUPPORTED:
 		LocaleManager.set_locale(String(entry["code"]))
-		assert_ne(btn.text, String(entry["native"]),
-			"the button must not offer the language already active")
-		var natives: Array[String] = []
-		for other: Dictionary in LocaleManager.SUPPORTED:
-			natives.append(String(other["native"]))
-		assert_has(natives, btn.text, "the label must be a shipped native name")
+		assert_eq(_language_value(pause).text, String(entry["native"]),
+			"the row must name the active language")
 
 
-func test_language_button_labels_are_literal_not_keys() -> void:
-	# Same rule as the title gate's boxes: translating this label would hide the
+func test_language_dropdown_lists_every_shipped_locale() -> void:
+	# Built from LocaleManager.SUPPORTED at runtime, so a third locale needs no
+	# edit here or in the scene.
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
+	var options := _language_options(pause)
+	assert_eq(options.size(), LocaleManager.SUPPORTED.size(),
+		"one row per shipped locale")
+	for i: int in LocaleManager.SUPPORTED.size():
+		assert_eq(options[i].text, String(LocaleManager.SUPPORTED[i]["native"]))
+		assert_not_null(options[i].icon, "each row carries its flag")
+
+
+func test_language_labels_are_literal_not_keys() -> void:
+	# Same rule as the title gate's boxes: translating these would hide the
 	# option from the only player who needs it.
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	var btn := _language_button(pause)
-	assert_eq(tr(btn.text), btn.text,
-		"'%s' must be literal text, not a translation key" % btn.text)
+	var labels: Array[String] = [_language_value(pause).text]
+	for option: Button in _language_options(pause):
+		labels.append(option.text)
+	for text: String in labels:
+		assert_eq(tr(text), text,
+			"'%s' must be literal text, not a translation key" % text)
 
 
-func test_language_button_switches_and_persists_the_locale() -> void:
+func test_language_dropdown_opens_and_dismisses() -> void:
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	var btn := _language_button(pause)
+	var popup := pause.get_node("Center/Panel/LangPopup") as Panel
+	assert_false(popup.visible, "the list starts closed")
 
+	_language_button(pause).pressed.emit()
+	assert_true(popup.visible, "the row opens it")
+	_language_button(pause).pressed.emit()
+	assert_false(popup.visible, "and closes it again")
+
+	# Leaving the view must take the list with it, or it hangs over the submenu.
+	_language_button(pause).pressed.emit()
+	pause.call(&"_set_view", 2)
+	assert_false(popup.visible, "a view swap dismisses the list")
+
+
+func test_language_option_switches_and_persists_the_locale() -> void:
+	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
+	add_child_autofree(pause)
 	LocaleManager.set_locale("en_GB")
-	btn.pressed.emit()
-	assert_eq(TranslationServer.get_locale(), "es_CO", "one press switches")
+
+	for option: Button in _language_options(pause):
+		if option.text == "español":
+			option.pressed.emit()
+	assert_eq(TranslationServer.get_locale(), "es_CO", "picking a row switches")
 	assert_eq(LocaleManager.saved_locale(), "es_CO", "and is remembered")
-	# And it wraps: pressing again must come back, not stall on the last entry.
-	btn.pressed.emit()
-	assert_eq(TranslationServer.get_locale(), "en_GB", "a second press wraps")
+	assert_false((pause.get_node("Center/Panel/LangPopup") as Panel).visible,
+		"picking closes the list")
 
 
-func test_language_button_fits_every_native_name_in_both_locales() -> void:
-	# Stretches to the Settings column like FullscreenBtn, so its budget is the
-	# panel's inner width, and it has to hold EVERY native name it can show.
+func test_language_row_fits_its_label_value_and_chevron() -> void:
+	# Three things share this row: the translated word "language", the active
+	# language's native name and the dropdown chevron. Only the first two vary by
+	# locale, and the pair has to fit next to a fixed-width glyph.
 	var pause: CanvasLayer = PAUSE_SCENE.instantiate()
 	add_child_autofree(pause)
-	var btn := _language_button(pause)
+	var row := pause.get_node(LANG_ROW + "/Row") as HBoxContainer
+	var label := pause.get_node(LANG_ROW + "/Row/Label") as Label
+	# A plain Control wrapping the glyph: a Container resets a child's rotation
+	# every layout pass, so the rotated TextureRect cannot be the row's child.
+	var chevron := pause.get_node(LANG_ROW + "/Row/Chevron") as Control
+	assert_not_null(chevron)
+	assert_ne(
+		(pause.get_node(LANG_ROW + "/Row/Chevron/Glyph") as TextureRect).rotation, 0.0,
+		"the dropdown glyph is the back chevron, turned to point down")
 
 	var panel := pause.get_node("Center/Panel") as Panel
 	var margin := pause.get_node("Center/Panel/Margin") as MarginContainer
-	var available: float = panel.custom_minimum_size.x \
-		- margin.get_theme_constant(&"margin_left") \
-		- margin.get_theme_constant(&"margin_right")
-	var padding: float = btn.get_theme_stylebox(&"normal").get_margin(SIDE_LEFT) \
-		+ btn.get_theme_stylebox(&"normal").get_margin(SIDE_RIGHT)
-	var font: Font = btn.get_theme_font(&"font")
-	var font_size: int = btn.get_theme_font_size(&"font_size")
+	var available: float = panel.custom_minimum_size.x 		- margin.get_theme_constant(&"margin_left") 		- margin.get_theme_constant(&"margin_right") 		- absf(row.offset_left) - absf(row.offset_right) 		- chevron.custom_minimum_size.x 		- 2.0 * row.get_theme_constant(&"separation")
+	var font: Font = label.get_theme_font(&"font")
+	var font_size: int = label.get_theme_font_size(&"font_size")
 
-	for entry: Dictionary in LocaleManager.SUPPORTED:
-		var w: float = font.get_string_size(
-			String(entry["native"]), HORIZONTAL_ALIGNMENT_CENTER, -1, font_size).x
-		assert_lte(w + padding, available,
-			"'%s' needs %.0fpx (+%.0f padding) in a %.0fpx row"
-				% [entry["native"], w, padding, available])
+	for locale: String in ["en_GB", "es_CO"]:
+		TranslationServer.set_locale(locale)
+		for entry: Dictionary in LocaleManager.SUPPORTED:
+			var text := "%s%s" % [tr(label.text), String(entry["native"])]
+			var w: float = font.get_string_size(
+				text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			assert_lte(w, available,
+				"%s: '%s' needs %.0fpx in a %.0fpx row"
+					% [locale, text, w, available])

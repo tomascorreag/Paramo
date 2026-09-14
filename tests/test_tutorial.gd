@@ -18,10 +18,16 @@ const BASE_SCENE: String = "res://scenes/templates/gameplay_base.tscn"
 # table has to change with it, which is the point.
 const STEP_SIGNALS: Dictionary = {
 	&"move": ["res://scripts/systems/click_to_move_controller.gd", "path_dispatched"],
+	&"discover": ["res://scripts/systems/flora_codex.gd", "discovered"],
 	&"journal": ["res://scripts/ui/field_journal.gd", "opened"],
+	&"bitacora": ["res://scripts/ui/field_journal.gd", "spread_changed"],
 	&"shop": ["res://scripts/systems/unlock_state.gd", "unlock_changed"],
 	&"close_journal": ["res://scripts/ui/field_journal.gd", "closed"],
 	&"build": ["res://scripts/systems/unlock_state.gd", "placement_paid"],
+	&"discover_more": ["res://scripts/systems/flora_codex.gd", "discovered"],
+	&"shop_ladder": ["res://scripts/systems/unlock_state.gd", "unlock_changed"],
+	&"close_journal_ladder": ["res://scripts/ui/field_journal.gd", "closed"],
+	&"build_ladder": ["res://scripts/systems/unlock_state.gd", "placement_paid"],
 	&"build_endpoint": ["res://scripts/systems/unlock_state.gd", "placement_paid"],
 	&"fire_douse": ["res://scripts/systems/fire_manager.gd", "tile_extinguished"],
 }
@@ -75,13 +81,97 @@ func test_steps_teach_move_journal_shop_build_in_order() -> void:
 	for step: Dictionary in TutorialController._STEPS:
 		if not bool(step.get("narrative", false)):
 			ids.append(step["id"])
-	assert_eq(ids, [&"move", &"journal", &"shop", &"close_journal", &"build",
-			&"build_endpoint", &"roam", &"fire_follow", &"fire_douse"],
-			"FTUE order is load-bearing: the shop step can only be done from the "
-			+ "journal the previous step opened, the build step can only be "
-			+ "done with the tool the shop step bought, from a world the "
-			+ "close step got back to — and the fire arc runs last because it is "
-			+ "the only part that needs the player already able to walk away.")
+	assert_eq(ids, [&"move", &"discover", &"journal", &"bitacora", &"shop",
+			&"close_journal", &"build", &"discover_more", &"shop_ladder",
+			&"close_journal_ladder", &"build_ladder", &"build_endpoint",
+			&"roam", &"fire_follow", &"fire_douse"],
+			"FTUE order is load-bearing: the bitácora tab exists only once "
+			+ "something is identified, the frailejón is only on sale once it is, "
+			+ "the shop step can only be done from the journal the steps before "
+			+ "it opened, the build step only with the plant the shop step sold, "
+			+ "from a world the close step got back to — and the fire arc runs "
+			+ "last because it is the only part that needs the player already "
+			+ "able to walk away.")
+
+
+func test_the_step_kinds_name_real_wiring() -> void:
+	# A "kind" reuses another step's completion wiring. One that names wiring
+	# _connect_step_signal has no branch for connects nothing, and the strip
+	# hangs on it — the FTUE's signature silent failure.
+	const WIRED: Array[StringName] = [&"move", &"discover", &"journal", &"bitacora",
+			&"shop", &"close_journal", &"build", &"build_endpoint", &"fire_douse"]
+	for step: Dictionary in TutorialController._STEPS:
+		if step.has("kind"):
+			assert_true(WIRED.has(step["kind"]),
+					"step '%s' has kind '%s', which nothing wires" % [step["id"], step["kind"]])
+
+
+func test_the_shop_sells_only_the_path_the_tokens_were_priced_for() -> void:
+	# The opening balance is exactly a frailejón and a ladder. Anything else
+	# bought on the way through leaves the ladder step unfinishable on day one.
+	var ctl: TutorialController = autofree(TutorialController.new())
+	var espeletia: Array[StringName] = []
+	for kind: StringName in ObjectPainter.kinds():
+		if ObjectPainter.is_espeletia(kind):
+			espeletia.append(kind)
+	assert_eq(espeletia.size(), 3, "three frailejones are registered")
+	for i: int in TutorialController._STEPS.size():
+		ctl._step = i
+		var id: StringName = TutorialController._STEPS[i]["id"]
+		var sells: Array[StringName] = ctl._granted_purchases()
+		var before_shop: bool = i < _index_of(&"shop")
+		var ladder_step: Dictionary = TutorialController._STEPS[_index_of(&"shop_ladder")]
+		var ladder_on_sale: bool = i >= _index_of(&"shop_ladder") \
+				and not TutorialController._is_disabled(ladder_step)
+		assert_eq(sells.has(&"frailejon"), not before_shop, "frailejón on sale at '%s'" % id)
+		assert_eq(sells.has(&"ladder"), ladder_on_sale, "ladder on sale at '%s'" % id)
+		for other: StringName in [&"bridge", &"fence", &"hypericum", &"arcytophyllum"]:
+			assert_false(sells.has(other), "'%s' must not be on sale at '%s'" % [other, id])
+	TutorialGate.restrict_purchases([&"ladder"])
+	assert_true(TutorialGate.allows_purchase(&"ladder"))
+	assert_false(TutorialGate.allows_purchase(&"fence"))
+	TutorialGate.release()
+	assert_true(TutorialGate.allows_purchase(&"fence"), "release lifts the shop limit")
+
+
+func test_a_disabled_step_is_stepped_over() -> void:
+	var ctl: TutorialController = autofree(TutorialController.new())
+	for i: int in TutorialController._STEPS.size():
+		if TutorialController._is_disabled(TutorialController._STEPS[i]):
+			ctl._step = i
+			assert_false(ctl._step_applies(),
+					"disabled step '%s' must not show" % TutorialController._STEPS[i]["id"])
+
+
+func test_the_first_find_is_a_frailejon_and_the_second_is_anything() -> void:
+	for step: Dictionary in TutorialController._STEPS:
+		match step["id"]:
+			&"discover":
+				assert_eq(step.get("finds", &""), TutorialController._FRAILEJON)
+				assert_eq(step.get("grants", -1), TutorialGate.Action.INSPECT,
+						"the first right click the game accepts is the magnifier")
+			&"discover_more":
+				assert_false(step.has("finds"), "any new species counts, grasses included")
+				assert_false(step.has("grants"))
+
+
+func test_opening_balance_covers_a_frailejon_and_then_a_ladder() -> void:
+	# The FTUE buys and plants a frailejón, then buys and builds a ladder, all on
+	# day one — and visitor income only arrives at day end.
+	var unlocks := UnlockState.new()
+	autofree(unlocks)
+	var due: float = unlocks.unlock_cost_for(&"frailejon") + unlocks.placement_cost_per_tile \
+			+ unlocks.unlock_cost_for(&"ladder") \
+			+ unlocks.placement_cost_per_tile * Ladder.OCCUPIED_CELLS
+	assert_gte(float(_season_defaults().starting_tokens), due,
+			"starting_tokens must cover the whole FTUE shopping list")
+
+
+func _index_of(id: StringName) -> int:
+	for i: int in TutorialController._STEPS.size():
+		if TutorialController._STEPS[i]["id"] == id:
+			return i
+	return -1
 
 
 func test_the_fire_arc_is_roam_then_follow_then_douse() -> void:
@@ -129,15 +219,96 @@ func test_the_scripted_fire_stays_inside_the_auras_reach() -> void:
 	# a glow that is not being drawn.
 	assert_lt(TutorialController._FIRE_MAX_OFFSCREEN, FireAuraOverlay.REACH,
 			"the fire must be lit inside the aura's reach, or nothing points at it")
-	assert_lt(TutorialController._FIRE_TARGET_OFFSCREEN,
-			TutorialController._FIRE_MAX_OFFSCREEN)
-	assert_gt(TutorialController._FIRE_TARGET_OFFSCREEN,
-			TutorialController._FIRE_MIN_OFFSCREEN,
-			"the target has to sit inside the band the search accepts")
+	assert_lt(TutorialController._FIRE_MIN_OFFSCREEN,
+			TutorialController._FIRE_MAX_OFFSCREEN, "the band must not be empty")
 	# And genuinely off screen: the aura's rise term is still fading a fire in
 	# at the edge, so a cell scored just outside would be visible AND unlit.
 	assert_gt(TutorialController._FIRE_MIN_OFFSCREEN, 0.0,
 			"a fire the player can already see is not an off-screen fire")
+
+
+func test_the_strip_docks_clear_of_the_page_being_read() -> void:
+	# The pages, MEASURED 2026-09-14 with the book open: left x 60..217 / right
+	# 264..420 at 480x270 (1080p fullscreen); left 0..157 / right 204..360 at
+	# 360x202 (1440x810 windowed). On resources the strip must clear the RIGHT
+	# page (the shop); on the bitácora the LEFT page (the species plate).
+	var half: float = TutorialController._STRIP_WIDTH * 0.5
+	for case: Array in [
+			[480.0, Rect2(60, 21, 157, 231), Rect2(264, 21, 156, 231)],
+			[360.0, Rect2(0, -13, 157, 231), Rect2(204, -13, 156, 231)]]:
+		var view_w: float = case[0]
+		var left: Rect2 = case[1]
+		var right: Rect2 = case[2]
+		var shop_c: float = TutorialController._dock_center(view_w, false, left, right)
+		assert_lte(shop_c + half, right.position.x, "%d wide: strip covers the shop" % view_w)
+		assert_gte(shop_c - half, 0.0, "%d wide: strip off the left edge" % view_w)
+		var read_c: float = TutorialController._dock_center(view_w, true, left, right)
+		assert_gte(read_c - half, left.end.x, "%d wide: strip covers the plate" % view_w)
+		assert_lte(read_c + half, view_w, "%d wide: strip off the right edge" % view_w)
+	assert_eq(TutorialController._dock_center(480.0, false, Rect2(), Rect2()), 240.0,
+			"no page rect, no dock")
+
+
+func test_the_open_book_points_at_what_the_step_asks_for() -> void:
+	var frailejon: Array[StringName] = [&"frailejon"]
+	var none: Array[StringName] = []
+	var c := TutorialController._cue_for(&"bitacora", &"run", none)
+	assert_true(c["tab"], "the bitácora step points at the tab from resources")
+	c = TutorialController._cue_for(&"bitacora", &"bitacora", none)
+	assert_false(c["tab"], "and stops once the book is there")
+	c = TutorialController._cue_for(&"shop", &"bitacora", frailejon)
+	assert_true(c["tab"], "a shop step on the bitácora points back at resources")
+	assert_true((c["entries"] as Array).is_empty())
+	c = TutorialController._cue_for(&"shop", &"run", frailejon)
+	assert_false(c["tab"])
+	assert_eq(c["entries"], frailejon, "and at what it sells once the shop shows")
+	c = TutorialController._cue_for(&"close_journal", &"run", frailejon)
+	assert_false(c["tab"])
+	assert_true((c["entries"] as Array).is_empty(), "other steps point at nothing")
+
+
+func test_no_caption_floor_without_a_running_strip() -> void:
+	var ctl: TutorialController = autofree(TutorialController.new())
+	assert_eq(ctl.caption_floor(), 0.0)
+	assert_lt(TutorialController._PULSE_MAX, 0.5,
+			"the frailejón pulse is a hint toward white, not a white flash")
+
+
+func _fire_candidate(cell: Vector2i, cost: float, cheb: int, sd: float) -> Dictionary:
+	return {"cell": cell, "cost": cost, "cheb": cheb, "sd": sd}
+
+
+func test_the_fire_is_the_shortest_walk_off_screen() -> void:
+	# Two off-screen fires in the band: the nearer walk wins, even though the
+	# other sits deeper in the aura.
+	var picked := TutorialController._rank_fire_cells([
+		_fire_candidate(Vector2i(20, 0), 16.0, 16, 0.40),
+		_fire_candidate(Vector2i(8, 0), 8.0, 8, 0.12),
+	])
+	assert_eq(picked, Vector2i(8, 0))
+
+
+func test_the_fire_is_never_across_a_river() -> void:
+	# Six cells away as the crow flies, but the walk goes round by a bridge: 24
+	# steps. It is off screen and reachable, and still must lose to a longer
+	# straight walk on the player's own bank.
+	var picked := TutorialController._rank_fire_cells([
+		_fire_candidate(Vector2i(6, 0), 24.0, 6, 0.15),
+		_fire_candidate(Vector2i(0, 11), 11.0, 11, 0.30),
+	])
+	assert_eq(picked, Vector2i(0, 11))
+	assert_eq(TutorialController._rank_fire_cells([
+		_fire_candidate(Vector2i(6, 0), 24.0, 6, 0.15),
+	]), Pathfinder.NO_CELL, "a detour alone is no fire at all")
+
+
+func test_an_empty_band_falls_back_to_the_nearest_walk_not_the_farthest() -> void:
+	var picked := TutorialController._rank_fire_cells([
+		_fire_candidate(Vector2i(5, 0), 5.0, 5, -0.2),
+		_fire_candidate(Vector2i(14, 0), 14.0, 14, -0.05),
+	])
+	assert_eq(picked, Vector2i(5, 0))
+	assert_eq(TutorialController._rank_fire_cells([]), Pathfinder.NO_CELL)
 
 
 func test_the_scripted_fire_outlasts_the_walk_and_does_not_spread() -> void:
@@ -266,12 +437,20 @@ func test_each_verb_is_blocked_until_the_step_that_teaches_it() -> void:
 		&"welcome": [],
 		&"charge": [],
 		&"move": [TutorialGate.Action.MOVE],
-		&"journal": [TutorialGate.Action.MOVE, TutorialGate.Action.JOURNAL],
-		&"shop": [TutorialGate.Action.MOVE, TutorialGate.Action.JOURNAL,
-				TutorialGate.Action.SHOP],
-		&"close_journal": [TutorialGate.Action.MOVE, TutorialGate.Action.JOURNAL,
-				TutorialGate.Action.SHOP],
+		&"discover": [TutorialGate.Action.MOVE, TutorialGate.Action.INSPECT],
+		&"journal": [TutorialGate.Action.MOVE, TutorialGate.Action.INSPECT,
+				TutorialGate.Action.JOURNAL],
+		&"bitacora": [TutorialGate.Action.MOVE, TutorialGate.Action.INSPECT,
+				TutorialGate.Action.JOURNAL],
+		&"shop": [TutorialGate.Action.MOVE, TutorialGate.Action.INSPECT,
+				TutorialGate.Action.JOURNAL, TutorialGate.Action.SHOP],
+		&"close_journal": [TutorialGate.Action.MOVE, TutorialGate.Action.INSPECT,
+				TutorialGate.Action.JOURNAL, TutorialGate.Action.SHOP],
 		&"build": TutorialGate.Action.values(),
+		&"discover_more": TutorialGate.Action.values(),
+		&"shop_ladder": TutorialGate.Action.values(),
+		&"close_journal_ladder": TutorialGate.Action.values(),
+		&"build_ladder": TutorialGate.Action.values(),
 		&"build_endpoint": TutorialGate.Action.values(),
 		# The fire arc teaches an action the gate has no bit for: dousing goes
 		# through the tile action menu, which BUILD already opened two steps
@@ -319,6 +498,7 @@ func test_every_taught_verb_is_actually_gated_somewhere() -> void:
 		TutorialGate.Action.JOURNAL: "res://scripts/ui/field_journal.gd",
 		TutorialGate.Action.SHOP: "res://scripts/ui/journal_shop_input.gd",
 		TutorialGate.Action.BUILD: "res://scripts/systems/tile_interaction_controller.gd",
+		TutorialGate.Action.INSPECT: "res://scripts/systems/tile_interaction_controller.gd",
 	}
 	for step: Dictionary in TutorialController._STEPS:
 		if not step.has("grants"):
@@ -446,7 +626,13 @@ func test_only_the_click_steps_carry_a_mouse_glyph() -> void:
 	# "press space" teaches the wrong input.
 	var expected: Dictionary = {
 		&"move": &"left",
+		# The magnifier lives in the tile menu, so both finds are right clicks;
+		# the bitácora tab is a left click on the book.
+		&"discover": &"right",
+		&"bitacora": &"left",
 		&"build": &"right",
+		&"discover_more": &"right",
+		&"build_ladder": &"right",
 		&"build_endpoint": &"left",
 		# The fire arc is the FTUE's second left-then-right pair: walk to it,
 		# then open the ring on it.

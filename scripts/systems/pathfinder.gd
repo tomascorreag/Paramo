@@ -495,6 +495,41 @@ func compute_reachable_set(from: Vector2i) -> Dictionary[Vector2i, bool]:
 	return reachable
 
 
+## Walk cost from `from` to every cell reachable within `max_cost`, over the
+## same resolved edges (and costs) find_path uses. Reachability says a cell CAN
+## be walked to; this says how far the walk is — a cell just across a river is
+## reachable, and a whole detour away. Bounded, so a small `max_cost` never
+## expands the rest of the map.
+func walk_costs_from(from: Vector2i, max_cost: float) -> Dictionary[Vector2i, float]:
+	var dist: Dictionary[Vector2i, float] = {}
+	if _grid == null or not _grid.is_walkable(from):
+		return dist
+	_validate_edge_cache()
+	dist[from] = 0.0
+	var open: Array = []
+	var counter: int = 0
+	_heap_push(open, [0.0, counter, from])
+	while not open.is_empty():
+		var cur: Array = _heap_pop(open)
+		var cell: Vector2i = cur[2]
+		var g: float = cur[0]
+		# Stale entry: the cell was settled at a lower cost after this was pushed.
+		if g > dist[cell]:
+			continue
+		var edges: Array = _edges_for(cell)
+		var e: int = 0
+		while e < edges.size():
+			var nb: Vector2i = edges[e]
+			var ng: float = g + float(edges[e + 1])
+			e += 2
+			if ng > max_cost or (dist.has(nb) and ng >= dist[nb]):
+				continue
+			dist[nb] = ng
+			counter += 1
+			_heap_push(open, [ng, counter, nb])
+	return dist
+
+
 ## Cached wrapper over compute_reachable_set. Recomputes only when `anchor`
 ## differs from the last query or the graph changed shape (graph_changed clears
 ## the anchor). Returns the shared cache dict — callers must treat it as

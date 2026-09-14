@@ -18,6 +18,8 @@ shader_type canvas_item;
 //      materials read the same value so diagnostics toggle in lockstep.
 
 #include "res://assets/shaders/noise_common.gdshaderinc"
+// Placement / discovery flash (defaults off: reveal 1, flash 0 = inert).
+#include "res://assets/shaders/flash_common.gdshaderinc"
 
 // The world clock, in seconds — replaces the TIME built-in so the sway freezes
 // with the rest of the world under get_tree().paused. Written by the WorldClock
@@ -91,6 +93,9 @@ void fragment() {
 	} else if (shader_debug == 2) {
 		COLOR = vec4(vec3(opaque_below / float(WIND_PROBE_PX)), texture(TEXTURE, UV).a) * v_modulate;
 	} else {
-		COLOR = texture(TEXTURE, UV + offset) * v_modulate;
+		if (!_revealed(world_pos, UV, TEXTURE_PIXEL_SIZE)) {
+			discard;
+		}
+		COLOR = _flash(texture(TEXTURE, UV + offset)) * v_modulate;
 	}
 }

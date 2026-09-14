@@ -4,38 +4,53 @@
 [ext_resource type="StyleBox" uid="uid://cki27kvgffc87" path="res://resources/ui/styleboxes/frame_border.tres" id="2_frame"]
 [ext_resource type="StyleBox" uid="uid://7h7iou0et3mf" path="res://resources/ui/styleboxes/solid_accent_soft.tres" id="3_8uki6"]
 [ext_resource type="StyleBox" uid="uid://c0jnuq8a11a8i" path="res://resources/ui/styleboxes/solid_surface.tres" id="3_surface"]
+[ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_accent.tres" id="4_accent"]
+[ext_resource type="Texture2D" path="res://assets/sprites/UX/icons/chevron_left.tres" id="5_chevron"]
 
 [sub_resource type="StyleBoxEmpty" id="SB_empty"]
 
-[node name="PauseMenu" type="CanvasLayer" unique_id=645504101]
+[node name="PauseMenu" type="CanvasLayer"]
 layer = 220
 script = ExtResource("1_pm")
 
-[node name="Dim" type="ColorRect" parent="." unique_id=766800268]
+[node name="Dim" type="ColorRect" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 color = Color(0.078431, 0.137255, 0.227451, 0.6)
 
-[node name="Center" type="CenterContainer" parent="." unique_id=430150094]
+[node name="Center" type="CenterContainer" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 
-[node name="Panel" type="Panel" parent="Center" unique_id=1162574523]
+[node name="Panel" type="Panel" parent="Center"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(184, 150)
+custom_minimum_size = Vector2(184, 164)
 layout_mode = 2
 
-[node name="Frame" type="Panel" parent="Center/Panel" unique_id=1973741509]
+[node name="Frame" type="Panel" parent="Center/Panel"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 theme_override_styles/panel = ExtResource("2_frame")
 
-[node name="Margin" type="MarginContainer" parent="Center/Panel" unique_id=1359933053]
+[node name="BackBtn" type="Button" parent="Center/Panel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 20.0
+offset_bottom = 20.0
+focus_mode = 0
+tooltip_text = "UI_BACK"
+flat = true
+icon = ExtResource("5_chevron")
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -44,70 +59,70 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 10
 
-[node name="Stack" type="VBoxContainer" parent="Center/Panel/Margin" unique_id=2000380345]
+[node name="Stack" type="VBoxContainer" parent="Center/Panel/Margin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="Title" type="Label" parent="Center/Panel/Margin/Stack" unique_id=270835396]
+[node name="Title" type="Label" parent="Center/Panel/Margin/Stack"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 16
 text = "UI_PAUSED"
 horizontal_alignment = 1
 
-[node name="Main" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1368542683]
+[node name="Main" type="VBoxContainer" parent="Center/Panel/Margin/Stack"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="Settings" type="VBoxContainer" parent="Center/Panel/Margin/Stack/Main" unique_id=1406095421]
+[node name="Settings" type="VBoxContainer" parent="Center/Panel/Margin/Stack/Main"]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="Separator" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1484330112]
+[node name="Separator" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Settings"]
 layout_mode = 2
 theme_override_constants/separation = 6
 alignment = 1
 
-[node name="BarLeft" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1407428516]
+[node name="BarLeft" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator"]
 custom_minimum_size = Vector2(0, 3)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 theme_override_styles/panel = ExtResource("3_8uki6")
 
-[node name="SettingsHeader" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1251077074]
+[node name="SettingsHeader" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/Separator"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
 text = "UI_SETTINGS"
 horizontal_alignment = 1
 
-[node name="BarRight" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator" unique_id=1904957683]
+[node name="BarRight" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/Separator"]
 custom_minimum_size = Vector2(0, 3)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
 theme_override_styles/panel = ExtResource("3_8uki6")
 
-[node name="VolumeLabel" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1450622199]
+[node name="VolumeLabel" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
 text = "UI_VOLUME"
 horizontal_alignment = 1
 
-[node name="SliderFrame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=328256822]
+[node name="SliderFrame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings"]
 custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
 theme_override_styles/panel = ExtResource("3_surface")
 
-[node name="SliderFrameBorder" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame" unique_id=1859048661]
+[node name="SliderFrameBorder" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 theme_override_styles/panel = ExtResource("2_frame")
 
-[node name="VolumeSlider" type="HSlider" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame" unique_id=2146019563]
+[node name="VolumeSlider" type="HSlider" parent="Center/Panel/Margin/Stack/Main/Settings/SliderFrame"]
 unique_name_in_owner = true
 layout_mode = 0
 anchor_right = 1.0
@@ -121,79 +136,280 @@ max_value = 1.5
 step = 0.05
 value = 0.75
 
-[node name="FullscreenBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1120044517]
+[node name="FullscreenBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Settings"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
 focus_mode = 0
+
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="Row" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_right = -4.0
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="Label" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 1
+mouse_filter = 2
 text = "UI_FULLSCREEN"
+vertical_alignment = 1
 
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn" unique_id=1120044518]
+[node name="Check" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row"]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("3_surface")
+
+[node name="CheckFill" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row/Check"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("4_accent")
+
+[node name="CheckFrame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/FullscreenBtn/Row/Check"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 theme_override_styles/panel = ExtResource("2_frame")
 
-[node name="LanguageBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1120044519]
+[node name="LanguageBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Settings"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
 focus_mode = 0
-text = "español"
 
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn" unique_id=1120044520]
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 theme_override_styles/panel = ExtResource("2_frame")
 
-[node name="AboutBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Settings" unique_id=1120044521]
+[node name="Row" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_right = -3.0
+mouse_filter = 2
+theme_override_constants/separation = 2
+
+[node name="Label" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 1
+mouse_filter = 2
+text = "UI_LANGUAGE"
+vertical_alignment = 1
+
+[node name="Value" type="Label" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 1
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
+text = "english"
+vertical_alignment = 1
+
+[node name="Chevron" type="Control" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn/Row"]
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+
+[node name="Glyph" type="TextureRect" parent="Center/Panel/Margin/Stack/Main/Settings/LanguageBtn/Row/Chevron"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+pivot_offset = Vector2(8, 8)
+rotation = -1.5707964
+mouse_filter = 2
+texture = ExtResource("5_chevron")
+
+[node name="Info" type="VBoxContainer" parent="Center/Panel/Margin/Stack/Main"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="Separator" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Main/Info"]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="BarLeft" type="Panel" parent="Center/Panel/Margin/Stack/Main/Info/Separator"]
+custom_minimum_size = Vector2(0, 3)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_styles/panel = ExtResource("3_8uki6")
+
+[node name="InfoHeader" type="Label" parent="Center/Panel/Margin/Stack/Main/Info/Separator"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
+text = "UI_INFO"
+horizontal_alignment = 1
+
+[node name="BarRight" type="Panel" parent="Center/Panel/Margin/Stack/Main/Info/Separator"]
+custom_minimum_size = Vector2(0, 3)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_styles/panel = ExtResource("3_8uki6")
+
+[node name="AboutBtn" type="Button" parent="Center/Panel/Margin/Stack/Main/Info"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
 focus_mode = 0
 text = "UI_ABOUT"
 
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Settings/AboutBtn" unique_id=1120044522]
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/Main/Info/AboutBtn"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 theme_override_styles/panel = ExtResource("2_frame")
 
-[node name="Confirm" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1435831011]
+[node name="Confirm" type="VBoxContainer" parent="Center/Panel/Margin/Stack"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="ConfirmLabel" type="Label" parent="Center/Panel/Margin/Stack/Confirm" unique_id=857861158]
+[node name="ConfirmLabel" type="Label" parent="Center/Panel/Margin/Stack/Confirm"]
 custom_minimum_size = Vector2(160, 0)
 layout_mode = 2
 text = "UI_DISCARD_RUN_Q"
 horizontal_alignment = 1
 autowrap_mode = 2
 
-[node name="ConfirmRow" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Confirm" unique_id=1301750421]
+[node name="ConfirmRow" type="HBoxContainer" parent="Center/Panel/Margin/Stack/Confirm"]
 layout_mode = 2
 theme_override_constants/separation = 6
 alignment = 1
 
-[node name="YesBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow" unique_id=1536091334]
+[node name="YesBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 24)
 layout_mode = 2
 text = "UI_YES"
 
-[node name="CancelBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow" unique_id=1645592046]
+[node name="CancelBtn" type="Button" parent="Center/Panel/Margin/Stack/Confirm/ConfirmRow"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(72, 24)
 layout_mode = 2
 text = "UI_CANCEL"
 
-[node name="ResumeBtn" type="Button" parent="Center/Panel" unique_id=82048195]
+[node name="About" type="VBoxContainer" parent="Center/Panel/Margin/Stack"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Author" type="Label" parent="Center/Panel/Margin/Stack/About"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
+text = "by Tomás Correa · 2026"
+horizontal_alignment = 1
+
+[node name="Url" type="Label" parent="Center/Panel/Margin/Stack/About"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
+text = "github.com/tomascorreag/paramo"
+horizontal_alignment = 1
+
+[node name="SourceBtn" type="Button" parent="Center/Panel/Margin/Stack/About"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+focus_mode = 0
+text = "UI_ABOUT_SOURCE"
+
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/SourceBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="LicenceBtn" type="Button" parent="Center/Panel/Margin/Stack/About"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+focus_mode = 0
+text = "UI_ABOUT_LICENCE"
+
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/LicenceBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="NoticesBtn" type="Button" parent="Center/Panel/Margin/Stack/About"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+focus_mode = 0
+text = "UI_ABOUT_NOTICES"
+
+[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/NoticesBtn"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="LangPopup" type="Panel" parent="Center/Panel"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+theme_override_styles/panel = ExtResource("3_surface")
+
+[node name="Options" type="VBoxContainer" parent="Center/Panel/LangPopup"]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 2.0
+offset_top = 2.0
+offset_right = -2.0
+offset_bottom = -2.0
+theme_override_constants/separation = 1
+
+[node name="Frame" type="Panel" parent="Center/Panel/LangPopup"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_frame")
+
+[node name="ResumeBtn" type="Button" parent="Center/Panel"]
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 7
@@ -211,83 +427,7 @@ pivot_offset_ratio = Vector2(0.5, 0.5)
 focus_mode = 0
 text = "UI_RESUME"
 
-[node name="Frame" type="Panel" parent="Center/Panel/ResumeBtn" unique_id=990110001]
-layout_mode = 0
-anchor_right = 1.0
-anchor_bottom = 1.0
-mouse_filter = 2
-theme_override_styles/panel = ExtResource("2_frame")
-
-[node name="About" type="VBoxContainer" parent="Center/Panel/Margin/Stack" unique_id=1671204483]
-unique_name_in_owner = true
-visible = false
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Author" type="Label" parent="Center/Panel/Margin/Stack/About" unique_id=1671204484]
-custom_minimum_size = Vector2(160, 0)
-layout_mode = 2
-theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
-text = "por tomás correa · 2026"
-horizontal_alignment = 1
-
-[node name="Url" type="Label" parent="Center/Panel/Margin/Stack/About" unique_id=1671204491]
-custom_minimum_size = Vector2(160, 0)
-layout_mode = 2
-theme_override_colors/font_color = Color(0.529412, 0.521569, 0.486275, 1)
-text = "github.com/tomascorreag/paramo"
-horizontal_alignment = 1
-
-[node name="SourceBtn" type="Button" parent="Center/Panel/Margin/Stack/About" unique_id=1671204485]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 16)
-layout_mode = 2
-focus_mode = 0
-text = "UI_ABOUT_SOURCE"
-
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/SourceBtn" unique_id=1671204486]
-layout_mode = 0
-anchor_right = 1.0
-anchor_bottom = 1.0
-mouse_filter = 2
-theme_override_styles/panel = ExtResource("2_frame")
-
-[node name="LicenceBtn" type="Button" parent="Center/Panel/Margin/Stack/About" unique_id=1671204487]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 16)
-layout_mode = 2
-focus_mode = 0
-text = "UI_ABOUT_LICENCE"
-
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/LicenceBtn" unique_id=1671204488]
-layout_mode = 0
-anchor_right = 1.0
-anchor_bottom = 1.0
-mouse_filter = 2
-theme_override_styles/panel = ExtResource("2_frame")
-
-[node name="NoticesBtn" type="Button" parent="Center/Panel/Margin/Stack/About" unique_id=1671204489]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 16)
-layout_mode = 2
-focus_mode = 0
-text = "UI_ABOUT_NOTICES"
-
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/NoticesBtn" unique_id=1671204490]
-layout_mode = 0
-anchor_right = 1.0
-anchor_bottom = 1.0
-mouse_filter = 2
-theme_override_styles/panel = ExtResource("2_frame")
-
-[node name="BackBtn" type="Button" parent="Center/Panel/Margin/Stack/About" unique_id=1671204492]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 16)
-layout_mode = 2
-focus_mode = 0
-text = "UI_BACK"
-
-[node name="Frame" type="Panel" parent="Center/Panel/Margin/Stack/About/BackBtn" unique_id=1671204493]
+[node name="Frame" type="Panel" parent="Center/Panel/ResumeBtn"]
 layout_mode = 0
 anchor_right = 1.0
 anchor_bottom = 1.0

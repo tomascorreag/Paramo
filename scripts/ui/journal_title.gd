@@ -2,7 +2,9 @@ class_name JournalTitle
 extends RefCounted
 
 ## The heading at the top of a journal section — centred on the page and ruled
-## under, in the written face (Eggmode).
+## under, in the written face (FantasticBoogaloo at 16 since 2026-09-11; Eggmode
+## before that — the arithmetic below holds for both: a 17-row line box in an
+## 18-row block).
 ##
 ## Three sections now want the identical heading (RunCalendar's "season log",
 ## JournalKnownSet's "known buildings" / "known flora", JournalResources'
@@ -12,16 +14,17 @@ extends RefCounted
 ##
 ##   1. THE TITLE IS DRAWN, NEVER A LABEL. A page sits inside a SubViewport that
 ##      page_warp.gdshader bends, and the warp quantises to whole `block` bands.
-##      Eggmode's line height is 16 and the journal's block is 18; 18 % 16 != 0, so
-##      a Label carrying that face fails test_journal_pages.gd's "row_block_px must
+##      The title face's line height (17 at 16) does not divide the journal's
+##      18-row block, so a Label carrying that face fails test_journal_pages.gd's "row_block_px must
 ##      be a whole number of text lines". Drawing sidesteps the Label phase rule
 ##      entirely — and re-translates for free, see 3.
 ##   2. NO INK MAY TOUCH A BLOCK EDGE. The warp translates each band rigidly and the
 ##      seam between two bands either duplicates or drops the row next to it.
-##      Eggmode at 16 inks 17 rows inside an 18-row block — exactly one row of
-##      slack — so the title is pushed down by `INK_INSET_PX`, spending that slack
+##      The title face at 16 is a 17-row line box inside an 18-row block —
+##      exactly one row of slack — so the title is pushed down by `INK_INSET_PX`, spending that slack
 ##      at the TOP where the caps are and leaving the bottom row to descenders.
-##   3. tr() IS CALLED AT DRAW TIME. Control queue_redraw()s itself on
+##   3. tr() IS CALLED AT DRAW TIME, and so is `cased()`, the locale's title
+##      casing (see it below). Control queue_redraw()s itself on
 ##      NOTIFICATION_TRANSLATION_CHANGED, so resolving the key inside _draw is the
 ##      whole locale story. A cached translation would freeze the heading in
 ##      whichever language it was first resolved in and need its own handler.
@@ -55,6 +58,26 @@ enum Underline {
 
 ## Rows the title's ink is pushed down inside its own block. See point 2 above.
 const INK_INSET_PX: int = 1
+
+
+## A journal heading as PRINTED: the CSV keeps every piece of chrome lowercase
+## (the project convention, guarded by test_localization.gd), and the book's
+## headings are the one place that reads as a title rather than as a button —
+## so the casing is put on at draw time, by the locale's own convention:
+## Spanish sentence case ("Obras conocidas"), English title case ("Known
+## Buildings"). Locale-keyed on the language, so es_CO and es both get the
+## Spanish rule; anything else gets the English one. Measure the CASED text:
+## a capital is wider than its lowercase.
+static func cased(text: String) -> String:
+	if text.is_empty():
+		return text
+	if TranslationServer.get_locale().begins_with("es"):
+		return text.substr(0, 1).to_upper() + text.substr(1)
+	var words := text.split(" ")
+	for i: int in words.size():
+		if not words[i].is_empty():
+			words[i] = words[i].substr(0, 1).to_upper() + words[i].substr(1)
+	return " ".join(words)
 
 ## Default rows into the block BELOW the title that the underline sits at. Far
 ## enough from the seam at the block boundary that a duplicated or dropped row
@@ -119,7 +142,7 @@ static func draw(ci: CanvasItem, font: Font, size: int, key: String, width: int,
 		wobble_px: int = 1, segment_px: int = 14) -> void:
 	if font == null or key.is_empty():
 		return
-	var text: String = ci.tr(key)
+	var text: String = cased(ci.tr(key))
 	ci.draw_string(font, Vector2(0, font.get_ascent(size) + INK_INSET_PX), text,
 		HORIZONTAL_ALIGNMENT_CENTER, width, size, color)
 	if underline_y < 0:

@@ -23,7 +23,7 @@ extends Control
 ##
 ## THE TITLE IS DRAWN, NOT A LABEL, and that is not a style preference. This sits
 ## inside a page's SubViewport, so page_warp.gdshader translates each `block_px`
-## band of it rigidly. The journal's title face is Eggmode at 16, whose line height
+## band of it rigidly. The journal's title face is FantasticBoogaloo at 16 (Eggmode until 2026-09-11), whose line height
 ## is 16 — and 18 % 16 != 0, so a Label carrying it fails
 ## tests/test_journal_pages.gd's "row_block_px must be a whole number of text
 ## lines". RunCalendar hit the same wall and solved it the same way. If you ever
@@ -46,17 +46,30 @@ extends Control
 ## rather than a shop UI. What this node still owns is the STATE behind the price
 ## — locked, cost, affordable — because the swatch's own fade is driven off it.
 ##
-## Contents are still authored in the scene: nothing tracks DISCOVERY — the
-## shop tracks PURCHASE (UnlockState). `set_known` remains the discovery hook.
+## DISCOVERY, when `require_discovery` is on. Contents are authored in the scene
+## as before, but a section with that flag asks the run's FloraCodex which of them
+## the player has actually identified in the world and draws only those — so the
+## flora page fills in as the mountain is walked. Everything index-based below
+## (cell sizes, hit rects, ink runs) is in DRAWN order, which is what makes
+## hiding an entry safe: the row closes up and the arithmetic never sees the
+## missing one. No codex in the tree (preview tools, layout tests, the editor)
+## means no discovery system and every authored entry is drawn, the same
+## null-means-unrestricted rule the shop half follows for UnlockState.
 ##
 ## @tool so both sections render in the editor. Unlike RunCalendar's preview mode
 ## there is nothing to fake here: the tileset scan is pure resource work and needs
 ## no autoloads, so the editor shows the real swatches.
 
+## Which spread of the book this section belongs to. FieldJournal.show_spread
+## flips every section's visibility by this tag; "run" is the spread the book
+## opens on.
+@export var spread: StringName = &"run"
+
 ## Section heading — a TRANSLATION KEY, resolved in _draw. Lowercase in every
 ## locale, per the project's UI copy convention.
 ##
-## The Spanish here must be ACCENT-FREE. This heading is drawn in Eggmode, which
+## The Spanish here was chosen ACCENT-FREE for Eggmode, the title face until
+## 2026-09-11 (FantasticBoogaloo, the face now, has the full set), which
 ## ships 107 glyphs and has no á é í ó ú ü ñ ¿ … — a heading with one would render
 ## tofu. tests/test_journal_pages.gd asserts the coverage; see the CSV for the
 ## accent-free wording actually used.
@@ -87,6 +100,10 @@ extends Control
 @export var entry_ids: PackedStringArray = []:
 	set(value):
 		entry_ids = value
+		# _invalidate, not just queue_redraw: the ids are what the discovery
+		# filter matches on, so they decide WHICH entries exist, not only how
+		# they look.
+		_invalidate()
 		queue_redraw()
 
 ## The TileSet `tile_kinds` are cut out of. The journal's is base_tileset.tres,
@@ -140,6 +157,30 @@ extends Control
 ## The page's warp quantisation. The title row rounds up to a multiple of this, so
 ## changing the title face or size cannot knock the swatch row off phase. Keep it
 ## equal to the page's `row_block_px`; tests/test_journal_pages.gd guards that.
+## Stand every swatch's INK on the cell's bottom row instead of centring it.
+## For a set whose entries differ a lot in height (the flora: a 24-row
+## frailejón beside a 10-row shrub) centring puts each ink top at a different
+## row, and there is then no header row at which they all clear the warp
+## seams — measured: hypericum (15 rows) and arcytophyllum (10 rows) straddled
+## a block at every gap from -36 to 36. With a shared baseline every run ends
+## on the same row, so one row top serves all heights (and plants standing on
+## one ground line is the right picture anyway). Off for the buildings set,
+## whose centred layout was tuned by hand and passes as it is.
+@export var align_ink_bottom: bool = false:
+	set(value):
+		align_ink_bottom = value
+		_rebuild()
+
+## Draw only the entries the run's FloraCodex has recorded. Off for the buildings
+## section, which is a list of what the player CAN build and is complete from the
+## first page turn; on for the flora, which is a list of what they have FOUND.
+##
+## Inert without a FloraCodex in the tree — see the header.
+@export var require_discovery: bool = false:
+	set(value):
+		require_discovery = value
+		_rebuild()
+
 @export var block_px: int = 18:
 	set(value):
 		block_px = value
@@ -192,13 +233,14 @@ extends Control
 
 @export_group("Type")
 ## Title face. Leave null to fall back to the theme's Label font. The journal sets
-## Eggmode — a section heading is something you WROTE at the top of the list.
+## the title face — a section heading is something you WROTE at the top of the list.
 @export var header_font: Font = null:
 	set(value):
 		header_font = value
 		_rebuild()
 
-## Must be a multiple of the face's native em (16 for Eggmode) or the rasteriser
+## Must be a multiple of the face's native em (16 for Eggmode; FantasticBoogaloo
+## is an outline face, legal at any size) or the rasteriser
 ## duplicates roughly one pixel row per em at a different place in every glyph and
 ## the line visibly staggers. See tests/test_journal_pages.gd.
 @export var header_font_size: int = 16:
@@ -249,6 +291,8 @@ const _RULE_WOBBLE_PX: int = 1
 ## breaks the grid — the same reason _rebuild floors every swatch position. One
 ## whole texel is the smallest honest "it moved" this page can express.
 const HOVER_LIFT_PX: int = 1
+## Amplitude of the FTUE's bob on a cued entry, in texels (see set_wiggle).
+const WIGGLE_PX: int = 1
 
 ## A hovered LOCKED swatch inks up toward owned instead of only moving. Reads as
 ## the thing surfacing when you point at it, and costs nothing extra: the `dim`
@@ -277,6 +321,21 @@ static var _indices: Dictionary[String, TileKindIndex] = {}
 ## Fade applied to a locked entry's swatch, via the ink shader's `dim` uniform.
 const LOCKED_ALPHA: float = 0.4
 
+# The run's FloraCodex, bound in _ready when `require_discovery` is on. Null =
+# no discovery system = draw everything.
+var _codex: Node = null
+# Which entry ids the codex has recorded, or {} while nothing is bound. Guarded
+# by `_codex`, not by emptiness: an empty codex is a legitimate state (the run
+# has just started and the player has identified nothing), and it must hide every
+# entry rather than fall back to showing them all.
+var _known: Dictionary = {}
+
+# Draw-order entries, rebuilt lazily. Cached because `entry_at` walks every
+# entry_rect on every mouse-motion event and each rebuild cuts fresh AtlasTextures
+# out of the tileset.
+var _entries_cache: Array[Dictionary] = []
+var _entries_dirty: bool = true
+
 var _swatches: Array[TextureRect] = []
 # Where each swatch RESTS, before the hover lift and the denial shake are added.
 # Kept separately so those two offsets can be applied and removed without
@@ -287,6 +346,8 @@ var _rest_positions: Array[Vector2] = []
 var _states: Dictionary = {}
 # Which swatch the pointer is over, -1 for none. Driven by JournalShopInput.
 var _hovered: int = -1
+var _wiggle_ids: Array[StringName] = []
+var _wiggle_px: int = 0
 # The swatch currently recoiling from an unaffordable click, and how far through
 # that recoil it is (1 -> 0).
 var _denied: int = -1
@@ -298,6 +359,37 @@ func _ready() -> void:
 	# Ink on paper takes no input, and the page's SubViewport sets
 	# gui_disable_input anyway — IGNORE keeps this out of the picking pass.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if require_discovery and not Engine.is_editor_hint():
+		# Deferred: FloraCodex joins its group in its own _ready, and this node
+		# sits inside the journal's SubViewport several scenes down — order
+		# unknown, exactly as JournalShopInput finds UnlockState.
+		_bind_codex.call_deferred()
+	_rebuild()
+
+
+# Binds the run's discovery record, if the scene has one. Without it the section
+# keeps drawing every authored entry, which is what the preview tools and the
+# layout tests render.
+func _bind_codex() -> void:
+	if not is_inside_tree():
+		return
+	var codex: Node = get_tree().get_first_node_in_group(FloraCodex.GROUP)
+	if codex == null:
+		return
+	_codex = codex
+	codex.connect(&"discovered", _on_discovered)
+	_refresh_known()
+
+
+func _on_discovered(_species: StringName) -> void:
+	_refresh_known()
+
+
+func _refresh_known() -> void:
+	_known = {}
+	if _codex != null and is_instance_valid(_codex):
+		for id: String in _codex.call(&"known_ids"):
+			_known[StringName(id)] = true
 	_rebuild()
 
 
@@ -356,11 +448,19 @@ func content_ink_runs() -> Array[Vector2i]:
 ## One swatch's (offset from the row's top, inked height).
 func swatch_ink_run(index: int, tex: Texture2D) -> Vector2i:
 	var cell := cell_size_for(index)
-	var ink := _ink_rect(tex)
+	var ink := ink_rect(tex)
 	# The row's top is a whole texel, so it factors out of the floor _rebuild does.
-	var off: int = int(floorf((float(cell.y) - ink.size.y) * 0.5 - ink.position.y)) \
-			+ int(ink.position.y)
+	var off: int = int(floorf(_ink_top_in_cell(cell, ink)))
 	return Vector2i(off, int(ink.size.y))
+
+
+# Where the INK's top row sits below the row top: bottom-aligned or centred.
+# Shared by _rebuild (which places the texture) and swatch_ink_run (which
+# tells the snap what will be inked), so the two cannot disagree.
+func _ink_top_in_cell(cell: Vector2i, ink: Rect2) -> float:
+	if align_ink_bottom:
+		return float(cell.y) - ink.size.y
+	return (float(cell.y) - ink.size.y) * 0.5
 
 
 ## Every run of ink this section draws, in its own local space, labelled. The
@@ -412,18 +512,69 @@ func active_header_font() -> Font:
 ## than silently rendering nothing.
 func swatch_textures() -> Array[Texture2D]:
 	var out: Array[Texture2D] = []
-	for kind: String in tile_kinds:
-		var tex := _tile_texture(StringName(kind))
-		if tex != null:
-			out.append(tex)
-	for tex: Texture2D in textures:
-		if tex != null:
-			out.append(tex)
+	for e: Dictionary in entries():
+		out.append(e["texture"])
 	return out
 
 
-## Replaces the authored contents at runtime. The hook a discovery system would
-## call; until one exists nothing invokes it.
+## What this section actually draws, in draw order: one
+## {texture, id, cell} per swatch. Everything index-based on this node counts
+## through THIS list, so a hidden entry costs no cell, no hit rect and no ink run.
+##
+## Authored order is tile_kinds then textures; the cell size and the id of an
+## entry are taken at its AUTHORED position, so hiding one does not slide the
+## others onto each other's sizes.
+func entries() -> Array[Dictionary]:
+	if not _entries_dirty:
+		return _entries_cache
+	var out: Array[Dictionary] = []
+	var authored: int = -1
+	for kind: String in tile_kinds:
+		authored += 1
+		var tex := _tile_texture(StringName(kind))
+		if tex != null and _is_shown(authored):
+			out.append(_entry(authored, tex))
+	for tex: Texture2D in textures:
+		authored += 1
+		if tex != null and _is_shown(authored):
+			out.append(_entry(authored, tex))
+	_entries_cache = out
+	_entries_dirty = false
+	return _entries_cache
+
+
+func _entry(authored: int, tex: Texture2D) -> Dictionary:
+	var cell: Vector2i = cell_size
+	if authored < cell_sizes.size():
+		var c: Vector2i = cell_sizes[authored]
+		if c.x > 0 and c.y > 0:
+			cell = c
+	var id: StringName = &""
+	if authored < entry_ids.size():
+		id = StringName(entry_ids[authored])
+	return {"texture": tex, "id": id, "cell": cell}
+
+
+# Whether the authored entry at this position is drawn. An entry with NO id is
+# hidden in a discovery-gated section rather than shown: it names nothing the
+# codex could ever record, so showing it would be an entry that never resolves.
+func _is_shown(authored: int) -> bool:
+	if _codex == null or not is_instance_valid(_codex):
+		return true
+	var id: StringName = &""
+	if authored < entry_ids.size():
+		id = StringName(entry_ids[authored])
+	return id != &"" and _known.has(id)
+
+
+func _invalidate() -> void:
+	_entries_dirty = true
+
+
+## Replaces the authored contents at runtime. Kept for a caller that wants to
+## swap the whole list; DISCOVERY does not go through here — it filters the
+## authored contents instead (see `require_discovery`), so the section keeps the
+## per-entry cell sizes and ids the scene authored.
 func set_known(kinds: PackedStringArray, texs: Array[Texture2D]) -> void:
 	tile_kinds = kinds
 	textures = texs
@@ -482,7 +633,7 @@ func entry_ink_rect(index: int) -> Rect2:
 			or not is_instance_valid(_swatches[index]):
 		return entry_rect(index)
 	var r: TextureRect = _swatches[index]
-	var ink := _ink_rect(r.texture)
+	var ink := ink_rect(r.texture)
 	return Rect2(r.position + ink.position, ink.size)
 
 
@@ -497,13 +648,13 @@ func entry_at(point: Vector2) -> int:
 	return -1
 
 
-## The cell allotted to one entry: its `cell_sizes` override if it has a usable
-## one, else the shared `cell_size`.
+## The cell allotted to one DRAWN entry: its `cell_sizes` override if it has a
+## usable one, else the shared `cell_size`.
 func cell_size_for(index: int) -> Vector2i:
-	if index < 0 or index >= cell_sizes.size():
+	var list := entries()
+	if index < 0 or index >= list.size():
 		return cell_size
-	var c: Vector2i = cell_sizes[index]
-	return c if c.x > 0 and c.y > 0 else cell_size
+	return list[index]["cell"]
 
 
 # Left edge of one entry's cell. Cells abut, so this is the sum of every cell
@@ -516,9 +667,10 @@ func _cell_left(index: int) -> int:
 
 
 func entry_id_at(index: int) -> StringName:
-	if index < 0 or index >= entry_ids.size():
+	var list := entries()
+	if index < 0 or index >= list.size():
 		return &""
-	return StringName(entry_ids[index])
+	return list[index]["id"]
 
 
 func _state_for(index: int) -> Dictionary:
@@ -526,6 +678,22 @@ func _state_for(index: int) -> Dictionary:
 
 
 # --- Pointer feedback (JournalShopInput drives these too) --------------------
+
+## The FTUE's "buy this": the entries named bob vertically by the offset given,
+## set per frame by FieldJournal from its cue clock. ONE texel of travel (see
+## WIGGLE_PX), the same budget the hover lift already spends, so the ink never
+## crosses a warp block it did not already cross.
+func set_wiggle(ids: Array[StringName], px: int) -> void:
+	if px == _wiggle_px and ids == _wiggle_ids:
+		return
+	_wiggle_ids = ids.duplicate()
+	_wiggle_px = px
+	_apply_states()
+
+
+func _wiggle_offset(index: int) -> int:
+	return _wiggle_px if _wiggle_ids.has(entry_id_at(index)) else 0
+
 
 ## Which swatch the pointer is over, or -1. Idempotent, so the input node can call
 ## it every mouse-motion event without churning.
@@ -611,7 +779,7 @@ func _apply_states() -> void:
 				(HOVER_ALPHA if hovered else LOCKED_ALPHA) if locked else 1.0)
 		if i < _rest_positions.size():
 			r.position = _rest_positions[i] + Vector2(
-				_deny_offset(i), -HOVER_LIFT_PX if hovered else 0)
+				_deny_offset(i), (-HOVER_LIFT_PX if hovered else 0) + _wiggle_offset(i))
 	queue_redraw()
 
 
@@ -633,7 +801,8 @@ func _tile_texture(kind: StringName) -> AtlasTexture:
 	return tex
 
 
-# Opaque bounds of a swatch texture, in its own texture space. Falls back to the
+## Opaque bounds of a swatch texture, in its own texture space. Public: the
+## bitacora's plate stands its growth stages by the same measure. Falls back to the
 # whole texture when nothing can be read (a texture whose image isn't available)
 # so layout degrades to the old texture-centred behaviour rather than collapsing.
 #
@@ -642,7 +811,7 @@ func _tile_texture(kind: StringName) -> AtlasTexture:
 static var _ink_rects: Dictionary[String, Rect2] = {}
 
 
-static func _ink_rect(tex: Texture2D) -> Rect2:
+static func ink_rect(tex: Texture2D) -> Rect2:
 	var full := Rect2(Vector2.ZERO, tex.get_size())
 	# Keyed by the REGION, not by get_rid(): an AtlasTexture reports the RID of
 	# the atlas it cuts from, so every swatch sharing a spritesheet returns the
@@ -678,6 +847,10 @@ static func _index_for(ts: TileSet, src_id: int) -> TileKindIndex:
 # that item draws, so hanging it on this node would push the title text through the
 # ramp too.
 func _rebuild() -> void:
+	# Before the tree check: a setter poked while the node is still loading must
+	# still drop the cached entries, or the first in-tree rebuild draws the list
+	# from before the edit.
+	_invalidate()
 	# Null-tolerant: every setter above fires during scene load, before the node is
 	# in the tree and before `tileset` is assigned.
 	if not is_inside_tree():
@@ -719,10 +892,10 @@ func _rebuild() -> void:
 		# enough to touch. Measured: at 18 and 26 texel cells the ladder and fence
 		# ink overlapped by 4 texels while both cells stayed clear of each other.
 		var art := tex.get_size()
-		var ink := _ink_rect(tex)
+		var ink := ink_rect(tex)
 		r.position = Vector2(
 			floorf(x + (float(cell.x) - ink.size.x) * 0.5 - ink.position.x),
-			floorf(top + (float(cell.y) - ink.size.y) * 0.5 - ink.position.y))
+			floorf(top + _ink_top_in_cell(cell, ink) - ink.position.y))
 		_rest_positions.append(r.position)
 		add_child(r)
 		# Deliberately NOT set_owner: under @tool an owned child would be written

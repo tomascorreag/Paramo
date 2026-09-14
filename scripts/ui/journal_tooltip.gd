@@ -10,9 +10,10 @@ extends Control
 ##
 ## The BUY line is only drawn when the entry is actually for sale; an entry that
 ## is owned, or priced past what the player holds, still prints its price (faded)
-## but gets no mouse to promise a click with. The READ line is always there — the
-## info verb is about the thing, not the transaction — and nothing is wired to
-## right click yet.
+## but gets no mouse to promise a click with. The READ line is there whenever the
+## entry has a page to turn to — a species the codex has recorded — and right
+## click turns the book to it (JournalShopInput.handle_read). A building has no
+## page and gets no read line.
 ##
 ## THE PRICE LIVES HERE, not in the page. It used to be printed inside the
 ## entry's cell, through the ink shader, which put it under three constraints
@@ -107,6 +108,9 @@ const DENY_DURATION: float = 0.18
 var buyable: bool = false
 ## The price on the buy line, or 0 for an entry that has nothing to charge.
 var price: int = 0
+## Whether the read line is drawn: the entry has a bitacora page. Read by the
+## tests; set through `show_for`.
+var readable: bool = true
 
 var _ink: Color = Color.WHITE
 var _affordable: bool = true
@@ -140,18 +144,26 @@ func _init() -> void:
 ## what the player holds, must not be offered a buy verb that would be refused.
 ## `cost` of 0 drops the price with it — an owned entry is not free, it is done.
 func show_for(art: Rect2, bounds: Rect2, ink: Color, for_sale: bool,
-		cost: int = 0, affordable: bool = true) -> void:
+		cost: int = 0, affordable: bool = true, can_read: bool = true) -> void:
 	_ink = ink
 	buyable = for_sale
 	price = maxi(0, cost)
 	_affordable = affordable
+	readable = can_read
 	_lay_out(art, bounds)
 	visible = true
 	queue_redraw()
 
 
+## Take the tag down. A hidden tag offers nothing, so the state the tests and
+## the shop read back (`buyable`, `price`, `readable`) says so too — an owned
+## building gets no tag at all now, and stale "buyable" state on an invisible
+## node would still be a lie.
 func hide_tip() -> void:
 	visible = false
+	buyable = false
+	price = 0
+	readable = false
 
 
 ## Redden the price for a click the player cannot pay for. The swatch's own
@@ -174,8 +186,11 @@ func _set_deny_phase(value: float) -> void:
 	queue_redraw()
 
 
-## Width of the read line: right click, then info.
+## Width of the read line: right click, then info. Zero when the entry has no
+## page to read, which is what hides the line.
 func _read_width() -> float:
+	if not readable:
+		return 0.0
 	return GLYPH_PITCH_PX + _INFO_ICON.get_size().x
 
 
@@ -211,11 +226,26 @@ func _lay_out(art: Rect2, bounds: Rect2) -> void:
 	var buy_x := _centre_x(art, bounds, buy_w)
 	var read_y := maxf(art.position.y + OVERLAP_PX - ROW_PX, bounds.position.y)
 	var buy_y := minf(art.end.y - OVERLAP_PX, bounds.end.y - ROW_PX)
-	var left := minf(read_x, buy_x) if buy_w > 0.0 else read_x
-	var right := maxf(read_x + read_w, buy_x + buy_w) if buy_w > 0.0 \
-			else read_x + read_w
-	position = Vector2(left, minf(read_y, buy_y)).floor()
-	size = Vector2(right - left, maxf(read_y, buy_y) + ROW_PX - position.y).ceil()
+	# Each line only counts toward the rect while it has something in it.
+	var xs: Array[float] = []
+	var xe: Array[float] = []
+	var ys: Array[float] = []
+	if read_w > 0.0:
+		xs.append(read_x)
+		xe.append(read_x + read_w)
+		ys.append(read_y)
+	if buy_w > 0.0:
+		xs.append(buy_x)
+		xe.append(buy_x + buy_w)
+		ys.append(buy_y)
+	if xs.is_empty():
+		xs.append(read_x)
+		xe.append(read_x)
+		ys.append(read_y)
+	var left: float = xs.min()
+	var right: float = xe.max()
+	position = Vector2(left, ys.min()).floor()
+	size = Vector2(right - left, ys.max() + ROW_PX - position.y).ceil()
 	_read_at = Vector2(read_x, read_y).floor() - position
 	_buy_at = Vector2(buy_x, buy_y).floor() - position
 
@@ -226,8 +256,9 @@ func _centre_x(art: Rect2, bounds: Rect2, width: float) -> float:
 
 
 func _draw() -> void:
-	draw_texture(_RIGHT_CLICK_ICON, _read_at, _ink)
-	draw_texture(_INFO_ICON, _read_at + Vector2(GLYPH_PITCH_PX, 0.0), _ink)
+	if readable:
+		draw_texture(_RIGHT_CLICK_ICON, _read_at, _ink)
+		draw_texture(_INFO_ICON, _read_at + Vector2(GLYPH_PITCH_PX, 0.0), _ink)
 	var x: float = _buy_at.x
 	if buyable:
 		draw_texture(_CLICK_ICON, Vector2(x, _buy_at.y), _ink)
