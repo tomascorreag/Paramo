@@ -19,6 +19,13 @@ var height: int = 0
 # Row-major, indexed as `_cells[y * width + x]`.
 var _cells: Array[TerrainCell] = []
 
+# The ecosystem the object pass placed on this grid. Written by
+# ObjectPainter.assign_object_kinds (null until then); read by the action
+# layer / shop to know which species belong on this mountain. Lives on the
+# grid rather than on ProceduralWorld so the sim, the harness and the game
+# all read the same record.
+var ecosystem: EcosystemProfile = null
+
 
 func _init(w: int, h: int) -> void:
 	width = w

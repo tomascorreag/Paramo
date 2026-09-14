@@ -19,6 +19,10 @@ const CSV_PATH: String = "res://assets/translations/paramo.csv"
 # being UPPER_SNAKE, which is the reason for that convention.
 const SCENE_DIRS: Array[String] = ["res://scenes/ui"]
 const SCRIPT_DIRS: Array[String] = ["res://scripts/ui", "res://scripts/tools", "res://scripts/systems"]
+# Data resources that carry keys. WorldObjectData.name_key is what ActionInspect
+# prints when it identifies a plant, and it is authored per species .tres — so
+# the .tres files are as much a source of copy as a scene is.
+const RESOURCE_DIRS: Array[String] = ["res://resources/objects"]
 
 # A QUOTED UPPER_SNAKE literal — the shape a translation key has in both .tscn
 # and .gd. Unquoted GDScript constants look the same but never match.
@@ -28,7 +32,8 @@ const QUOTED_UPPER_SNAKE: String = "\"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\""
 # strings exist (feature tags, shader defines), so without this the scan would
 # report them as missing translations.
 const KEY_PREFIXES: Array[String] = [
-	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_",
+	"UI_", "JOURNAL_", "LOADING_", "SEASON_", "TUTORIAL_", "NARRATIVE_", "FLORA_",
+	"GRAMMAR_", "ECOSYSTEM_",
 ]
 
 # The lowercase-chrome convention covers UI copy. CLAUDE.md puts in-world
@@ -114,12 +119,60 @@ func test_locales_are_registered_and_resolve() -> void:
 
 func test_every_key_used_in_scenes_and_scripts_exists() -> void:
 	var missing: Array[String] = []
-	for path: String in _collect_files(SCENE_DIRS, ["tscn"]) + _collect_files(SCRIPT_DIRS, ["gd"]):
+	for path: String in _collect_files(SCENE_DIRS, ["tscn"]) 			+ _collect_files(SCRIPT_DIRS, ["gd"]) 			+ _collect_files(RESOURCE_DIRS, ["tres"]):
 		for key: String in _keys_in(path):
 			if not _csv.has(key):
 				missing.append("%s: %s" % [path, key])
 	assert_eq(missing, [] as Array[String],
 		"translation keys used but not defined in the CSV")
+
+
+## Every plant in the object registry must be nameable: ActionInspect prints
+## `name_key`, and an unnamed species identifies into the journal silently.
+func test_every_plant_has_a_name_key() -> void:
+	for path: String in _collect_files(RESOURCE_DIRS, ["tres"]):
+		var data: Resource = load(path)
+		if not (data is PlantObjectData):
+			continue
+		var key := String((data as PlantObjectData).name_key)
+		assert_true(_csv.has(key),
+			"%s: name_key '%s' must be a CSV key" % [path, key])
+
+
+## Every plant needs an article word for BOTH genders in every locale, because
+## ActionInspect picks between them with WorldObjectData.name_gender. These keys
+## are indexed out of a table rather than written as literals at the call site,
+## so the scan above cannot see them.
+func test_article_words_exist_for_both_genders() -> void:
+	for slot: String in ["INDEFINITE", "AT_THE"]:
+		for gender: String in ["M", "F"]:
+			var key := "GRAMMAR_ARTICLE_%s_%s" % [slot, gender]
+			assert_true(_csv.has(key), "%s must be a CSV key" % key)
+
+
+## The Spanish articles have to actually differ by gender, or the whole
+## name_gender mechanism is inert and "una cortadera" silently becomes "un".
+func test_spanish_articles_differ_by_gender() -> void:
+	if not _locales.has("es_CO"):
+		return
+	for slot: String in ["INDEFINITE", "AT_THE"]:
+		var m: String = _csv["GRAMMAR_ARTICLE_%s_M" % slot]["es_CO"]
+		var f: String = _csv["GRAMMAR_ARTICLE_%s_F" % slot]["es_CO"]
+		assert_ne(m, f, "es_CO %s article must inflect" % slot)
+
+
+## The inspect lines are formatted with one positional argument. A line missing
+## its placeholder silently drops the species name and says only "This is ."
+func test_inspect_lines_carry_the_species_placeholder() -> void:
+	var found := 0
+	for key: String in _csv:
+		if not key.begins_with("NARRATIVE_INSPECT_"):
+			continue
+		found += 1
+		for locale: String in _locales:
+			assert_true(String(_csv[key][locale]).contains("{0}"),
+				"%s/%s must contain the {0} placeholder" % [key, locale])
+	assert_gt(found, 0, "the inspect lines must exist")
 
 
 func _keys_in(path: String) -> Array[String]:
@@ -162,3 +215,20 @@ func _walk(path: String, extensions: Array[String], out: Array[String]) -> void:
 			out.append(full)
 		name = dir.get_next()
 	dir.list_dir_end()
+
+
+## Every plant's field notes must resolve: the bitacora prints `fact_keys`
+## through tr(), and a missing one would print as its own key. Two or three per
+## species is the page's budget (tests/test_journal_bitacora.gd measures it).
+func test_every_plant_has_field_notes() -> void:
+	for path: String in _collect_files(RESOURCE_DIRS, ["tres"]):
+		var data: Resource = load(path)
+		if not (data is PlantObjectData):
+			continue
+		var keys: PackedStringArray = (data as PlantObjectData).fact_keys
+		assert_between(keys.size(), 2, 3, "%s: two or three facts" % path)
+		for key: String in keys:
+			assert_true(_csv.has(key), "%s: fact key '%s' must be a CSV key" % [path, key])
+			assert_true(key.begins_with(SENTENCE_CASE_PREFIX),
+				"%s: field notes are in-world prose, and only %s exempts them from lowercase"
+					% [key, SENTENCE_CASE_PREFIX])

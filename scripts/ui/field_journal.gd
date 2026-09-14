@@ -23,6 +23,29 @@ extends CanvasLayer
 signal opened
 signal closed
 
+## The book has two SPREADS — "run" (calendar, supplies, the shop) and
+## "bitacora" (two discovered species, one page each) — and they share the
+## two pages: every section under a page's Content carries a `spread` tag and
+## `show_spread` flips visibility by it. Same SubViewports, same warp, same ink.
+## Emitted whenever the spread or the species on the bitacora changes; the
+## fore-edge tabs redraw off these. `species_changed` carries the LEFT page's.
+signal spread_changed(spread: StringName)
+signal species_changed(id: StringName)
+## The set of browsable species changed (a find, or the codex binding): what
+## the tabs and the corners can offer just moved.
+signal browsable_changed
+
+## Every species the bitacora can show, in AUTHORED order (the sprite sheet's
+## row order). Filtered by the run's FloraCodex at read time: only identified
+## species are browsable, and with no codex in the tree (preview tools, layout
+## tests) all of them are — the same null-means-unrestricted rule the shop
+## sections follow for UnlockState.
+##
+## Authored order rather than discovery order so prev/next is a stable ring:
+## a species found later slots into its place instead of reshuffling the
+## sequence the player has learnt.
+@export var bitacora_species: Array[PlantObjectData] = []
+
 const _OPEN_DURATION: float = 0.22
 const _CLOSE_DURATION: float = 0.14
 
@@ -46,6 +69,16 @@ var _page_viewports: Array[SubViewport] = []
 var _open: bool = false
 var _tween: Tween
 
+var _spread: StringName = &"run"
+## The LEFT page's species; the right page shows the next browsable one.
+var _species: StringName = &""
+var _codex: Node = null
+## Per species, how many times its page has been shown this run — the field
+## note printed is `fact_keys[count % size]`, so it rotates per showing.
+var _fact_cursor: Dictionary = {}
+## Every Content child of both pages: the sections `show_spread` toggles.
+var _sections: Array[Control] = []
+
 
 func _ready() -> void:
 	# ALWAYS so the slide + input keep running under get_tree().paused (like PauseMenu).
@@ -63,11 +96,78 @@ func _ready() -> void:
 	_collect_page_viewports()
 	visibility_changed.connect(_sync_page_viewports)
 	_sync_page_viewports()
+	_collect_sections()
+	_apply_spread()
+	# Deferred: FloraCodex joins its group in its own _ready, order unknown —
+	# the same story as JournalKnownSet._bind_codex and JournalShopInput.
+	_bind_codex.call_deferred()
 	# Start the book parked below the bottom edge so the first open rises cleanly.
 	var h := _park_offset()
 	_book.offset_top = h
 	_book.offset_bottom = h
 	_dim.modulate.a = 0.0
+	_fit()
+
+
+# --- Fitting the window -------------------------------------------------------
+#
+# The world is drawn at N device pixels per texel, N picked from the MONITOR
+# (DisplayManager), so a small window shows less world — and used to show less
+# book: at 1440x810 on a 1080p monitor the logical view is 360x202 and the
+# 394-wide book hung off both sides. The book instead picks its OWN whole
+# number M <= N of device pixels per texel, the largest at which it fits, by
+# scaling Book by M/N. The window rasterizes every canvas item at its own
+# resolution (CANVAS_ITEMS stretch, no SubViewport), so a book texel is then
+# exactly M device pixels — still pixel art, just smaller than the world's.
+# Below M = 1 nothing is left to give; a window under FIT_RECT's size crops.
+
+## What must stay on screen, in BookArt space: the cover's ink (Book.png's
+## opaque texels, x 48..431, y 17..255) widened to both fore-edge tabs drawn
+## extended (x 43..436). test_journal_pages re-measures both.
+const FIT_RECT: Rect2i = Rect2i(43, 17, 394, 239)
+
+## (Book width, Book height, N) at the last fit; refit only when one moves.
+var _fit_key: Vector3 = Vector3(-1.0, -1.0, -1.0)
+
+
+## Device pixels per book texel for a window of `device` pixels whose world is
+## drawn at `world_scale`: the largest whole number at which FIT_RECT fits,
+## never above the world's, never below 1.
+static func fit_scale(device: Vector2, world_scale: int) -> int:
+	var m: int = mini(floori(device.x / float(FIT_RECT.size.x)),
+			floori(device.y / float(FIT_RECT.size.y)))
+	return clampi(m, 1, maxi(1, world_scale))
+
+
+## Book's scale and BookArt's offsets for world scale `n`, off Book's current
+## size. BookArt keeps its centre anchors; only the offsets move, so that the
+## art lands on a whole book texel with FIT_RECT's centre on the view's.
+func fit_to(n: int) -> void:
+	var size: Vector2 = _book.size
+	var k: float = float(fit_scale(size * float(n), n)) / float(maxi(1, n))
+	_book.scale = Vector2(k, k)
+	var art := get_node_or_null("Book/BookArt") as Control
+	if art == null:
+		return
+	# In Book's own (unscaled) space the view is size / k wide; the anchors
+	# already contribute half of `size`.
+	var pos: Vector2 = (size / k * 0.5 - Vector2(FIT_RECT.get_center())).floor()
+	art.offset_left = pos.x - size.x * 0.5
+	art.offset_top = pos.y - size.y * 0.5
+	art.offset_right = art.offset_left + 480.0
+	art.offset_bottom = art.offset_top + 270.0
+
+
+# N is read off this viewport's own stretch rather than DisplayManager: the
+# preview tools render the book into plain SubViewports (N = 1, no change)
+# while DisplayManager still reports the monitor's scale.
+func _fit() -> void:
+	var n: int = maxi(1, roundi(get_viewport().get_final_transform().get_scale().x))
+	var key := Vector3(_book.size.x, _book.size.y, n)
+	if key == _fit_key:
+		return
+	_fit_key = key
+	fit_to(n)
 
 
 # The season wheel turns continuously with the season clock: a half-turn (180°)
@@ -76,7 +176,9 @@ func _ready() -> void:
 # While the journal is open the game is paused, so the clock is frozen and the
 # wheel holds a snapshot of the moment you opened it. (Logic moved verbatim from
 # the old HUD gauge; ungated by visibility so test_season_wheel can drive it.)
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_fit()
+	_apply_cue(delta)
 	if SeasonManager.phase == SeasonManager.Phase.IDLE:
 		_season_wheel.rotation = 0.0
 		return
@@ -86,6 +188,12 @@ func _process(_delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Nothing here while the pause menu holds the game — this layer is
+	# PROCESS_MODE_ALWAYS, so without the guard Space would throw the book open
+	# on top of the modal (and Esc would close the book behind it). Returns
+	# WITHOUT consuming: the key belongs to the pause menu.
+	if PauseMenu.is_blocking():
+		return
 	# Space toggles from either state.
 	if event.is_action_pressed(&"toggle_journal"):
 		# ...but not before the run exists. `toggle_journal` is Space, and the
@@ -107,6 +215,18 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		toggle()
 		return
+	# Left/right page the bitacora while it is showing. Consumed: nothing
+	# else under a paused tree wants them, and a key that fell through would
+	# scroll whatever UI has focus.
+	if _open and _spread == &"bitacora":
+		if event.is_action_pressed(&"ui_left"):
+			get_viewport().set_input_as_handled()
+			prev_species()
+			return
+		if event.is_action_pressed(&"ui_right"):
+			get_viewport().set_input_as_handled()
+			next_species()
+			return
 	# Esc closes ONLY while open, and is consumed here in _input — which runs before
 	# PauseMenu's _unhandled_input — so Esc backs out of the journal instead of
 	# opening the pause menu on top of it. When closed, Esc falls through to the
@@ -125,6 +245,76 @@ func _on_dim_gui_input(event: InputEvent) -> void:
 		close()
 
 
+## Whether the book is open or rising. False from the frame `close()` starts.
+func is_open() -> bool:
+	return _open
+
+
+# --- FTUE cues -----------------------------------------------------------------
+#
+# The tutorial names WHAT to point at (the fore-edge tab, some shop entries);
+# the book decides HOW: a slow bob in whole texels, clocked here because this
+# layer runs through the pause the open book holds.
+
+## One full bob, in seconds. Slow on purpose: it is an invitation, not an alarm.
+const CUE_PERIOD: float = 1.6
+
+var _cue_tab: bool = false
+var _cue_entries: Array[StringName] = []
+var _cue_time: float = 0.0
+var _fore_edge: JournalForeEdge = null
+var _known_sets: Array[JournalKnownSet] = []
+
+
+## Point at the fore-edge tab (`tab`) and/or the shop entries with these ids.
+## Nothing bobs while the book is closed, whatever is set.
+func set_cue(tab: bool, entries: Array[StringName]) -> void:
+	_cue_tab = tab
+	_cue_entries = entries
+
+
+## The bob at time `t`, in whole texels of `amplitude`.
+static func cue_offset(t: float, amplitude: int) -> int:
+	return int(roundf(sin(t * TAU / CUE_PERIOD) * float(amplitude)))
+
+
+func _apply_cue(delta: float) -> void:
+	var tab: bool = _open and _cue_tab
+	var entries: Array[StringName] = _cue_entries if _open else ([] as Array[StringName])
+	_cue_time = _cue_time + delta if (tab or not entries.is_empty()) else 0.0
+	if _fore_edge == null:
+		var found := find_children("*", "JournalForeEdge", true, false)
+		if not found.is_empty():
+			_fore_edge = found[0] as JournalForeEdge
+		for node: Node in find_children("*", "JournalKnownSet", true, false):
+			_known_sets.append(node as JournalKnownSet)
+	if _fore_edge != null:
+		_fore_edge.set_wiggle(cue_offset(_cue_time, JournalForeEdge.WIGGLE_PX) if tab else 0)
+	var px: int = cue_offset(_cue_time, JournalKnownSet.WIGGLE_PX)
+	for section: JournalKnownSet in _known_sets:
+		if is_instance_valid(section):
+			section.set_wiggle(entries, px)
+
+
+## The left page on screen, in viewport coordinates.
+func page_left_rect() -> Rect2:
+	return _screen_rect(get_node_or_null("Book/BookArt/Pages/PageLeft") as Control)
+
+
+## The right page (the shop) on screen, in viewport coordinates. The FTUE
+## strip reads it to stay clear of the page while the book is open.
+func page_right_rect() -> Rect2:
+	return _screen_rect(get_node_or_null("Book/BookArt/Pages/PageRight") as Control)
+
+
+# Through the canvas transform, not get_global_rect(): that one ignores the
+# Book's fit scale and would report the page at the world's size.
+func _screen_rect(c: Control) -> Rect2:
+	if c == null:
+		return Rect2()
+	return c.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, c.size)
+
+
 func toggle() -> void:
 	if _open:
 		close()
@@ -139,6 +329,9 @@ func open() -> void:
 	visible = true
 	get_tree().paused = true
 	opened.emit()
+	# Opening the book on the bitacora is a showing too: the notes rotate.
+	if _spread == &"bitacora":
+		_set_species(_species, true)
 	# Re-park stale offsets: if the window was resized while closed, the
 	# stored park offset may no longer clear the bottom edge and the book
 	# would pop in mid-rise.
@@ -199,3 +392,246 @@ func _sync_page_viewports() -> void:
 	var mode := SubViewport.UPDATE_ALWAYS if visible else SubViewport.UPDATE_DISABLED
 	for vp: SubViewport in _page_viewports:
 		vp.render_target_update_mode = mode
+
+
+# --- Spreads -----------------------------------------------------------------
+
+# Every tagged section under both pages' Content, plus anything tagged
+# directly under Pages — the season slit is a SubViewportContainer beside the
+# pages, not a section inside one, and it belongs to the run spread too.
+func _collect_sections() -> void:
+	_sections.clear()
+	var pages := get_node_or_null("Book/BookArt/Pages") as Control
+	if pages == null:
+		return
+	var parents: Array[Node] = [pages]
+	for page_name: String in ["PageLeft", "PageRight"]:
+		var content := pages.get_node_or_null("%s/SubViewport/Content" % page_name)
+		if content != null:
+			parents.append(content)
+	for parent: Node in parents:
+		for child: Node in parent.get_children():
+			var c := child as Control
+			if c != null and c.get(&"spread") != null:
+				_sections.append(c)
+
+
+## The spread showing right now: &"run" or &"bitacora".
+func spread() -> StringName:
+	return _spread
+
+
+## Turn to a spread. Persists across close/open — a book stays where you left
+## it. Turning to the bitacora with no species chosen picks the first
+## browsable one; with NOTHING identified the bitácora is closed and the
+## turn is refused.
+func show_spread(name_: StringName) -> void:
+	if name_ != &"run" and name_ != &"bitacora":
+		return
+	if name_ == &"bitacora":
+		if not has_bitacora():
+			return
+		if _species == &"" or not is_readable(_species):
+			_set_species(_first_browsable(), true)
+	var changed: bool = name_ != _spread
+	_spread = name_
+	_apply_spread()
+	if changed:
+		spread_changed.emit(_spread)
+
+
+func _apply_spread() -> void:
+	for c: Control in _sections:
+		if is_instance_valid(c):
+			c.visible = StringName(c.get(&"spread")) == _spread
+
+
+## The LEFT page's species, or &"" while the book has never been turned to
+## the bitácora.
+func species() -> StringName:
+	return _species
+
+
+## Both pages' species, left then right; a page with nothing on it is &"".
+func page_species() -> Array[StringName]:
+	var right: StringName = &""
+	var ids := browsable_species()
+	var i: int = ids.find(String(_species))
+	if i >= 0 and i + 1 < ids.size():
+		right = StringName(ids[i + 1])
+	return [_species, right]
+
+
+## Whether `id` is on either open page right now.
+func shows(id: StringName) -> bool:
+	return id != &"" and page_species().has(id)
+
+
+## Species ids the bitacora may show, in authored order: those the run's codex
+## has recorded, or all of them with no codex in the tree.
+func browsable_species() -> PackedStringArray:
+	var out := PackedStringArray()
+	var codex_live: bool = _codex != null and is_instance_valid(_codex)
+	for data: PlantObjectData in bitacora_species:
+		if data == null:
+			continue
+		if not codex_live or bool(_codex.call(&"is_known", data.id)):
+			out.append(String(data.id))
+	return out
+
+
+## Whether the bitacora may open at `id` — i.e. whether the shop's read verb
+## has anywhere to go. False for anything that is not a species at all.
+func is_readable(id: StringName) -> bool:
+	return id != &"" and browsable_species().has(String(id))
+
+
+## Whether the bitácora can be opened at all: something has been identified.
+## Until then it has no tab, no page and no corner.
+func has_bitacora() -> bool:
+	return not browsable_species().is_empty()
+
+
+## Open the bitacora with `id` in view. The book turns in PAIRS from the first
+## browsable species, so `id` lands on the left page when it is at an even
+## position in the ring and on the right when odd — the same two pages it
+## would be on if you paged there. False (and no change) when not browsable.
+func show_species(id: StringName) -> bool:
+	if not is_readable(id):
+		return false
+	var ids := browsable_species()
+	var i: int = ids.find(String(id))
+	_set_species(StringName(ids[i - (i % 2)]), true)
+	show_spread(&"bitacora")
+	return true
+
+
+## The book as ONE sequence of spreads, for the page corners: the run spread
+## is page 0, then the bitácora's pairs in browsable order — none while
+## nothing is identified. `page_index()` is where the book is open now.
+func page_index() -> int:
+	if _spread != &"bitacora":
+		return 0
+	var i: int = browsable_species().find(String(_species))
+	return 1 + maxi(0, i) / 2
+
+
+func page_count() -> int:
+	return 1 + (browsable_species().size() + 1) / 2
+
+
+## Turn `delta` pages along that sequence; false at either cover (no wrap —
+## a book does not).
+func turn_page(delta: int) -> bool:
+	var target: int = page_index() + delta
+	if target < 0 or target >= page_count() or target == page_index():
+		return false
+	if target == 0:
+		show_spread(&"run")
+		return true
+	show_species(StringName(browsable_species()[(target - 1) * 2]))
+	return true
+
+
+func next_species() -> void:
+	_step_species(2)
+
+
+func prev_species() -> void:
+	_step_species(-2)
+
+
+func _step_species(delta: int) -> void:
+	var ids := browsable_species()
+	if ids.is_empty():
+		_set_species(&"", false)
+		return
+	var i: int = ids.find(String(_species))
+	if i < 0:
+		_set_species(StringName(ids[0]), true)
+		return
+	# Pairs: the ring is the even positions, wrapping.
+	var pairs: int = (ids.size() + 1) / 2
+	var pair: int = posmod(i / 2 + (delta / 2), pairs)
+	_set_species(StringName(ids[pair * 2]), true)
+
+
+func _first_browsable() -> StringName:
+	var ids := browsable_species()
+	return StringName(ids[0]) if not ids.is_empty() else &""
+
+
+func _data_for(id: StringName) -> PlantObjectData:
+	for data: PlantObjectData in bitacora_species:
+		if data != null and data.id == id:
+			return data
+	return null
+
+
+## The left and right plates, in that order (null where the scene lacks one).
+func _plates() -> Array[JournalSpeciesPlate]:
+	return [
+		get_node_or_null("%SpeciesPlateLeft") as JournalSpeciesPlate,
+		get_node_or_null("%SpeciesPlateRight") as JournalSpeciesPlate,
+	]
+
+
+# Writes the pair starting at `id` into the two plates; a page with no
+# species is blank. `showing` counts as a showing for the note rotation; a
+# silent re-validation does not.
+func _set_species(id: StringName, showing: bool) -> void:
+	var changed: bool = id != _species
+	_species = id
+	var pair := page_species()
+	var plates := _plates()
+	for n: int in plates.size():
+		var plate := plates[n]
+		if plate == null:
+			continue
+		var pid: StringName = pair[n]
+		if pid == &"":
+			plate.set_blank()
+			continue
+		if showing:
+			_fact_cursor[pid] = int(_fact_cursor.get(pid, -1)) + 1
+		plate.set_species(_data_for(pid), int(_fact_cursor.get(pid, 0)))
+	if changed:
+		species_changed.emit(_species)
+
+
+func _bind_codex() -> void:
+	if not is_inside_tree():
+		return
+	var codex: Node = get_tree().get_first_node_in_group(FloraCodex.GROUP)
+	if codex == null:
+		return
+	_codex = codex
+	codex.connect(&"discovered", _on_codex_changed)
+	_revalidate_species()
+
+
+func _on_codex_changed(_species_: StringName) -> void:
+	_revalidate_species()
+
+
+# The codex clears at season 0 and grows on every find. The left page keeps
+# its species if it is still browsable AND still on an even position (a find
+# earlier in the ring shifts the pairs); otherwise the book drops back to the
+# pair that species is now in, or to the first pair — or, with nothing left
+# to show, closes the bitácora and turns back to the run spread.
+func _revalidate_species() -> void:
+	if _spread != &"bitacora":
+		# Nothing is showing; the next turn to the bitacora re-picks anyway.
+		if _species != &"" and not is_readable(_species):
+			_species = &""
+	elif not has_bitacora():
+		_species = &""
+		show_spread(&"run")
+	else:
+		var ids := browsable_species()
+		var i: int = ids.find(String(_species))
+		if i < 0:
+			_set_species(_first_browsable(), false)
+		else:
+			_set_species(StringName(ids[i - (i % 2)]), false)
+	browsable_changed.emit()

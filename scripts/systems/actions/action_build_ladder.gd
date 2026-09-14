@@ -11,6 +11,7 @@ func _init() -> void:
 	icon = preload("res://assets/sprites/UX/icons/ladder.tres")
 	group = &"build"
 	unlock_id = &"ladder"
+	executes_from_afar = true
 
 
 func _applies(ctx: ActionContext) -> bool:

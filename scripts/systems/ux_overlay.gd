@@ -11,6 +11,13 @@ extends Node2D
 ##   - LockedSquare + LockedX: static square (32x16) + frame-0 X anchored at a
 ##     committed cell while the radial menu is open or a multi-click build mode
 ##     is active.
+##   - While the player WALKS to a clicked cell, BaseX + Circle stay PINNED on
+##     that cell and stop following the mouse (State.WALKING): the reticle is
+##     the destination, not the pointer. A new click re-pins; arrival, a stop,
+##     or an aborted path (Player.arrived) hands the reticle back to the mouse.
+##   - A COMMITTED walk (walk-then-act, walking to build) pins the same way but
+##     always on the solid circle: the player has already picked what happens
+##     there, so the reticle reads as the live action, not as a destination.
 ##
 ## During traversal placement mode (bridge or ladder) an extra pool of rotating
 ## Xs marks the closest valid endpoints; hovering one hides the others.
@@ -36,7 +43,7 @@ const _CIRCLE_SOLID: Texture2D = preload("res://assets/sprites/UX/cursor/circle.
 const _CIRCLE_DIM: Texture2D = preload("res://assets/sprites/UX/cursor/circle_dim.tres")
 const _CURSOR_X_FRAMES: SpriteFrames = preload("res://assets/sprites/UX/cursor/cursor_x.tres")
 
-enum State { HOVER, LOCKED, PLACEMENT }
+enum State { HOVER, LOCKED, PLACEMENT, WALKING }
 
 
 @export var pathfinder: Pathfinder
@@ -59,6 +66,11 @@ var hovered_cell: Vector2i = Pathfinder.NO_CELL
 
 var _state: State = State.HOVER
 var _locked_cell: Vector2i = Pathfinder.NO_CELL
+# The clicked destination while the player walks to it; NO_CELL otherwise.
+# Outlives a LOCKED/PLACEMENT interlude, so unlock() can return to WALKING.
+var _walk_target: Vector2i = Pathfinder.NO_CELL
+# The walk ends in an action the player already chose — forces the solid circle.
+var _walk_committed: bool = false
 var _candidate_cells: Array[Vector2i] = []
 var _candidate_sprites: Array[AnimatedSprite2D] = []
 var _is_valid_endpoint: Callable = Callable()
@@ -97,6 +109,13 @@ func _ready() -> void:
 		) as TileInteractionController
 	if player == null:
 		player = get_tree().get_first_node_in_group(&"player") as Player
+	if player != null and player.has_signal(&"arrived"):
+		player.arrived.connect(_on_player_arrived)
+	# Only USER clicks pin the reticle: walk-then-act approaches go through
+	# Player.follow_path directly and lock the reticle on the target themselves.
+	var c2m: Node = get_tree().get_first_node_in_group(&"click_to_move_controller")
+	if c2m != null and c2m.has_signal(&"path_dispatched"):
+		c2m.path_dispatched.connect(_on_user_path_dispatched)
 
 	_apply_state_visibility()
 
@@ -114,6 +133,9 @@ func _process(_delta: float) -> void:
 		State.LOCKED:
 			# Mouse moves freely (to pick menu items) but no in-world cursor.
 			_clear_hovered_cell()
+		State.WALKING:
+			# Pinned on the destination; the mouse is ignored until arrival.
+			pass
 		State.HOVER, State.PLACEMENT:
 			_update_cursor_cell()
 			if _state == State.PLACEMENT:
@@ -149,7 +171,8 @@ func lock_at(cell: Vector2i) -> void:
 
 
 ## Release LOCKED state. No-op while in BRIDGE so the radial menu's deferred
-## `closed` signal can't interrupt a build mode that just started.
+## `closed` signal can't interrupt a build mode that just started. Returns to
+## WALKING rather than HOVER if the player is still on a clicked walk.
 func unlock() -> void:
 	if _state != State.LOCKED:
 		return
@@ -159,6 +182,63 @@ func unlock() -> void:
 	# state-dependent — force the next _process to re-resolve.
 	_invalidate_hover_cache()
 	_apply_state_visibility()
+	if _walk_target != Pathfinder.NO_CELL and player != null and player.is_moving():
+		pin_destination(_walk_target, _walk_committed)
+
+
+## Pin the walk reticle on `cell` until Player.arrived. From HOVER or WALKING
+## only: a lock or a build mode keeps its own marker and takes precedence, and
+## remembers the target so unlock() can resume the pin. `committed` = the walk
+## ends in an action, so the circle is solid whatever the cell offers right now
+## (from afar, proximity-gated actions can read as unavailable).
+func pin_destination(cell: Vector2i, committed: bool = false) -> void:
+	_walk_target = cell
+	_walk_committed = committed
+	if _state != State.HOVER and _state != State.WALKING:
+		return
+	if cell == Pathfinder.NO_CELL:
+		release_destination()
+		return
+	_state = State.WALKING
+	# The reticle IS the hovered cell for the duration: consumers reading
+	# hovered_cell see the destination, and the X + circle draw there.
+	var old := hovered_cell
+	hovered_cell = cell
+	_apply_state_visibility()
+	if old != cell:
+		hovered_cell_changed.emit(cell, old)
+	_refresh_base_x(old)
+	_refresh_circle()
+
+
+## Hand the reticle back to the mouse. Safe to call in any state.
+func release_destination() -> void:
+	_walk_target = Pathfinder.NO_CELL
+	_walk_committed = false
+	if _state != State.WALKING:
+		return
+	_state = State.HOVER
+	# The mouse may sit anywhere by now — re-resolve on the next _process.
+	_invalidate_hover_cache()
+	_apply_state_visibility()
+
+
+func is_pinned() -> bool:
+	return _state == State.WALKING
+
+
+func is_pin_committed() -> bool:
+	return _state == State.WALKING and _walk_committed
+
+
+func _on_user_path_dispatched(cells: Array[Vector2i]) -> void:
+	if cells.is_empty():
+		return
+	pin_destination(cells[cells.size() - 1])
+
+
+func _on_player_arrived() -> void:
+	release_destination()
 
 
 ## `is_valid_endpoint` is a `Callable(Vector2i) -> bool` used to decide whether
@@ -292,7 +372,8 @@ func _is_hovered_endpoint_valid() -> bool:
 
 
 func _refresh_circle() -> void:
-	if _state != State.HOVER or hovered_cell == Pathfinder.NO_CELL:
+	if (_state != State.HOVER and _state != State.WALKING) \
+			or hovered_cell == Pathfinder.NO_CELL:
 		_circle.visible = false
 		return
 	# Three tiers, actionability first so it wins regardless of reachability:
@@ -301,7 +382,7 @@ func _refresh_circle() -> void:
 	#   else                        → no circle (BaseX only)
 	# "Meaningful" = anything beyond inspect (debug). Decided by the registry
 	# via TileInteractionController.has_meaningful_action().
-	var actionable := (
+	var actionable := is_pin_committed() or (
 		tile_interaction_controller != null
 		and tile_interaction_controller.has_meaningful_action(hovered_cell)
 	)
@@ -404,7 +485,7 @@ func _update_candidate_visibility() -> void:
 
 func _apply_state_visibility() -> void:
 	match _state:
-		State.HOVER:
+		State.HOVER, State.WALKING:
 			_locked_x.visible = false
 			_locked_square.visible = false
 			_base_x.visible = true

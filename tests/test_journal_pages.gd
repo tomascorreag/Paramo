@@ -37,10 +37,14 @@ const CONTENT_AMPLITUDE_PX := 5.0
 const FONT_EM_PX := {
 	"res://assets/fonts/Tiny5-Regular.ttf": 8,
 	"res://assets/fonts/Eggmode-Pd8g.ttf": 16,
+	# A true outline face (~8% of points on any grid): no native em, legal at
+	# any size, so 1.
+	"res://assets/fonts/FantasticBoogaloo-GDlq.ttf": 1,
 }
-## Body copy is the theme's Tiny5; Eggmode is reserved for TITLES.
+## Body copy is the theme's Tiny5; the title face is reserved for TITLES
+## (FantasticBoogaloo since 2026-09-11, Eggmode before).
 const BODY_FONT := "res://assets/fonts/Tiny5-Regular.ttf"
-const TITLE_FONT := "res://assets/fonts/Eggmode-Pd8g.ttf"
+const TITLE_FONT := "res://assets/fonts/FantasticBoogaloo-GDlq.ttf"
 ## Every sprite printed on a page goes through this, so it can only ever emit a
 ## colour one of the four ink ramps contains.
 const INK_SHADER := "res://assets/shaders/journal_ink.gdshader"
@@ -77,6 +81,71 @@ func test_book_art_is_the_native_book_size() -> void:
 	assert_eq(art.size, Vector2(480, 270))
 	assert_eq(art.anchor_left, 0.5, "BookArt must be centred, not left-anchored")
 	assert_eq(art.anchor_right, 0.5)
+
+
+func test_the_book_picks_the_largest_scale_it_fits_at() -> void:
+	# Window px, the world's N, the book's M.
+	var cases: Array = [
+		[Vector2(1920, 1080), 4, 4],  # fullscreen 1080p: the world's own size
+		[Vector2(1440, 810), 4, 3],   # the default window on a 1080p monitor
+		[Vector2(1280, 720), 3, 3],   # 720p fullscreen: 717 of 720 rows
+		[Vector2(1200, 675), 4, 2],
+		[Vector2(3840, 2160), 8, 8],
+		[Vector2(4000, 2400), 4, 4],  # never larger than the world
+		[Vector2(394, 239), 1, 1],    # native: one texel, one pixel
+		[Vector2(300, 200), 2, 1],    # too small for even that: crops at 1
+	]
+	for c: Array in cases:
+		assert_eq(FieldJournal.fit_scale(c[0], c[1]), c[2], "%s at %dx" % [c[0], c[1]])
+
+
+func test_the_fit_rect_holds_the_cover_and_both_tabs() -> void:
+	var fit := FieldJournal.FIT_RECT
+	var cover := (load("res://assets/sprites/UX/Panels/Book.png") as Texture2D).get_image()
+	assert_true(fit.encloses(cover.get_used_rect()), "Book.png's ink %s" % cover.get_used_rect())
+	var edge := journal.get_node("Book/BookArt/ForeEdge") as JournalForeEdge
+	for t: JournalForeEdge.Tab in edge.tabs():
+		for wiggle: int in [-JournalForeEdge.WIGGLE_PX, JournalForeEdge.WIGGLE_PX]:
+			edge.set_wiggle(wiggle)
+			var r := edge.tab_rect(t, true)
+			assert_true(fit.encloses(r), "%s tab %s" % [t.spread, r])
+	edge.set_wiggle(0)
+	# Tight: the tabs are the sides, the cover the top and bottom.
+	assert_eq(fit.position.x, JournalForeEdge.PAGE_LEFT_EDGE_X - JournalForeEdge.GAP_PX
+			- JournalForeEdge.FRAME_EXTENDED.size.x)
+	assert_eq(fit.end.x, JournalForeEdge.PAGE_RIGHT_EDGE_X + JournalForeEdge.GAP_PX
+			+ JournalForeEdge.FRAME_EXTENDED.size.x)
+	assert_eq(fit.position.y, cover.get_used_rect().position.y)
+	assert_eq(fit.end.y, cover.get_used_rect().end.y)
+
+
+func test_a_small_window_shrinks_the_book_onto_whole_device_pixels() -> void:
+	# The default window on a 1080p monitor: 360x202 logical at 4x.
+	var book := journal.get_node("Book") as Control
+	var art := journal.get_node("Book/BookArt") as Control
+	book.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	book.position = Vector2.ZERO
+	book.size = Vector2(360, 202)
+	journal.fit_to(4)
+	assert_eq(book.scale, Vector2(0.75, 0.75))
+	assert_eq(art.size, Vector2(480, 270), "the art keeps its native size")
+	# Device px = 4 * logical; a book texel is 3 of them, from a whole-pixel origin.
+	var origin: Vector2 = book.scale * art.position * 4.0
+	assert_eq(origin, origin.round(), "origin %s on the device grid" % origin)
+	var fit := Rect2(book.scale * (art.position + Vector2(FieldJournal.FIT_RECT.position)) * 4.0,
+			book.scale * Vector2(FieldJournal.FIT_RECT.size) * 4.0)
+	assert_true(Rect2(0, 0, 1440, 808).encloses(fit), "fit %s on a 1440x808 window" % fit)
+
+
+func test_a_window_the_book_fits_leaves_it_at_the_world_scale() -> void:
+	var book := journal.get_node("Book") as Control
+	var art := journal.get_node("Book/BookArt") as Control
+	book.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	book.position = Vector2.ZERO
+	book.size = Vector2(480, 270)
+	journal.fit_to(4)
+	assert_eq(book.scale, Vector2.ONE)
+	assert_eq(art.position, Vector2(0, -1), "FIT_RECT's centre on the view's")
 
 
 func test_book_parks_fully_below_any_viewport() -> void:
@@ -808,7 +877,7 @@ func test_journal_titles_are_drawable_in_the_title_face() -> void:
 	# written accent-free ON PURPOSE ("construcciones conocidas", not
 	# "construcción"). Nothing else enforces that, so this does.
 	var face: Font = _cal().active_header_font()
-	assert_eq(face.resource_path, TITLE_FONT, "titles must be the Eggmode face")
+	assert_eq(face.resource_path, TITLE_FONT, "titles must be the title face")
 
 	var keys: Array[String] = [_cal().header_text]
 	for s: JournalKnownSet in _sections():
@@ -823,7 +892,7 @@ func test_journal_titles_are_drawable_in_the_title_face() -> void:
 			for i: int in text.length():
 				assert_true(
 					face.has_char(text.unicode_at(i)),
-					"%s/%s: Eggmode has no glyph for '%s' — the journal's titles must be accent-free"
+					"%s/%s: the title face has no glyph for '%s'"
 						% [key, locale, text[i]])
 			assert_eq(text, text.to_lower(),
 				"%s/%s: UI copy is lowercase, per the project convention" % [key, locale])
@@ -865,20 +934,49 @@ func test_journal_titles_fit_their_page() -> void:
 
 		var cal := _cal()
 		var cal_face: Font = cal.active_header_font()
+		# The CASED text, which is what draws: a capital is wider.
+		var cal_text := JournalTitle.cased(tr(cal.header_text))
 		var cal_w: float = cal_face.get_string_size(
-			tr(cal.header_text), HORIZONTAL_ALIGNMENT_LEFT, -1, cal.header_font_size).x
+			cal_text, HORIZONTAL_ALIGNMENT_LEFT, -1, cal.header_font_size).x
 		assert_lte(cal_w, cal.size.x,
 			"%s: calendar title '%s' is %.0fpx on a %.0fpx page"
-				% [locale, tr(cal.header_text), cal_w, cal.size.x])
+				% [locale, cal_text, cal_w, cal.size.x])
 
 		for s: JournalKnownSet in _sections():
 			var face: Font = s.active_header_font()
-			var w: float = face.get_string_size(
-				tr(s.title), HORIZONTAL_ALIGNMENT_LEFT, -1, s.header_font_size).x
+			var w: float = face.get_string_size(JournalTitle.cased(tr(s.title)),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, s.header_font_size).x
 			# The heading starts at the section's own left inset, so that inset is
 			# not available to the text.
 			var budget: float = s.size.x - 8.0
 			assert_lte(w, budget,
 				"%s: '%s' is %.0fpx in a %.0fpx column"
-					% [locale, tr(s.title), w, budget])
+					% [locale, JournalTitle.cased(tr(s.title)), w, budget])
+	TranslationServer.set_locale(previous)
+
+
+func test_journal_titles_are_cased_by_the_locales_convention() -> void:
+	# The CSV stays lowercase (the chrome convention); the headings put their
+	# casing on at draw time — Spanish sentence case, English title case — and
+	# the glyphs that adds must exist in the title face.
+	var previous := TranslationServer.get_locale()
+	TranslationServer.set_locale("es_CO")
+	assert_eq(JournalTitle.cased("obras conocidas"), "Obras conocidas")
+	assert_eq(JournalTitle.cased("bitácora"), "Bitácora")
+	assert_eq(JournalTitle.cased(""), "")
+	TranslationServer.set_locale("en_GB")
+	assert_eq(JournalTitle.cased("known buildings"), "Known Buildings")
+	assert_eq(JournalTitle.cased("season log"), "Season Log")
+	var face: Font = _cal().active_header_font()
+	var keys: Array[String] = [_cal().header_text]
+	for s: JournalKnownSet in _sections():
+		keys.append(s.title)
+	for locale: String in LOCALES:
+		TranslationServer.set_locale(locale)
+		for key: String in keys:
+			var text := JournalTitle.cased(tr(key))
+			assert_ne(text, tr(key), "%s/%s: the heading is cased" % [key, locale])
+			for i: int in text.length():
+				assert_true(face.has_char(text.unicode_at(i)),
+					"%s/%s: no glyph for '%s'" % [key, locale, text[i]])
 	TranslationServer.set_locale(previous)

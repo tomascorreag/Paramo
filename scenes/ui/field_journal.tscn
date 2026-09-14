@@ -10,7 +10,7 @@
 [ext_resource type="Script" uid="uid://x7dfs44812m3" path="res://scripts/ui/page_slit.gd" id="8_slit"]
 [ext_resource type="Shader" uid="uid://c88n8ti56qvxq" path="res://assets/shaders/page_slit.gdshader" id="9_slitsh"]
 [ext_resource type="Script" uid="uid://dhciw5330fbbu" path="res://scripts/ui/run_calendar.gd" id="10_cal"]
-[ext_resource type="FontFile" uid="uid://c2aw5fmhnmntg" path="res://assets/fonts/Eggmode-Pd8g.ttf" id="11_egg"]
+[ext_resource type="FontFile" uid="uid://bfoy6hrfhuy7t" path="res://assets/fonts/FantasticBoogaloo-GDlq.ttf" id="11_title"]
 [ext_resource type="Script" uid="uid://llfjwj6xucbe" path="res://scripts/ui/journal_resources.gd" id="12_res"]
 [ext_resource type="Texture2D" uid="uid://coe5b20mflg00" path="res://assets/sprites/UX/icons/water_small.tres" id="14_water"]
 [ext_resource type="Texture2D" uid="uid://beyudk1uthn0j" path="res://assets/sprites/UX/icons/money_small.tres" id="15_money"]
@@ -21,11 +21,29 @@
 [ext_resource type="Texture2D" uid="uid://bbpg5ojlxb0gh" path="res://resources/ui/journal_ink_warm.tres" id="19_inkwarm"]
 [ext_resource type="TileSet" uid="uid://kyiktpi3leg1" path="res://resources/tiles/base_tileset.tres" id="20_tiles"]
 [ext_resource type="Texture2D" path="res://resources/objects/variants/frailejon_3.tres" id="21_frail"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_barclayana_3.tres" id="22_barc"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/espeletia_hartwegiana_3.tres" id="23_hart"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/hypericum_3.tres" id="24_hype"]
+[ext_resource type="Texture2D" path="res://resources/objects/variants/arcytophyllum_3.tres" id="25_arcy"]
 [ext_resource type="Texture2D" uid="uid://beuuvvk0p5pnv" path="res://resources/ui/journal_ink_green.tres" id="22_inkgreen"]
 [ext_resource type="Texture2D" uid="uid://dsacbgjb0dpw" path="res://resources/ui/journal_ink_cool.tres" id="23_inkcool"]
 [ext_resource type="Texture2D" uid="uid://dnfw5nq3847p3" path="res://resources/ui/journal_ink_neutral.tres" id="24_inkneutral"]
 [ext_resource type="Texture2D" uid="uid://cwrdu208heb4c" path="res://assets/sprites/UX/icons/water.tres" id="26_waterbig"]
 [ext_resource type="Texture2D" uid="uid://cdqpb0ioeqmvm" path="res://assets/sprites/UX/icons/money.tres" id="27_moneybig"]
+[ext_resource type="Script" path="res://scripts/ui/journal_species_plate.gd" id="28_plate"]
+[ext_resource type="Script" path="res://scripts/ui/journal_fore_edge.gd" id="30_edge"]
+[ext_resource type="Resource" path="res://resources/objects/frailejon.tres" id="31_sp_frailejon"]
+[ext_resource type="Resource" path="res://resources/objects/espeletia_hartwegiana.tres" id="32_sp_hart"]
+[ext_resource type="Resource" path="res://resources/objects/espeletia_barclayana.tres" id="33_sp_barc"]
+[ext_resource type="Resource" path="res://resources/objects/calamagrostis.tres" id="34_sp_cala"]
+[ext_resource type="Resource" path="res://resources/objects/chusquea.tres" id="35_sp_chus"]
+[ext_resource type="Resource" path="res://resources/objects/cortaderia.tres" id="36_sp_cort"]
+[ext_resource type="Resource" path="res://resources/objects/hypericum.tres" id="37_sp_hype"]
+[ext_resource type="Resource" path="res://resources/objects/arcytophyllum.tres" id="38_sp_arcy"]
+[ext_resource type="Resource" path="res://resources/ecosystems/chingaza.tres" id="39_eco_chingaza"]
+[ext_resource type="Resource" path="res://resources/ecosystems/guerrero.tres" id="40_eco_guerrero"]
+[ext_resource type="Resource" path="res://resources/ecosystems/nevados.tres" id="41_eco_nevados"]
+[ext_resource type="Script" path="res://scripts/ui/journal_page_corners.gd" id="42_corners"]
 
 [sub_resource type="CurveTexture" id="CurveTexture_d0ded"]
 width = 157
@@ -112,6 +130,7 @@ shader_parameter/shadow_feather_px = 5.0
 [node name="FieldJournal" type="CanvasLayer" unique_id=1601302349]
 layer = 140
 script = ExtResource("1_fj")
+bitacora_species = Array[Resource]([ExtResource("31_sp_frailejon"), ExtResource("32_sp_hart"), ExtResource("33_sp_barc"), ExtResource("34_sp_cala"), ExtResource("35_sp_chus"), ExtResource("36_sp_cort"), ExtResource("37_sp_hype"), ExtResource("38_sp_arcy")])
 
 [node name="Dim" type="ColorRect" parent="." unique_id=616720214]
 unique_name_in_owner = true
@@ -221,7 +240,7 @@ label_width_px = 37
 header_underline_offset_px = 1
 day_number_offset_px = 8
 font = ExtResource("16_tiny5")
-header_font = ExtResource("11_egg")
+header_font = ExtResource("11_title")
 block_px = 18
 rule_color = Color(0.64705884, 0.47058824, 0.33333334, 1)
 stamp_scale = 0.45
@@ -235,6 +254,21 @@ preview_stats = PackedInt32Array(6, 4, 3, 2, 5, 1, 0, 4, 2)
 stamp_wobble_px = 2
 wobble_segment_px = 24
 preview_season_names = PackedStringArray("SEASON_WET", "SEASON_DRY")
+
+[node name="SpeciesPlateLeft" type="Control" parent="Book/BookArt/Pages/PageLeft/SubViewport/Content" unique_id=1961899850]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 213.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("28_plate")
+ecosystems = Array[Resource]([ExtResource("39_eco_chingaza"), ExtResource("40_eco_guerrero"), ExtResource("41_eco_nevados")])
+font = ExtResource("16_tiny5")
+name_font = ExtResource("11_title")
+ink_material = SubResource("ShaderMaterial_ink")
 
 [node name="PageRight" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1780670663]
 texture_filter = 1
@@ -286,7 +320,7 @@ resource_ids = PackedStringArray("water", "tokens")
 icons = Array[Texture2D]([ExtResource("26_waterbig"), ExtResource("27_moneybig")])
 column_px = 48
 left_inset_px = 0
-header_font = ExtResource("11_egg")
+header_font = ExtResource("11_title")
 font = ExtResource("16_tiny5")
 ink_material = SubResource("ShaderMaterial_ink")
 preview_amounts = PackedInt32Array(12, 40)
@@ -307,7 +341,7 @@ tileset = ExtResource("20_tiles")
 cell_size = Vector2i(24, 30)
 cell_sizes = Array[Vector2i]([Vector2i(20, 30), Vector2i(36, 30), Vector2i(30, 30)])
 header_gap_px = -12
-header_font = ExtResource("11_egg")
+header_font = ExtResource("11_title")
 ink_material = SubResource("ShaderMaterial_ink")
 
 [node name="KnownFlora" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899849]
@@ -322,12 +356,29 @@ mouse_filter = 2
 script = ExtResource("17_known")
 title = "JOURNAL_KNOWN_FLORA"
 tile_kinds = PackedStringArray()
-textures = Array[Texture2D]([ExtResource("21_frail")])
-entry_ids = PackedStringArray("frailejon")
+textures = Array[Texture2D]([ExtResource("21_frail"), ExtResource("22_barc"), ExtResource("23_hart"), ExtResource("24_hype"), ExtResource("25_arcy")])
+entry_ids = PackedStringArray("frailejon", "espeletia_barclayana", "espeletia_hartwegiana", "hypericum", "arcytophyllum")
 tileset = ExtResource("20_tiles")
+align_ink_bottom = true
+require_discovery = true
 cell_size = Vector2i(24, 30)
 header_gap_px = -12
-header_font = ExtResource("11_egg")
+header_font = ExtResource("11_title")
+ink_material = SubResource("ShaderMaterial_ink")
+
+[node name="SpeciesPlateRight" type="Control" parent="Book/BookArt/Pages/PageRight/SubViewport/Content" unique_id=1961899851]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 213.0
+grow_horizontal = 2
+mouse_filter = 2
+script = ExtResource("28_plate")
+ecosystems = Array[Resource]([ExtResource("39_eco_chingaza"), ExtResource("40_eco_guerrero"), ExtResource("41_eco_nevados")])
+font = ExtResource("16_tiny5")
+name_font = ExtResource("11_title")
 ink_material = SubResource("ShaderMaterial_ink")
 
 [node name="SeasonGaugeHolder" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1423454152 node_paths=PackedStringArray("page")]
@@ -362,3 +413,15 @@ mouse_filter = 2
 texture = ExtResource("3_wheel")
 expand_mode = 1
 stretch_mode = 5
+
+[node name="ForeEdge" type="Control" parent="Book/BookArt" unique_id=1961899852]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("30_edge")
+
+[node name="PageCorners" type="Control" parent="Book/BookArt" unique_id=1961899853]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("42_corners")
