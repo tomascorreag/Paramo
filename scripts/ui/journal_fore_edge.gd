@@ -98,7 +98,13 @@ const LABEL_INSET_PX: int = 3
 
 const INK: Color = Palette.P06
 
+## How far the tab bobs along the page edge while the FTUE points at it. Whole
+## texels, set by FieldJournal from its cue clock. It is off the paper, so no
+## warp block to respect — unlike a swatch, it can travel 2.
+const WIGGLE_PX: int = 2
+
 var _tabs: Array[Tab] = []
+var _wiggle: int = 0
 var _journal: FieldJournal = null
 ## The pointer is over the shown tab, which is drawn extended.
 var _extended: bool = false
@@ -172,7 +178,16 @@ func tab_rect(t: Tab, extended: bool = _extended) -> Rect2i:
 	var length: int = ceili(label_length_px(t.key)) + 2 * LABEL_PAD_PX
 	var x: int = PAGE_RIGHT_EDGE_X + GAP_PX if t.side == Side.RIGHT \
 		else PAGE_LEFT_EDGE_X - GAP_PX - w
-	return Rect2i(x, (PAGE_TOP_Y + PAGE_BOTTOM_Y - length) / 2, w, length)
+	return Rect2i(x, (PAGE_TOP_Y + PAGE_BOTTOM_Y - length) / 2 + _wiggle, w, length)
+
+
+## Offset the tab along the page edge by `px` (the FTUE's "click this"). The hit
+## rect moves with it, so what bobs is what answers.
+func set_wiggle(px: int) -> void:
+	if px == _wiggle:
+		return
+	_wiggle = px
+	queue_redraw()
 
 
 ## What answers to `t`: its rect as drawn, grown INTO the page by the gap

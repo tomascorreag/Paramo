@@ -3,6 +3,25 @@
 `...` = `"../Godot_v4.6.1-stable_win64.exe/Godot_v4.6.1-stable_win64_console.exe" --path .`
 Every tool here needs a rendering context — **do NOT pass `--headless`.**
 
+## Fitting the window — `FieldJournal.fit_to`
+
+The world is drawn at N device pixels per texel, with N taken from the monitor (`DisplayManager`), so a smaller window shows less world. It used to show less book too: at 1440×810 on a 1080p monitor the logical view is 360×202, and the book, 394×239 from tab to tab and cover top to bottom (`FieldJournal.FIT_RECT`), hung off both sides. The run tab on the bitácora spread was off-screen, and so was the FTUE's "click the resources tab" target.
+
+The book now picks its own whole number M ≤ N of device pixels per texel, the largest at which `FIT_RECT` fits the window (`fit_scale`), and scales `Book` by M/N. Under CANVAS_ITEMS stretch every canvas item is rasterized at window resolution, so a book texel is exactly M device pixels. `BookArt` keeps its centre anchors; only its offsets move, so that `FIT_RECT`'s centre sits on the view's centre at a whole book texel. N is read off the viewport's own stretch (`get_final_transform()`), not `DisplayManager`, so the preview tools' plain SubViewports see N = 1 and render unchanged. Below M = 1 (a window under 394×239 px) it crops; nothing is left to give.
+
+- The world scale is untouched. The rejected alternative was lowering N for the whole game whenever the book doesn't fit, which re-zooms the world with window size and contradicts the monitor-derived N.
+- `Book.scale` is not `CanvasLayer.transform`, so `Dim` stays full-screen and the slide offsets stay in logical pixels.
+- `get_global_rect()` ignores a parent's scale. Anything outside the book that needs a page's screen position goes through `get_global_transform_with_canvas()` (`page_left_rect`/`page_right_rect`, read by the FTUE dock). Input inside the book is unaffected: every hit test there is local or global-transform based.
+
+**MEASURED 2026-09-14** at real stretch (root window, CANVAS_ITEMS + INTEGER, run spread with the bitácora tab showing). Every book texel over `FIT_RECT` was checked to be a uniform M×M device-pixel block, 94 166 of 94 166 in each case, tab label included:
+
+| window | N | M | `FIT_RECT` on device |
+|---|---|---|---|
+| 1440×810 | 4 | 3 | x 129–1311, y 45–762 |
+| 1200×675 | 4 | 2 | x 206–994, y 98–576 |
+| 960×540 | 2 | 2 | x 86–874, y 32–510 |
+| 1280×720 | 3 | 3 | x 48–1230, y 3–720 |
+
 ## Page warp — `scripts/tools/preview_page_warp.gd`
 
 `assets/shaders/page_warp.gdshader` bends each page's content to follow the

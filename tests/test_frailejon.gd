@@ -298,6 +298,29 @@ func test_a_mature_damaged_plant_keeps_processing_until_it_has_healed() -> void:
 # commands on the plant's own CanvasItem. So these tests assert on the private
 # offset arrays and on the sprite, not on the occupant registry.
 
+func test_highlight_mixes_toward_white_and_hands_the_material_back() -> void:
+	var inst := _instance_with("res://resources/objects/frailejon.tres")
+	var sprite := inst.get_node("Sprite2D") as Sprite2D
+	var shared: Material = sprite.material
+	inst.set_highlight(0.3)
+	var mat := sprite.material as ShaderMaterial
+	assert_not_null(mat)
+	assert_ne(mat, shared, "the highlight must not write to a shared material")
+	assert_almost_eq(float(mat.get_shader_parameter(&"flash_amount")), 0.3, 1e-4)
+	assert_eq(mat.get_shader_parameter(&"flash_color"), Frailejon.HIGHLIGHT_COLOR)
+	inst.set_highlight(0.0)
+	assert_eq(sprite.material, shared, "off hands the plant's own material back")
+
+
+func test_a_real_flash_outranks_the_highlight() -> void:
+	var inst := _instance_with("res://resources/objects/frailejon.tres")
+	inst.set_highlight(0.3)
+	inst.play_discovery_flash()
+	inst.set_highlight(0.0)
+	assert_true(inst.is_flashing(),
+			"turning the pulse off as the plant is identified must not cut the gold flash")
+
+
 func _instance_with(data_path: String) -> Frailejon:
 	var inst: Frailejon = load("res://scenes/tools/frailejon.tscn").instantiate()
 	inst.data = load(data_path)

@@ -159,7 +159,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# whole of "no building before the FTUE's build step". Below the brake above
 	# on purpose: stopping a walk is part of the movement the FTUE has already
 	# taught by then. Not consumed, for the same reason as click-to-move.
-	if not TutorialGate.allows(TutorialGate.Action.BUILD):
+	# INSPECT opens the same menu earlier with only the magnifier in it (below).
+	var build_allowed := TutorialGate.allows(TutorialGate.Action.BUILD)
+	if not build_allowed and not TutorialGate.allows(TutorialGate.Action.INSPECT):
 		return
 
 	var global_pos := _event_global_position(mb)
@@ -172,6 +174,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	var ctx := _build_context(cell)
 	var actions := _registry.available_for(ctx)
+	if not build_allowed:
+		var inspect_only: Array[TileAction] = []
+		for a in actions:
+			if a.id == &"inspect":
+				inspect_only.append(a)
+		actions = inspect_only
 	if actions.is_empty():
 		# Resolved a tile (e.g. one you can move to) but no action applies —
 		# flash so the player knows the click registered.
@@ -416,7 +424,8 @@ func _on_menu_closed() -> void:
 # Watch for the pending walk to end. is_moving() stays true between steps and
 # while a path is queued, so a single true->false transition means the player
 # either arrived or the path aborted — either way, re-check and act (or deny).
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_toast_position(delta, false)
 	if _pending_action == null:
 		return
 	if player == null or player.is_moving():
@@ -610,13 +619,45 @@ func show_message(text: String, duration: float) -> void:
 	_ensure_toast()
 	_toast_label.text = text
 	_toast_label.modulate.a = 1.0
+	var was_visible: bool = _toast_label.visible
 	_toast_label.visible = true
+	# A fresh caption appears where it belongs; one already up slides there.
+	_update_toast_position(0.0, not was_visible)
 	if _toast_tween and _toast_tween.is_valid():
 		_toast_tween.kill()
 	_toast_tween = create_tween()
 	_toast_tween.tween_interval(duration)
 	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.35)
 	_toast_tween.tween_callback(func() -> void: _toast_label.visible = false)
+
+
+## The toast's resting gap to the bottom of the screen, and its box height.
+const _TOAST_BOTTOM_PX: float = 8.0
+const _TOAST_HEIGHT_PX: float = 20.0
+## How fast a caption rides up over (or back down from) the FTUE strip.
+const _TOAST_LIFT_SPEED: float = 8.0
+var _toast_lift: float = _TOAST_BOTTOM_PX
+
+
+## While the FTUE strip is up the caption sits ABOVE it (the strip is at the
+## bottom of the screen, exactly where the caption goes), and slides back down
+## when the strip leaves. Pulled from the tutorial's `caption_floor` rather
+## than pushed, so nothing here exists when there is no tutorial.
+func _update_toast_position(delta: float, snap: bool) -> void:
+	if _toast_label == null or not is_instance_valid(_toast_label) or not _toast_label.visible:
+		return
+	var target: float = _TOAST_BOTTOM_PX
+	var tut := get_tree().get_first_node_in_group(TutorialController.GROUP)
+	if tut != null and tut.has_method(&"caption_floor"):
+		target = maxf(target, float(tut.call(&"caption_floor")))
+	if snap:
+		_toast_lift = target
+	else:
+		_toast_lift = lerpf(_toast_lift, target, 1.0 - exp(-_TOAST_LIFT_SPEED * delta))
+	# Whole pixels: the label's text is a pixel font.
+	var bottom: float = -roundf(_toast_lift)
+	_toast_label.offset_bottom = bottom
+	_toast_label.offset_top = bottom - _TOAST_HEIGHT_PX
 
 
 func _ensure_toast() -> void:

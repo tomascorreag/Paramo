@@ -522,6 +522,42 @@ func is_flashing() -> bool:
 	return _flash_tween != null and _flash_tween.is_valid()
 
 
+## The colour a highlight mixes toward: the same brightest neutral the build
+## flash uses. Mixed at an amount, never reached — see set_highlight.
+const HIGHLIGHT_COLOR: Color = SpawnFlash.BUILD_COLOR
+
+## Held highlight, 0..1. The FTUE pulses it on the frailejón it points at.
+var _highlight: float = 0.0
+
+
+## Mix the plant toward white by `amount` and HOLD it there until told
+## otherwise — the caller animates it (the FTUE pulses it slowly). Rides the
+## flash material: same per-plant duplicate, same `flash_amount` mix, so it
+## sways with the plant and adds nothing to the palette the flash does not
+## already add.
+##
+## A real flash (planting, a discovery) outranks it: while one runs this only
+## records the amount, and the next call after the tween ends takes the
+## material back. 0 hands the shared sway material back.
+func set_highlight(amount: float) -> void:
+	_highlight = clampf(amount, 0.0, 1.0)
+	if is_flashing():
+		return
+	if _highlight <= 0.0:
+		if _flash_mat != null:
+			_end_flash()
+		return
+	if _flash_mat == null and not _begin_flash():
+		return
+	_flash_mat.set_shader_parameter(&"flash_color", HIGHLIGHT_COLOR)
+	_flash_mat.set_shader_parameter(&"reveal_amount", 1.0)
+	_flash_mat.set_shader_parameter(&"flash_amount", _highlight)
+
+
+func highlight() -> float:
+	return _highlight
+
+
 # Swap both CanvasItems onto a private material that carries the flash
 # uniforms. The sway material is DUPLICATED rather than written to: it is shared
 # by every plant of the species, and an instance uniform is the trap the

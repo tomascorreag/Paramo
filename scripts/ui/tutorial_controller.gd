@@ -3,10 +3,17 @@ extends CanvasLayer
 
 ## The first-time-user experience: a hint strip that opens the run in the
 ## park's voice (two narrative lines), teaches the verbs of the game in the
-## order the player needs them — walk, open the journal, buy a tool, close the
-## journal, build it — then gets out of the way, lets a fire start where the
-## player can't see it, and teaches the last verb by making them go and put it
-## out. A third narrative line signs off.
+## order the player needs them — walk, identify a frailejón, read it in the
+## bitácora, buy it, plant it, identify a second species, buy and build a
+## ladder — then gets out of the way, lets a fire start where the player can't
+## see it, and teaches the last verb by making them go and put it out. A third
+## narrative line signs off.
+##
+## The plant comes before the ladder because discovery gates the shop: a species
+## is only for sale once it has been identified, so the one loop worth teaching
+## first is find → read → buy → sow. ProceduralWorld guarantees a frailejón a
+## few cells from the spawn (ObjectPainter.ensure_flagship_near), so the first
+## step always has something on screen to point at.
 ##
 ## The fire arc is the one part of this that acts on the world rather than
 ## describing it. It is three steps: a QUIET one with no copy at all (the strip
@@ -76,6 +83,26 @@ const _STRIP_WIDTH: float = 200.0
 const _STRIP_MARGIN_BOTTOM: float = 8.0
 ## Clear air between the strip and the skip button under it.
 const _SKIP_GAP: float = 5.0
+## Clear air between the strip and the page it docks beside while the book is
+## open. Centred, the strip covered the shop row: at 360x202 (1440x810 windowed)
+## the flora row ends at y 176 and the strip starts at 141, and the 26 px below
+## the row cannot hold the strip and the skip button — so down was measured out,
+## and sideways is the free axis. Which side follows the SPREAD: on the bitácora
+## the strip clears the LEFT page (the species the player is reading), on the
+## resources spread the RIGHT page (the shop).
+const _DOCK_GAP: float = 2.0
+## How fast the strip slides to a new dock, as an exponential rate per second.
+## ~0.6 s to arrive: slow enough to read as the panel stepping aside.
+const _DOCK_SPEED: float = 5.0
+
+## Clear air between a caption (a plant being named) and the top of the strip.
+const _CAPTION_GAP: float = 3.0
+
+## The "un frailejón crece cerca" step pulses the nearest frailejón toward
+## white: this far at the top of the pulse (never flat white, which would read
+## as the build flash), over this period.
+const _PULSE_MAX: float = 0.35
+const _PULSE_PERIOD: float = 2.2
 
 const _FADE: float = 0.25
 ## Beat between "you did it" and the next line appearing. Long enough to read as
@@ -131,18 +158,23 @@ const _ROAM_SECONDS: float = 12.0
 ## player can feel, which is the point.
 const _FIRE_FUEL: float = 30.0
 
-## Where the fire is lit, as a signed distance BEYOND the edge of the screen in
-## screen-heights (the same metric FireAuraOverlay shapes its glow with, so
-## these are directly comparable to its EDGE_HOLD/REACH).
-##
-## _TARGET is what the search aims at: far enough out that the fire itself is
-## invisible and only the aura reports it, near enough that the aura is strong
-## (the overlay's REACH is 0.9, past which a fire contributes nothing at all —
-## a fire lit beyond it would leave the player with no indicator to follow).
-## _MIN is the floor for "genuinely off screen"; _MAX keeps the walk sane.
-const _FIRE_TARGET_OFFSCREEN: float = 0.35
+## Where the fire may be lit, as a signed distance BEYOND the edge of the screen
+## in screen-heights (the same metric FireAuraOverlay shapes its glow with, so
+## these are directly comparable to its EDGE_HOLD/REACH). _MIN is the floor for
+## "genuinely off screen"; _MAX keeps it inside the aura (REACH 0.9, past which a
+## fire contributes nothing and the player has no indicator to follow). Inside
+## the band the pick is by WALK, not by screen distance — see _rank_fire_cells.
 const _FIRE_MIN_OFFSCREEN: float = 0.10
 const _FIRE_MAX_OFFSCREEN: float = 0.60
+
+## The longest walk the fire may be, in path cost (1 per flat step). The search
+## never expands past it, so nothing across the map is even considered.
+const _FIRE_MAX_WALK: float = 30.0
+## A candidate's walk may be at most this many times its straight-line
+## (Chebyshev) distance. This is the river rule: a cell ten steps away across
+## water, reachable only by a bridge thirty steps upstream, is off screen and
+## reachable and still the wrong fire — it is a detour, not a walk.
+const _FIRE_MAX_DETOUR: float = 2.0
 
 ## However the camera is framed, never light a fire within this many cells of
 ## the player. The screen metric above is the real test; this is the guard
@@ -169,6 +201,20 @@ const _FIRE_ONSCREEN_INSET: float = 0.12
 # step shown so far, so nothing that has been taught is ever taken away again —
 # and the opening narrative, granting nothing, means the run starts with the
 # player able to read and nothing else.
+#
+# "kind" names the completion wiring (_connect_step_signal) and defaults to the
+# id. It exists because the plant and the ladder go through the same verbs
+# twice — discover, shop, close, build — and ids have to stay unique.
+#
+# "sells" is what the shop may sell from this step on (TutorialGate
+# .restrict_purchases), cumulative like "grants". The token budget is exact — a
+# frailejón, then a ladder — so buying anything else on the way spends the
+# ladder's money. `_FRAILEJON` stands for whichever Espeletia this mountain has.
+#
+# "finds" on a discover step narrows what counts; without it, any species the
+# codex has not seen before does.
+const _FRAILEJON: StringName = &"@frailejon"
+
 const _STEPS: Array[Dictionary] = [
 	{"id": &"welcome", "key": "NARRATIVE_WELCOME", "narrative": true},
 	{"id": &"charge", "key": "NARRATIVE_CHARGE", "narrative": true},
@@ -179,8 +225,22 @@ const _STEPS: Array[Dictionary] = [
 		"id": &"move", "key": "TUTORIAL_MOVE",
 		"grants": TutorialGate.Action.MOVE, "repeat": 2, "click": &"left",
 	},
+	# The first right click the game accepts, and the menu it opens holds only
+	# the magnifier (TutorialGate.Action.INSPECT). Specifically a frailejón: it
+	# is the plant the shop will sell, and the one the generator placed nearby.
+	{
+		"id": &"discover", "key": "TUTORIAL_DISCOVER_FRAILEJON",
+		"grants": TutorialGate.Action.INSPECT, "finds": _FRAILEJON, "click": &"right",
+	},
 	{"id": &"journal", "key": "TUTORIAL_JOURNAL", "grants": TutorialGate.Action.JOURNAL},
-	{"id": &"shop", "key": "TUTORIAL_SHOP", "grants": TutorialGate.Action.SHOP},
+	# The bitácora tab only exists once something is identified, so this is the
+	# first moment it can be shown. A player who already turned to it during the
+	# journal step skips the line.
+	{"id": &"bitacora", "key": "TUTORIAL_BITACORA", "click": &"left"},
+	{
+		"id": &"shop", "key": "TUTORIAL_SHOP_FRAILEJON",
+		"grants": TutorialGate.Action.SHOP, "sells": _FRAILEJON,
+	},
 	# The way out of the journal is the one thing here a player cannot discover
 	# by looking: the book covers the screen and its close affordances (Space
 	# again, Esc, a click on the scrim) are all invisible. Its own step.
@@ -191,13 +251,32 @@ const _STEPS: Array[Dictionary] = [
 		"id": &"build", "key": "TUTORIAL_BUILD",
 		"grants": TutorialGate.Action.BUILD, "click": &"right",
 	},
+	# The objective that says what discovery is FOR: the book sells only what
+	# has been identified. Any new species counts, grasses included.
+	{
+		"id": &"discover_more", "kind": &"discover",
+		"key": "TUTORIAL_DISCOVER_MORE", "click": &"right",
+	},
+	# The ladder half is "disabled" (2026-09-14): stepped over, and its "sells"
+	# and "grants" never reach the gate. Delete the flag to bring it back.
+	{
+		"id": &"shop_ladder", "kind": &"shop",
+		"key": "TUTORIAL_SHOP_LADDER", "sells": &"ladder", "disabled": true,
+	},
+	{
+		"id": &"close_journal_ladder", "kind": &"close_journal",
+		"key": "TUTORIAL_CLOSE_JOURNAL", "disabled": true,
+	},
+	{
+		"id": &"build_ladder", "kind": &"build", "key": "TUTORIAL_BUILD",
+		"click": &"right", "disabled": true,
+	},
 	# A ladder, a bridge and a fence are all TWO clicks: the right click above
 	# only opens the ring, and picking the tool from it starts a placement that
 	# a second, LEFT click has to land. Nothing on screen says so — the ghost
 	# and the x marks appear and the player is holding a half-built thing — so
-	# the second click gets its own line. Skipped whole for a build that has no
-	# second click (the frailejon is planted by the ring pick itself), which is
-	# what "placement_only" means.
+	# the second click gets its own line. Skipped whole when no placement is
+	# open, which is what "placement_only" means.
 	{
 		"id": &"build_endpoint", "key": "TUTORIAL_ENDPOINT",
 		"placement_only": true, "click": &"left",
@@ -261,6 +340,9 @@ var _step_progress: int = 0
 ## disconnected at this point; only the hand-off is waiting.
 var _completion_pending: bool = false
 
+## The full-screen margin container the column hangs in; its right margin is
+## what docks the strip beside an open book.
+var _anchor: MarginContainer
 var _strip: Control
 var _label: Label
 ## The mouse glyph leading the copy, shown only on steps that ask for a click.
@@ -281,6 +363,7 @@ var _fire_cell: Vector2i = Pathfinder.NO_CELL
 
 # Scene peers, resolved by group once the run is live.
 var _click_to_move: Node
+var _codex: Node
 var _journal: Node
 var _unlocks: Node
 var _traversal: Node
@@ -320,7 +403,162 @@ func _process(delta: float) -> void:
 			_completion_pending = false
 			_advance()
 		_tick_fire_follow()
+	_update_dock(delta)
+	_update_cues()
+	_update_pulse()
 	_tick_skip_hold(delta)
+
+
+# --- Staying out of the way, and pointing ------------------------------------
+
+## The strip's centre x as it slides, or -1 before the first frame.
+var _dock_x: float = -1.0
+
+
+## Slide the column beside the open book (which side by spread, see _DOCK_GAP),
+## back to centre when it closes. Read per frame off the live page rects: they
+## move with a window resize, and an unchanged theme constant is not re-set.
+func _update_dock(delta: float) -> void:
+	if _anchor == null:
+		return
+	var view_w: float = get_viewport().get_visible_rect().size.x
+	var target: float = view_w * 0.5
+	if _journal != null and is_instance_valid(_journal) and bool(_journal.call(&"is_open")):
+		target = _dock_center(view_w, _journal.call(&"spread") == &"bitacora",
+				_journal.call(&"page_left_rect"), _journal.call(&"page_right_rect"))
+	if _dock_x < 0.0:
+		_dock_x = target
+	_dock_x = lerpf(_dock_x, target, 1.0 - exp(-_DOCK_SPEED * delta))
+	if absf(_dock_x - target) < 0.5:
+		_dock_x = target
+	# Whole pixels: the column is centred between the two margins, so a centre
+	# at c needs one margin of |2c - w| on the side it moves away from.
+	var c: float = roundf(_dock_x)
+	var left: int = int(maxf(0.0, 2.0 * c - view_w))
+	var right: int = int(maxf(0.0, view_w - 2.0 * c))
+	if _anchor.get_theme_constant(&"margin_left") != left:
+		_anchor.add_theme_constant_override(&"margin_left", left)
+	if _anchor.get_theme_constant(&"margin_right") != right:
+		_anchor.add_theme_constant_override(&"margin_right", right)
+
+
+## The strip's centre x beside an open book: clear of the left page on the
+## bitácora, clear of the right page on the resources spread. A page with no
+## rect (no journal scene) keeps it centred; the result never puts the strip
+## off either edge of the screen.
+static func _dock_center(view_w: float, on_bitacora: bool, left_page: Rect2,
+		right_page: Rect2) -> float:
+	var half: float = _STRIP_WIDTH * 0.5
+	var page: Rect2 = left_page if on_bitacora else right_page
+	if page.size.x <= 0.0:
+		return view_w * 0.5
+	var c: float = page.end.x + _DOCK_GAP + half if on_bitacora \
+			else page.position.x - _DOCK_GAP - half
+	return clampf(c, half, maxf(view_w - half, half))
+
+
+## What the open book should point at for the current step. Nothing during a
+## hand-off: the thing was just done.
+func _update_cues() -> void:
+	if _journal == null or not is_instance_valid(_journal):
+		return
+	var kind: StringName = &"" if (_advancing or _completion_pending) else _kind()
+	var cue := _cue_for(kind, _journal.call(&"spread"),
+			_expand_sells(_STEPS[_step]) if _step >= 0 and _step < _STEPS.size() else ([] as Array[StringName]))
+	_journal.call(&"set_cue", cue["tab"], cue["entries"])
+
+
+## `{tab, entries}` for a step kind on a spread. The bitácora step points at the
+## tab while the book is still on resources. A shop step points at the tab back
+## to resources while the book is on the bitácora, and at the entries it sells
+## once the shop is showing. Pure, for the test.
+static func _cue_for(kind: StringName, spread: StringName, sells: Array[StringName]) -> Dictionary:
+	var tab: bool = false
+	var entries: Array[StringName] = []
+	match kind:
+		&"bitacora":
+			tab = spread != &"bitacora"
+		&"shop":
+			if spread == &"bitacora":
+				tab = true
+			else:
+				entries = sells
+	return {"tab": tab, "entries": entries}
+
+
+## The frailejón the discover step's line is about, pulsing while it is up.
+var _pulse_plant: Node2D = null
+## Searched once per showing of the step, so a map with no frailejón in reach
+## doesn't walk the occupant registry every frame.
+var _pulse_looked: bool = false
+
+
+func _update_pulse() -> void:
+	if _current_id() != &"discover" or _advancing or _completion_pending:
+		_release_pulse()
+		return
+	if _pulse_plant == null or not is_instance_valid(_pulse_plant):
+		if _pulse_looked:
+			return
+		_pulse_looked = true
+		_pulse_plant = _closest_frailejon()
+		if _pulse_plant == null:
+			return
+	# From 0, so it fades in with the line rather than popping on.
+	var wave: float = 0.5 - 0.5 * cos(_step_elapsed / _PULSE_PERIOD * TAU)
+	_pulse_plant.call(&"set_highlight", _PULSE_MAX * wave)
+
+
+func _release_pulse() -> void:
+	if _pulse_plant != null and is_instance_valid(_pulse_plant):
+		_pulse_plant.call(&"set_highlight", 0.0)
+	_pulse_plant = null
+
+
+## The Espeletia occupant nearest the player (Chebyshev), or null. Chosen once,
+## when the line appears, and kept: re-picking as the player walks would hop
+## the pulse between plants.
+func _closest_frailejon() -> Node2D:
+	if _pathfinder == null or not is_instance_valid(_pathfinder) \
+			or _player == null or not is_instance_valid(_player):
+		return null
+	var grid: Object = _pathfinder.call(&"grid")
+	if grid == null:
+		return null
+	var anchor: Vector2i = _player.get(&"current_cell")
+	var best: Node2D = null
+	var best_d: int = 0x7FFFFFFF
+	for kind: StringName in ObjectPainter.kinds():
+		if not ObjectPainter.is_espeletia(kind):
+			continue
+		var occupants: Dictionary = grid.call(&"occupants_of_kind", kind)
+		for cell: Vector2i in occupants:
+			var node: Node2D = occupants[cell]
+			if node == null or not is_instance_valid(node) or not node.has_method(&"set_highlight"):
+				continue
+			var d: int = maxi(absi(cell.x - anchor.x), absi(cell.y - anchor.y))
+			if d < best_d:
+				best_d = d
+				best = node
+	return best
+
+
+## How far up from the bottom of the screen a caption has to sit to clear the
+## strip, in pixels; 0 while there is no strip (not running, or the quiet
+## step). Read by TileInteractionController's toast. Off the strip's LAYOUT
+## rect, not its alpha, so a hand-off fade between two lines doesn't drop the
+## caption and lift it straight back.
+func caption_floor() -> float:
+	if not _running or _strip == null or _is_quiet():
+		return 0.0
+	return get_viewport().get_visible_rect().size.y \
+			- _strip.get_global_rect().position.y + _CAPTION_GAP
+
+
+func _clear_cues() -> void:
+	if _journal != null and is_instance_valid(_journal):
+		_journal.call(&"set_cue", false, [] as Array[StringName])
+	_release_pulse()
 
 
 ## The follow step is the FTUE's ONE polled completion, and the exception proves
@@ -373,7 +611,9 @@ func _show_step(index: int) -> void:
 	_step_elapsed = 0.0
 	_step_progress = 0
 	_completion_pending = false
+	_pulse_looked = false
 	TutorialGate.restrict_to(_granted_mask())
+	TutorialGate.restrict_purchases(_granted_purchases())
 	_label.text = _step_key()
 	_apply_click_glyph()
 	_connect_step_signal()
@@ -414,9 +654,47 @@ func _apply_click_glyph() -> void:
 func _granted_mask() -> int:
 	var mask: int = 0
 	for i: int in mini(_step + 1, _STEPS.size()):
-		if _STEPS[i].has("grants"):
+		if _STEPS[i].has("grants") and not _is_disabled(_STEPS[i]):
 			mask |= TutorialGate.bit(_STEPS[i]["grants"])
 	return mask
+
+
+## Every id the shop may sell at the current step: the "sells" of this step and
+## every step before it, with `_FRAILEJON` expanded. Cumulative for the same
+## reason as the mask — a frailejón the player was told to buy stays buyable.
+func _granted_purchases() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for i: int in mini(_step + 1, _STEPS.size()):
+		if not _is_disabled(_STEPS[i]):
+			ids.append_array(_expand_sells(_STEPS[i]))
+	return ids
+
+
+## A step switched off in the table: never shown, and grants and sells nothing.
+static func _is_disabled(step: Dictionary) -> bool:
+	return bool(step.get("disabled", false))
+
+
+## One step's "sells", with `_FRAILEJON` expanded; empty for a step with none.
+static func _expand_sells(step: Dictionary) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if not step.has("sells"):
+		return ids
+	var sells: StringName = step["sells"]
+	if sells == _FRAILEJON:
+		for kind: StringName in ObjectPainter.kinds():
+			if ObjectPainter.is_espeletia(kind):
+				ids.append(kind)
+	else:
+		ids.append(sells)
+	return ids
+
+
+## What a step's completion is wired to: its "kind", else its id.
+func _kind() -> StringName:
+	if _step < 0 or _step >= _STEPS.size():
+		return &""
+	return _STEPS[_step].get("kind", _STEPS[_step]["id"])
 
 
 ## Whether the current step has anything to say right now. Two steps can answer
@@ -433,12 +711,34 @@ func _granted_mask() -> int:
 ## where it happens (_tick_fire_follow for the follow step, the douse step's own
 ## signals for the douse). Folding a live world query in here would also make
 ## the step unrenderable by preview_tutorial_strip.gd, which has no fire.
+##
+## Three more are already done when they come up. A discover step whose find is
+## already in the codex (the player identified a second species while looking
+## for the frailejón), and the bitácora step when the book is already turned to
+## it. Each asks its live peer, and a missing peer (the preview tool) means the
+## step shows.
 func _step_applies() -> bool:
 	var step: Dictionary = _STEPS[_step]
+	if _is_disabled(step):
+		return false
 	if bool(step.get("placement_only", false)):
 		return _traversal != null and bool(_traversal.call(&"is_placing"))
 	if bool(step.get("fire_only", false)):
 		return _fire_cell != Pathfinder.NO_CELL
+	match _kind():
+		&"discover":
+			if _codex == null or not is_instance_valid(_codex):
+				return true
+			var known: PackedStringArray = _codex.call(&"known_ids")
+			if step.get("finds", &"") == _FRAILEJON:
+				for id: String in known:
+					if ObjectPainter.is_espeletia(StringName(id)):
+						return false
+				return true
+			# "Another" species: the frailejón is one, so two means done.
+			return known.size() < 2
+		&"bitacora":
+			return _journal == null or _journal.call(&"spread") != &"bitacora"
 	return true
 
 
@@ -511,14 +811,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_complete_step()
 
 
-## The translation key for the current step. Only the build step varies: it
-## names the type the shop step bought, falling back to the generic line if the
-## player somehow reached it having bought something unlisted.
+## The translation key for the current step. Only the build steps vary: they
+## name the type the shop step before them bought, falling back to the generic
+## line if the player somehow reached one having bought something unlisted.
 func _step_key() -> String:
 	var step: Dictionary = _STEPS[_step]
-	if step["id"] == &"build" and _BUILD_KEYS.has(_bought_type):
+	if _kind() == &"build" and _BUILD_KEYS.has(_bought_type):
 		return String(_BUILD_KEYS[_bought_type])
-	if step["id"] == &"build_endpoint" and _ENDPOINT_KEYS.has(_bought_type):
+	if _kind() == &"build_endpoint" and _ENDPOINT_KEYS.has(_bought_type):
 		return String(_ENDPOINT_KEYS[_bought_type])
 	return String(step["key"])
 
@@ -563,6 +863,7 @@ func _finish() -> void:
 	_finished = true
 	_running = false
 	_disconnect_step_signal()
+	_clear_cues()
 	TutorialGate.release()
 	set_process(false)
 	# Free rather than hide: nothing here has a second act, and a live
@@ -577,6 +878,7 @@ func _finish() -> void:
 ## walk.
 func _exit_tree() -> void:
 	TutorialGate.release()
+	_clear_cues()
 
 
 ## The skip button, and the public way for anything else to end the FTUE.
@@ -592,10 +894,16 @@ func skip() -> void:
 # no polling, no proximity guessing.
 
 func _connect_step_signal() -> void:
-	match _STEPS[_step]["id"]:
+	match _kind():
 		&"move":
 			if _click_to_move != null:
 				_click_to_move.connect(&"path_dispatched", _on_moved)
+		&"discover":
+			if _codex != null:
+				_codex.connect(&"discovered", _on_discovered)
+		&"bitacora":
+			if _journal != null:
+				_journal.connect(&"spread_changed", _on_spread_changed)
 		&"journal":
 			if _journal != null:
 				_journal.connect(&"opened", _complete_step)
@@ -645,11 +953,17 @@ func _connect_step_signal() -> void:
 func _disconnect_step_signal() -> void:
 	if _step < 0 or _step >= _STEPS.size():
 		return
-	match _STEPS[_step]["id"]:
+	match _kind():
 		&"move":
 			if _click_to_move != null and _click_to_move.is_connected(
 					&"path_dispatched", _on_moved):
 				_click_to_move.disconnect(&"path_dispatched", _on_moved)
+		&"discover":
+			if _codex != null and _codex.is_connected(&"discovered", _on_discovered):
+				_codex.disconnect(&"discovered", _on_discovered)
+		&"bitacora":
+			if _journal != null and _journal.is_connected(&"spread_changed", _on_spread_changed):
+				_journal.disconnect(&"spread_changed", _on_spread_changed)
 		&"journal":
 			if _journal != null and _journal.is_connected(&"opened", _complete_step):
 				_journal.disconnect(&"opened", _complete_step)
@@ -697,9 +1011,27 @@ func _on_placement_ended(_kind: StringName, built: bool) -> void:
 	_show_step(_step - 1)
 
 
+## Only a purchase the step asked for counts. The gate already refuses anything
+## else, so this is the second half of that claim, not the first.
 func _on_unlocked(type: StringName) -> void:
+	if not TutorialGate.allows_purchase(type):
+		return
 	_bought_type = type
 	_complete_step()
+
+
+## A species the codex had not seen. `codex.discovered` never fires for a
+## re-inspection, so on the open-ended step any emission is a new species.
+func _on_discovered(species: StringName) -> void:
+	if _STEPS[_step].get("finds", &"") == _FRAILEJON \
+			and not ObjectPainter.is_espeletia(species):
+		return
+	_complete_step()
+
+
+func _on_spread_changed(spread: StringName) -> void:
+	if spread == &"bitacora":
+		_complete_step()
 
 
 func _on_placed(_type: StringName, _count: int) -> void:
@@ -736,50 +1068,62 @@ func _light_the_fire() -> void:
 		_fire_cell = Pathfinder.NO_CELL
 
 
-## Where to light it: a cell the player can WALK to, that will BURN, and that is
-## off the edge of the screen but still inside the reach of the screen-edge aura
-## — because the aura is the only thing that will tell the player it exists.
+## Where to light it: a cell that will BURN, off the edge of the screen but
+## inside the aura's reach, and the SHORTEST WALK from the player that is — the
+## lesson is "look at the glow, go there", not a trek.
 ##
-## Reachability comes from the pathfinder's own flood fill, so the answer can
-## never be a fire across a ravine; burnability from FireManager.can_ignite, so
-## it can never be water, rock or dirt. What is left is ranked on ONE number:
-## how far beyond the edge of the screen the cell sits, against
-## _FIRE_TARGET_OFFSCREEN.
-##
-## The fallback is deliberate rather than an accident of the ranking: if nothing
-## sits in the off-screen band (a wide window, a player standing at the edge of
-## the mountain), take the FARTHEST burnable cell there is instead. That is the
-## widest search this can do, and it still walks the player somewhere; if even
-## that finds nothing, the arc is skipped whole and the FTUE closes as it did
-## before it existed.
+## Walk costs come from Pathfinder.walk_costs_from, bounded at _FIRE_MAX_WALK,
+## so nothing past that walk is a candidate at all; burnability from
+## FireManager.can_ignite, so never water, rock or dirt. Ranking and the detour
+## rule are in _rank_fire_cells, which is pure so it can be tested without a
+## viewport.
 func _pick_fire_cell() -> Vector2i:
 	if _pathfinder == null or not is_instance_valid(_pathfinder) \
 			or _player == null or not is_instance_valid(_player):
 		return Pathfinder.NO_CELL
 	var anchor: Vector2i = _player.get(&"current_cell")
-	# reachable_from hands back its own cached dictionary — read, never mutate.
-	var reachable: Dictionary = _pathfinder.call(&"reachable_from", anchor)
+	var costs: Dictionary = _pathfinder.call(&"walk_costs_from", anchor, _FIRE_MAX_WALK)
+	var candidates: Array[Dictionary] = []
+	for cell: Vector2i in costs:
+		var cheb: int = maxi(absi(cell.x - anchor.x), absi(cell.y - anchor.y))
+		if cheb < _FIRE_MIN_CELLS or not FireManager.can_ignite(cell):
+			continue
+		candidates.append({
+			"cell": cell, "cost": float(costs[cell]), "cheb": cheb,
+			"sd": _cell_offscreen_distance(cell),
+		})
+	return _rank_fire_cells(candidates)
 
+
+## The pick, over candidates `{cell, cost, cheb, sd}` (walk cost, Chebyshev
+## distance, off-screen distance). Detours (`cost > _FIRE_MAX_DETOUR * cheb`)
+## are dropped first. Then the cheapest walk inside the off-screen band wins,
+## ties to the cell nearer the edge.
+##
+## If the band is empty (a wide window, a player boxed in by water) the cheapest
+## non-detour walk at all is taken, on screen or not — a fire the player can see
+## a few steps away still teaches the douse; one across the map, which is what
+## the old farthest-cell fallback lit, teaches a hike. No candidates at all
+## returns NO_CELL and the arc is skipped whole.
+static func _rank_fire_cells(candidates: Array[Dictionary]) -> Vector2i:
 	var best: Vector2i = Pathfinder.NO_CELL
-	var best_error: float = INF
+	var best_key := Vector2(INF, INF)
 	var fallback: Vector2i = Pathfinder.NO_CELL
-	var fallback_sd: float = -INF
-
-	for cell: Vector2i in reachable:
-		if maxi(absi(cell.x - anchor.x), absi(cell.y - anchor.y)) < _FIRE_MIN_CELLS:
+	var fallback_cost: float = INF
+	for c: Dictionary in candidates:
+		var cost: float = c["cost"]
+		if cost > _FIRE_MAX_DETOUR * float(c["cheb"]):
 			continue
-		if not FireManager.can_ignite(cell):
-			continue
-		var sd: float = _cell_offscreen_distance(cell)
-		if sd > fallback_sd:
-			fallback_sd = sd
-			fallback = cell
+		if cost < fallback_cost:
+			fallback_cost = cost
+			fallback = c["cell"]
+		var sd: float = c["sd"]
 		if sd < _FIRE_MIN_OFFSCREEN or sd > _FIRE_MAX_OFFSCREEN:
 			continue
-		var error: float = absf(sd - _FIRE_TARGET_OFFSCREEN)
-		if error < best_error:
-			best_error = error
-			best = cell
+		var key := Vector2(cost, sd)
+		if key < best_key:
+			best_key = key
+			best = c["cell"]
 	return best if best != Pathfinder.NO_CELL else fallback
 
 
@@ -839,6 +1183,7 @@ func _build_ui() -> void:
 	screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	screen.add_theme_constant_override(&"margin_bottom", int(_STRIP_MARGIN_BOTTOM))
 	add_child(screen)
+	_anchor = screen
 
 	var column := VBoxContainer.new()
 	column.name = "Column"
@@ -993,6 +1338,7 @@ func _update_skip_fill() -> void:
 func _resolve_peers() -> void:
 	var tree := get_tree()
 	_click_to_move = tree.get_first_node_in_group(ClickToMoveController.GROUP_NAME)
+	_codex = tree.get_first_node_in_group(FloraCodex.GROUP)
 	_journal = tree.get_first_node_in_group(&"journal")
 	_unlocks = tree.get_first_node_in_group(UnlockState.GROUP)
 	_traversal = tree.get_first_node_in_group(TraversalPlacementController.GROUP_NAME)

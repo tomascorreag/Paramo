@@ -444,6 +444,48 @@ func test_buying_takes_the_buy_line_down_without_a_mouse_move() -> void:
 	assert_eq(_tooltip().price, 0, "and nothing left to charge")
 
 
+func test_a_cued_entry_bobs_and_the_others_stay() -> void:
+	var rest0: Vector2 = flora._swatches[0].position
+	var rest1: Vector2 = flora._swatches[1].position
+	flora.set_wiggle([&"frailejon"], 1)
+	assert_eq(flora._swatches[0].position, rest0 + Vector2(0, 1))
+	assert_eq(flora._swatches[1].position, rest1, "an entry nobody named stays put")
+	flora.set_wiggle([], 0)
+	assert_eq(flora._swatches[0].position, rest0)
+
+
+func test_the_cue_bob_is_whole_texels_and_moves_the_tab() -> void:
+	for i in 40:
+		var o: int = FieldJournal.cue_offset(i * 0.1, JournalForeEdge.WIGGLE_PX)
+		assert_between(o, -JournalForeEdge.WIGGLE_PX, JournalForeEdge.WIGGLE_PX)
+	assert_lte(JournalKnownSet.WIGGLE_PX, JournalKnownSet.HOVER_LIFT_PX,
+			"a swatch bob must not travel further than the hover lift the page is laid out for")
+	var fore := journal.find_children("*", "JournalForeEdge", true, false)[0] as JournalForeEdge
+	var t := fore.tab(&"bitacora")
+	var y: int = fore.tab_rect(t).position.y
+	fore.set_wiggle(2)
+	assert_eq(fore.tab_rect(t).position.y, y + 2, "the tab and its hit rect bob together")
+	fore.set_wiggle(0)
+
+
+func test_the_tutorial_can_sell_one_thing_only() -> void:
+	# The FTUE's budget is exactly its shopping list, so while it names what is
+	# on sale, the other entries neither lift nor sell.
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
+	var ladder: int = Array(buildings.entry_ids).find("ladder")
+	var other: int = 1 if ladder == 0 else 0
+	assert_gt(ladder, -1, "the buildings page sells a ladder")
+	TutorialGate.restrict_purchases([&"ladder"])
+	assert_false(shop.handle_click(_click_point(buildings, other)),
+			"an entry the tutorial is not selling must not sell")
+	assert_false(_unlocks.is_unlocked(StringName(buildings.entry_ids[other])))
+	shop.handle_hover(_click_point(buildings, other))
+	assert_eq(buildings._hovered, -1, "and must not lift")
+	assert_true(shop.handle_click(_click_point(buildings, ladder)))
+	assert_true(_unlocks.is_unlocked(&"ladder"))
+
+
 func test_the_tutorial_gate_takes_the_tag_with_it() -> void:
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()

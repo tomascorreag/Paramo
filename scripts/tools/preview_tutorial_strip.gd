@@ -51,7 +51,10 @@ const LOCALES: Array[String] = ["en_GB", "es_CO"]
 const CONTROLLER_PATH := "res://scripts/ui/tutorial_controller.gd"
 
 ## The build step is rendered once per type it can name. Kept as plain data
-## rather than read off _BUILD_KEYS so the output filenames stay stable.
+## rather than read off _BUILD_KEYS so the output filenames stay stable. The
+## per-step states render every step in the table once, the plant/ladder
+## discover, bitácora and shop lines included — those skip-when-done checks ask
+## a codex and a journal this tool doesn't have, so they always show here.
 const _BUILD_TYPES: Array[StringName] = [&"ladder", &"bridge", &"fence", &"frailejon"]
 
 ## The types placed with a SECOND click, rendered again on the endpoint step.

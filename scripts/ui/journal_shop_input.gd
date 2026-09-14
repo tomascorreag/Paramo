@@ -114,6 +114,9 @@ func handle_hover(pr_local: Vector2) -> void:
 				continue
 			var idx: int = section.entry_at(
 					pr_local - content.position - section.position)
+			# The FTUE may be selling one thing only; the others don't lift.
+			if idx >= 0 and not TutorialGate.allows_purchase(section.entry_id_at(idx)):
+				break
 			if idx >= 0:
 				hit_section = section
 				hit_index = idx
@@ -296,6 +299,9 @@ func _try_buy(section: JournalKnownSet, index: int) -> bool:
 	if not TutorialGate.allows(TutorialGate.Action.SHOP):
 		return false
 	var id: StringName = section.entry_id_at(index)
+	# ...and, while the FTUE is pricing its own path, only what the step sells.
+	if not TutorialGate.allows_purchase(id):
+		return false
 	if id == &"" or _unlocks_node() == null:
 		return false
 	if bool(_unlocks.call(&"is_unlocked", id)):

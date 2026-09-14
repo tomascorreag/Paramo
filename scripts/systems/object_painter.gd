@@ -274,6 +274,103 @@ static func plant_scene() -> PackedScene:
 	return _FRAILEJON_SCENE
 
 
+## Whether `kind` is one of the frailejones (genus Espeletia). Read off the
+## data, not a list of ids, so a fourth species joins by being registered.
+static func is_espeletia(kind: StringName) -> bool:
+	var d := data_for(kind) as PlantObjectData
+	return d != null and d.scientific_name.begins_with("Espeletia ")
+
+
+## The frailejón this mountain sells: its first plantable Espeletia, or &"".
+static func flagship_species(profile: EcosystemProfile) -> StringName:
+	if profile == null:
+		return &""
+	for kind: StringName in profile.plantable:
+		if is_espeletia(kind):
+			return kind
+	return &""
+
+
+## Chebyshev reach of the spawn guarantee. Inside it the plant is on screen at
+## every supported window size (the logical view is ~11 cells tall at 1080p).
+const FLAGSHIP_RADIUS: int = 5
+## Never ON the spawn or beside it: a plant blocks placement and slows the walk,
+## and the first step asks the player to walk up to it.
+const FLAGSHIP_MIN_DISTANCE: int = 2
+
+
+## Make sure a frailejón of this mountain's species stands within `radius`
+## cells of `center` (the player's spawn), on the spawn's own altitude so it is
+## reachable without a ladder. The FTUE's first step is "identify a frailejón",
+## and the scatter (~33 cells a map) promises none nearby.
+##
+## Runs between `begin_spawn` and the spawn steps: it writes the grid, and the
+## spawn rows then instance the plant like any other. The flagged cell is spawned
+## MATURE — a sprout is a few texels and not something to be sent looking for.
+## Its stage draw is still taken from the rng, so the stream past it advances as
+## if a random stage had been picked.
+##
+## Deterministic per grid and centre, so ProceduralWorld and SimWorld (which
+## both call it) keep agreeing per seed. Returns the frailejón's cell (one that
+## was already there, or the one placed), or (-1, -1) when nothing qualified.
+static func ensure_flagship_near(
+	ctx: Dictionary, center: Vector2i, radius: int = FLAGSHIP_RADIUS,
+) -> Vector2i:
+	var none := Vector2i(-1, -1)
+	if ctx.is_empty():
+		return none
+	var grid: TerrainGrid = ctx["grid"]
+	var origin: TerrainCell = grid.at_or_null(center.x, center.y)
+	var kind := flagship_species(grid.ecosystem)
+	if origin == null or kind == &"":
+		return none
+	var best := none
+	var best_score: int = 0x7FFFFFFF
+	var existing := none
+	var existing_score: int = 0x7FFFFFFF
+	for dy in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var cell := center + Vector2i(dx, dy)
+			var c: TerrainCell = grid.at_or_null(cell.x, cell.y)
+			if c == null or c.kind != TerrainCell.Kind.GROUND or c.altitude != origin.altitude:
+				continue
+			var ring: int = maxi(absi(dx), absi(dy))
+			# Nearest ring first, then the rounder distance inside it; ties keep
+			# scan order, which is what makes it deterministic.
+			var score: int = ring * 1000 + dx * dx + dy * dy
+			# One the scatter already put here is used — the NEAREST, not the
+			# first in scan order, which is the top row of the square.
+			if is_espeletia(c.object_kind):
+				if score < existing_score:
+					existing_score = score
+					existing = cell
+				continue
+			if ring < FLAGSHIP_MIN_DISTANCE:
+				continue
+			if c.ground_shape != TerrainCell.GroundShape.FULL_CUBE \
+					and c.ground_shape != TerrainCell.GroundShape.FLAT:
+				continue
+			# Open ground, or a grass the scatter put there (grasses give way to
+			# anything planted in play too — TileGrid.set_occupant evicts them).
+			if c.object_kind != &"":
+				var occupant := data_for(c.object_kind)
+				if occupant == null or not occupant.displaceable:
+					continue
+			if score < best_score:
+				best_score = score
+				best = cell
+	# An existing one is spawned mature too: the scatter rolls a random stage,
+	# and a sprout is exactly what the guarantee exists not to point at.
+	if existing != none:
+		best = existing
+	elif best != none:
+		grid.at(best.x, best.y).object_kind = kind
+	else:
+		return none
+	(ctx.get_or_add("mature", {}) as Dictionary)[best] = true
+	return best
+
+
 ## The ecosystem profile with `id`, or null when unknown / empty. Used by
 ## `ProceduralWorld.ecosystem_override` and tools to pin a mountain.
 static func profile_by_id(id: StringName) -> EcosystemProfile:
@@ -460,7 +557,8 @@ static func spawn_step(ctx: Dictionary, max_rows: int) -> bool:
 		var y: int = ctx["y"]
 		if y >= grid.height:
 			return true
-		_spawn_row(grid, ctx["world"], ctx["pathfinder"], ctx["rng"], y)
+		_spawn_row(grid, ctx["world"], ctx["pathfinder"], ctx["rng"], y,
+				ctx.get("mature", {}))
 		ctx["y"] = y + 1
 		spawned += 1
 	return int(ctx["y"]) >= grid.height
@@ -483,6 +581,7 @@ static func _spawn_row(
 	pathfinder: Pathfinder,
 	rng: RandomNumberGenerator,
 	y: int,
+	mature: Dictionary = {},
 ) -> void:
 	for x in grid.width:
 		var c: TerrainCell = grid.at(x, y)
@@ -516,6 +615,10 @@ static func _spawn_row(
 		# texture on its initial _apply_variant_texture call.
 		if "growth_stage" in inst and data.variants.size() > 0:
 			inst.growth_stage = rng.randi_range(0, data.variants.size() - 1)
+			# ensure_flagship_near's plant: drawn above all the same, so the
+			# stream downstream of it doesn't depend on whether it was forced.
+			if mature.has(inst.cell):
+				inst.growth_stage = data.variants.size() - 1
 		# Tag for cleanup on next regenerate.
 		inst.add_to_group(_GROUP_PROCEDURAL)
 		# Add BEFORE setting global_position so _ready (which depends on

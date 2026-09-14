@@ -49,6 +49,86 @@ func _kinds_map(g: TerrainGrid) -> PackedStringArray:
 	return out
 
 
+# --- the FTUE's frailejón -----------------------------------------------------
+
+func _spawn_ctx(g: TerrainGrid) -> Dictionary:
+	return {"grid": g}
+
+
+func test_flagship_is_the_mountains_own_espeletia() -> void:
+	assert_eq(ObjectPainter.flagship_species(ObjectPainter.profile_by_id(&"chingaza")), &"frailejon")
+	for p in ObjectPainter.profiles():
+		var kind := ObjectPainter.flagship_species(p)
+		assert_true(ObjectPainter.is_espeletia(kind), "%s sells no frailejón" % p.id)
+	assert_false(ObjectPainter.is_espeletia(&"calamagrostis"))
+	assert_false(ObjectPainter.is_espeletia(&"rock"))
+
+
+func test_ensure_flagship_places_one_near_an_empty_spawn() -> void:
+	var g := _flat_grid(14, false)
+	g.ecosystem = ObjectPainter.profile_by_id(&"chingaza")
+	var ctx := _spawn_ctx(g)
+	var center := Vector2i(12, 12)
+	var cell := ObjectPainter.ensure_flagship_near(ctx, center)
+	assert_ne(cell, Vector2i(-1, -1))
+	var ring: int = maxi(absi(cell.x - center.x), absi(cell.y - center.y))
+	assert_eq(ring, ObjectPainter.FLAGSHIP_MIN_DISTANCE, "the nearest legal ring")
+	assert_eq(g.at(cell.x, cell.y).object_kind, &"frailejon")
+	assert_eq(_count(g, &"frailejon"), 1)
+	assert_true((ctx["mature"] as Dictionary).has(cell), "spawned mature, not a sprout")
+	# Idempotent: a second call finds the first.
+	assert_eq(ObjectPainter.ensure_flagship_near(ctx, center), cell)
+	assert_eq(_count(g, &"frailejon"), 1)
+
+
+func test_ensure_flagship_keeps_an_existing_one_and_is_deterministic() -> void:
+	var g := _flat_grid(14, false)
+	g.ecosystem = ObjectPainter.profile_by_id(&"chingaza")
+	# Two already there: the top-row one comes first in scan order, the other is
+	# nearer. The nearer one is used, and spawned mature like a placed one.
+	g.at(12, 7).object_kind = &"frailejon"
+	g.at(15, 12).object_kind = &"frailejon"
+	var ctx := _spawn_ctx(g)
+	assert_eq(ObjectPainter.ensure_flagship_near(ctx, Vector2i(12, 12)), Vector2i(15, 12))
+	assert_eq(_count(g, &"frailejon"), 2, "nothing placed when one is already near")
+	assert_true((ctx["mature"] as Dictionary).has(Vector2i(15, 12)))
+	var a := _flat_grid(14, false)
+	var b := _flat_grid(14, false)
+	a.ecosystem = g.ecosystem
+	b.ecosystem = g.ecosystem
+	assert_eq(ObjectPainter.ensure_flagship_near(_spawn_ctx(a), Vector2i(12, 12)),
+			ObjectPainter.ensure_flagship_near(_spawn_ctx(b), Vector2i(12, 12)))
+
+
+func test_ensure_flagship_stays_on_the_spawn_altitude_and_off_blockers() -> void:
+	# Everything around the spawn is a different altitude or a rock, except one
+	# grass cell: the frailejón has to displace that grass, and nowhere else.
+	var g := _flat_grid(14, false)
+	g.ecosystem = ObjectPainter.profile_by_id(&"chingaza")
+	var center := Vector2i(12, 12)
+	for y in _H:
+		for x in _W:
+			if Vector2i(x, y) != center:
+				g.at(x, y).altitude = 16
+	g.at(14, 12).altitude = 14
+	g.at(14, 12).object_kind = &"calamagrostis"
+	g.at(12, 14).altitude = 14
+	g.at(12, 14).object_kind = &"rock"
+	assert_eq(ObjectPainter.ensure_flagship_near(_spawn_ctx(g), center), Vector2i(14, 12))
+	assert_eq(g.at(12, 14).object_kind, &"rock", "a rock is not displaced")
+
+
+func test_ensure_flagship_gives_up_cleanly() -> void:
+	var g := _flat_grid(14, false)
+	g.ecosystem = null
+	assert_eq(ObjectPainter.ensure_flagship_near(_spawn_ctx(g), Vector2i(12, 12)), Vector2i(-1, -1),
+			"no ecosystem, no species to place")
+	g.ecosystem = ObjectPainter.profile_by_id(&"chingaza")
+	assert_eq(ObjectPainter.ensure_flagship_near(_spawn_ctx(g), Vector2i(-1, -1)), Vector2i(-1, -1),
+			"a failed spawn pick places nothing")
+	assert_eq(_count(g, &"frailejon"), 0)
+
+
 # --- altitude term ----------------------------------------------------------
 
 func test_band_is_flat_inside() -> void:

@@ -291,6 +291,8 @@ const _RULE_WOBBLE_PX: int = 1
 ## breaks the grid — the same reason _rebuild floors every swatch position. One
 ## whole texel is the smallest honest "it moved" this page can express.
 const HOVER_LIFT_PX: int = 1
+## Amplitude of the FTUE's bob on a cued entry, in texels (see set_wiggle).
+const WIGGLE_PX: int = 1
 
 ## A hovered LOCKED swatch inks up toward owned instead of only moving. Reads as
 ## the thing surfacing when you point at it, and costs nothing extra: the `dim`
@@ -344,6 +346,8 @@ var _rest_positions: Array[Vector2] = []
 var _states: Dictionary = {}
 # Which swatch the pointer is over, -1 for none. Driven by JournalShopInput.
 var _hovered: int = -1
+var _wiggle_ids: Array[StringName] = []
+var _wiggle_px: int = 0
 # The swatch currently recoiling from an unaffordable click, and how far through
 # that recoil it is (1 -> 0).
 var _denied: int = -1
@@ -675,6 +679,22 @@ func _state_for(index: int) -> Dictionary:
 
 # --- Pointer feedback (JournalShopInput drives these too) --------------------
 
+## The FTUE's "buy this": the entries named bob vertically by the offset given,
+## set per frame by FieldJournal from its cue clock. ONE texel of travel (see
+## WIGGLE_PX), the same budget the hover lift already spends, so the ink never
+## crosses a warp block it did not already cross.
+func set_wiggle(ids: Array[StringName], px: int) -> void:
+	if px == _wiggle_px and ids == _wiggle_ids:
+		return
+	_wiggle_ids = ids.duplicate()
+	_wiggle_px = px
+	_apply_states()
+
+
+func _wiggle_offset(index: int) -> int:
+	return _wiggle_px if _wiggle_ids.has(entry_id_at(index)) else 0
+
+
 ## Which swatch the pointer is over, or -1. Idempotent, so the input node can call
 ## it every mouse-motion event without churning.
 func set_hovered(index: int) -> void:
@@ -759,7 +779,7 @@ func _apply_states() -> void:
 				(HOVER_ALPHA if hovered else LOCKED_ALPHA) if locked else 1.0)
 		if i < _rest_positions.size():
 			r.position = _rest_positions[i] + Vector2(
-				_deny_offset(i), -HOVER_LIFT_PX if hovered else 0)
+				_deny_offset(i), (-HOVER_LIFT_PX if hovered else 0) + _wiggle_offset(i))
 	queue_redraw()
 
 

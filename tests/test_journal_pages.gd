@@ -83,6 +83,71 @@ func test_book_art_is_the_native_book_size() -> void:
 	assert_eq(art.anchor_right, 0.5)
 
 
+func test_the_book_picks_the_largest_scale_it_fits_at() -> void:
+	# Window px, the world's N, the book's M.
+	var cases: Array = [
+		[Vector2(1920, 1080), 4, 4],  # fullscreen 1080p: the world's own size
+		[Vector2(1440, 810), 4, 3],   # the default window on a 1080p monitor
+		[Vector2(1280, 720), 3, 3],   # 720p fullscreen: 717 of 720 rows
+		[Vector2(1200, 675), 4, 2],
+		[Vector2(3840, 2160), 8, 8],
+		[Vector2(4000, 2400), 4, 4],  # never larger than the world
+		[Vector2(394, 239), 1, 1],    # native: one texel, one pixel
+		[Vector2(300, 200), 2, 1],    # too small for even that: crops at 1
+	]
+	for c: Array in cases:
+		assert_eq(FieldJournal.fit_scale(c[0], c[1]), c[2], "%s at %dx" % [c[0], c[1]])
+
+
+func test_the_fit_rect_holds_the_cover_and_both_tabs() -> void:
+	var fit := FieldJournal.FIT_RECT
+	var cover := (load("res://assets/sprites/UX/Panels/Book.png") as Texture2D).get_image()
+	assert_true(fit.encloses(cover.get_used_rect()), "Book.png's ink %s" % cover.get_used_rect())
+	var edge := journal.get_node("Book/BookArt/ForeEdge") as JournalForeEdge
+	for t: JournalForeEdge.Tab in edge.tabs():
+		for wiggle: int in [-JournalForeEdge.WIGGLE_PX, JournalForeEdge.WIGGLE_PX]:
+			edge.set_wiggle(wiggle)
+			var r := edge.tab_rect(t, true)
+			assert_true(fit.encloses(r), "%s tab %s" % [t.spread, r])
+	edge.set_wiggle(0)
+	# Tight: the tabs are the sides, the cover the top and bottom.
+	assert_eq(fit.position.x, JournalForeEdge.PAGE_LEFT_EDGE_X - JournalForeEdge.GAP_PX
+			- JournalForeEdge.FRAME_EXTENDED.size.x)
+	assert_eq(fit.end.x, JournalForeEdge.PAGE_RIGHT_EDGE_X + JournalForeEdge.GAP_PX
+			+ JournalForeEdge.FRAME_EXTENDED.size.x)
+	assert_eq(fit.position.y, cover.get_used_rect().position.y)
+	assert_eq(fit.end.y, cover.get_used_rect().end.y)
+
+
+func test_a_small_window_shrinks_the_book_onto_whole_device_pixels() -> void:
+	# The default window on a 1080p monitor: 360x202 logical at 4x.
+	var book := journal.get_node("Book") as Control
+	var art := journal.get_node("Book/BookArt") as Control
+	book.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	book.position = Vector2.ZERO
+	book.size = Vector2(360, 202)
+	journal.fit_to(4)
+	assert_eq(book.scale, Vector2(0.75, 0.75))
+	assert_eq(art.size, Vector2(480, 270), "the art keeps its native size")
+	# Device px = 4 * logical; a book texel is 3 of them, from a whole-pixel origin.
+	var origin: Vector2 = book.scale * art.position * 4.0
+	assert_eq(origin, origin.round(), "origin %s on the device grid" % origin)
+	var fit := Rect2(book.scale * (art.position + Vector2(FieldJournal.FIT_RECT.position)) * 4.0,
+			book.scale * Vector2(FieldJournal.FIT_RECT.size) * 4.0)
+	assert_true(Rect2(0, 0, 1440, 808).encloses(fit), "fit %s on a 1440x808 window" % fit)
+
+
+func test_a_window_the_book_fits_leaves_it_at_the_world_scale() -> void:
+	var book := journal.get_node("Book") as Control
+	var art := journal.get_node("Book/BookArt") as Control
+	book.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	book.position = Vector2.ZERO
+	book.size = Vector2(480, 270)
+	journal.fit_to(4)
+	assert_eq(book.scale, Vector2.ONE)
+	assert_eq(art.position, Vector2(0, -1), "FIT_RECT's centre on the view's")
+
+
 func test_book_parks_fully_below_any_viewport() -> void:
 	# The park offset must clear BookArt's half-height (135) below the bottom
 	# edge at ANY logical viewport height — the old `offset = vp.y` park only

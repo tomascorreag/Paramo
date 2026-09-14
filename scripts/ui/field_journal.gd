@@ -106,6 +106,68 @@ func _ready() -> void:
 	_book.offset_top = h
 	_book.offset_bottom = h
 	_dim.modulate.a = 0.0
+	_fit()
+
+
+# --- Fitting the window -------------------------------------------------------
+#
+# The world is drawn at N device pixels per texel, N picked from the MONITOR
+# (DisplayManager), so a small window shows less world — and used to show less
+# book: at 1440x810 on a 1080p monitor the logical view is 360x202 and the
+# 394-wide book hung off both sides. The book instead picks its OWN whole
+# number M <= N of device pixels per texel, the largest at which it fits, by
+# scaling Book by M/N. The window rasterizes every canvas item at its own
+# resolution (CANVAS_ITEMS stretch, no SubViewport), so a book texel is then
+# exactly M device pixels — still pixel art, just smaller than the world's.
+# Below M = 1 nothing is left to give; a window under FIT_RECT's size crops.
+
+## What must stay on screen, in BookArt space: the cover's ink (Book.png's
+## opaque texels, x 48..431, y 17..255) widened to both fore-edge tabs drawn
+## extended (x 43..436). test_journal_pages re-measures both.
+const FIT_RECT: Rect2i = Rect2i(43, 17, 394, 239)
+
+## (Book width, Book height, N) at the last fit; refit only when one moves.
+var _fit_key: Vector3 = Vector3(-1.0, -1.0, -1.0)
+
+
+## Device pixels per book texel for a window of `device` pixels whose world is
+## drawn at `world_scale`: the largest whole number at which FIT_RECT fits,
+## never above the world's, never below 1.
+static func fit_scale(device: Vector2, world_scale: int) -> int:
+	var m: int = mini(floori(device.x / float(FIT_RECT.size.x)),
+			floori(device.y / float(FIT_RECT.size.y)))
+	return clampi(m, 1, maxi(1, world_scale))
+
+
+## Book's scale and BookArt's offsets for world scale `n`, off Book's current
+## size. BookArt keeps its centre anchors; only the offsets move, so that the
+## art lands on a whole book texel with FIT_RECT's centre on the view's.
+func fit_to(n: int) -> void:
+	var size: Vector2 = _book.size
+	var k: float = float(fit_scale(size * float(n), n)) / float(maxi(1, n))
+	_book.scale = Vector2(k, k)
+	var art := get_node_or_null("Book/BookArt") as Control
+	if art == null:
+		return
+	# In Book's own (unscaled) space the view is size / k wide; the anchors
+	# already contribute half of `size`.
+	var pos: Vector2 = (size / k * 0.5 - Vector2(FIT_RECT.get_center())).floor()
+	art.offset_left = pos.x - size.x * 0.5
+	art.offset_top = pos.y - size.y * 0.5
+	art.offset_right = art.offset_left + 480.0
+	art.offset_bottom = art.offset_top + 270.0
+
+
+# N is read off this viewport's own stretch rather than DisplayManager: the
+# preview tools render the book into plain SubViewports (N = 1, no change)
+# while DisplayManager still reports the monitor's scale.
+func _fit() -> void:
+	var n: int = maxi(1, roundi(get_viewport().get_final_transform().get_scale().x))
+	var key := Vector3(_book.size.x, _book.size.y, n)
+	if key == _fit_key:
+		return
+	_fit_key = key
+	fit_to(n)
 
 
 # The season wheel turns continuously with the season clock: a half-turn (180°)
@@ -114,7 +176,9 @@ func _ready() -> void:
 # While the journal is open the game is paused, so the clock is frozen and the
 # wheel holds a snapshot of the moment you opened it. (Logic moved verbatim from
 # the old HUD gauge; ungated by visibility so test_season_wheel can drive it.)
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_fit()
+	_apply_cue(delta)
 	if SeasonManager.phase == SeasonManager.Phase.IDLE:
 		_season_wheel.rotation = 0.0
 		return
@@ -179,6 +243,76 @@ func _on_dim_gui_input(event: InputEvent) -> void:
 			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
 		get_viewport().set_input_as_handled()
 		close()
+
+
+## Whether the book is open or rising. False from the frame `close()` starts.
+func is_open() -> bool:
+	return _open
+
+
+# --- FTUE cues -----------------------------------------------------------------
+#
+# The tutorial names WHAT to point at (the fore-edge tab, some shop entries);
+# the book decides HOW: a slow bob in whole texels, clocked here because this
+# layer runs through the pause the open book holds.
+
+## One full bob, in seconds. Slow on purpose: it is an invitation, not an alarm.
+const CUE_PERIOD: float = 1.6
+
+var _cue_tab: bool = false
+var _cue_entries: Array[StringName] = []
+var _cue_time: float = 0.0
+var _fore_edge: JournalForeEdge = null
+var _known_sets: Array[JournalKnownSet] = []
+
+
+## Point at the fore-edge tab (`tab`) and/or the shop entries with these ids.
+## Nothing bobs while the book is closed, whatever is set.
+func set_cue(tab: bool, entries: Array[StringName]) -> void:
+	_cue_tab = tab
+	_cue_entries = entries
+
+
+## The bob at time `t`, in whole texels of `amplitude`.
+static func cue_offset(t: float, amplitude: int) -> int:
+	return int(roundf(sin(t * TAU / CUE_PERIOD) * float(amplitude)))
+
+
+func _apply_cue(delta: float) -> void:
+	var tab: bool = _open and _cue_tab
+	var entries: Array[StringName] = _cue_entries if _open else ([] as Array[StringName])
+	_cue_time = _cue_time + delta if (tab or not entries.is_empty()) else 0.0
+	if _fore_edge == null:
+		var found := find_children("*", "JournalForeEdge", true, false)
+		if not found.is_empty():
+			_fore_edge = found[0] as JournalForeEdge
+		for node: Node in find_children("*", "JournalKnownSet", true, false):
+			_known_sets.append(node as JournalKnownSet)
+	if _fore_edge != null:
+		_fore_edge.set_wiggle(cue_offset(_cue_time, JournalForeEdge.WIGGLE_PX) if tab else 0)
+	var px: int = cue_offset(_cue_time, JournalKnownSet.WIGGLE_PX)
+	for section: JournalKnownSet in _known_sets:
+		if is_instance_valid(section):
+			section.set_wiggle(entries, px)
+
+
+## The left page on screen, in viewport coordinates.
+func page_left_rect() -> Rect2:
+	return _screen_rect(get_node_or_null("Book/BookArt/Pages/PageLeft") as Control)
+
+
+## The right page (the shop) on screen, in viewport coordinates. The FTUE
+## strip reads it to stay clear of the page while the book is open.
+func page_right_rect() -> Rect2:
+	return _screen_rect(get_node_or_null("Book/BookArt/Pages/PageRight") as Control)
+
+
+# Through the canvas transform, not get_global_rect(): that one ignores the
+# Book's fit scale and would report the page at the world's size.
+func _screen_rect(c: Control) -> Rect2:
+	if c == null:
+		return Rect2()
+	return c.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, c.size)
 
 
 func toggle() -> void:
