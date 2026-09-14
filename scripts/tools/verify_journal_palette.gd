@@ -34,8 +34,14 @@ extends SceneTree
 ##       --path . --script res://scripts/tools/verify_journal_palette.gd
 ##
 ## Args:
-##   --out <dir>   also save the audited render (default: don't)
-##   --verbose     list every allowed colour and its pixel count, not just failures
+##   --out <dir>        also save the audited render (default: don't)
+##   --verbose          list every allowed colour and its pixel count, not just failures
+##   --spread bitacora  audit the BITACORA spread instead: every pair of pages the
+##                      book can show, one render each. The photographs are
+##                      exempt (they are photographs, taped in, like the disc is
+##                      a disc); everything around them — tape, stages, type —
+##                      is audited. The slot is not exempt there (it is hidden
+##                      with the run spread).
 
 const JOURNAL_PATH := "res://scenes/ui/field_journal.tscn"
 const BOOK_PATH := "res://assets/sprites/UX/Panels/Book.png"
@@ -55,11 +61,26 @@ const PAGE_RECTS := {
 }
 ## The season-disc slot, exempt (see the header). Matches SeasonGaugeHolder's rect.
 const SLOT_RECT := Rect2i(106, 30, 64, 38)
+## The bitacora's polaroids, exempt on that spread for the same reason as the
+## disc: a photograph stuck into the page is not ink, and the frame around it
+## is an art asset (PolaroidFrame.png, authored white and P12 gold), which the
+## palette rule covers at authoring time, not here.
+## Read off the plates at audit time, in book space, and GROWN by the page
+## warp's reach: page_warp.gdshader stretches content by up to its amplitude
+## (5 texels) and steps columns by one, so the photo's edge rows land a few
+## texels outside the unwarped rect. Measured before the growth: 24 photo
+## pixels a page reported off-palette, all on its edges.
+var _photo_rects: Array[Rect2i] = []
+const PHOTO_EXEMPT_GROW := Vector2i(1, 6)
 
 var _out_dir: String = ""
 var _verbose: bool = false
+var _spread: String = "run"
 var _vp: SubViewport
+var _journal: CanvasLayer
 var _frames: int = 0
+var _queue: PackedStringArray = PackedStringArray()
+var _failures: int = 0
 
 
 func _initialize() -> void:
@@ -71,6 +92,9 @@ func _initialize() -> void:
 					_out_dir = args[i + 1].rstrip("/") + "/"
 			"--verbose":
 				_verbose = true
+			"--spread":
+				if i + 1 < args.size():
+					_spread = args[i + 1]
 
 	_vp = SubViewport.new()
 	_vp.size = VIEW_SIZE
@@ -78,19 +102,75 @@ func _initialize() -> void:
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	root.add_child(_vp)
 
-	var journal: CanvasLayer = (load(JOURNAL_PATH) as PackedScene).instantiate()
-	_vp.add_child(journal)
-	_open_instantly(journal)
+	_journal = (load(JOURNAL_PATH) as PackedScene).instantiate()
+	_vp.add_child(_journal)
+	# Posed on the first FRAME, not here: FieldJournal._ready hides the layer
+	# and parks the book below the viewport, and a node added from _initialize
+	# gets its _ready on the first iteration — after anything set here. Opened
+	# from _initialize, the tool audited an empty viewport and reported the
+	# clear colour as the pages' one off-palette pixel.
+	# SceneTree._process returns bool (true ends the loop), not void.
 
 
-# SceneTree._process returns bool (true ends the loop), not void.
 func _process(_delta: float) -> bool:
 	_frames += 1
-	# Let the page SubViewports render their content and the containers pick it up.
-	if _frames < 5:
+	if _frames == 1:
+		_open_instantly(_journal)
+		if _spread == "bitacora":
+			# One render per PAIR: the even positions of the ring.
+			var ids: PackedStringArray = _journal.call(&"browsable_species")
+			for k: int in range(0, ids.size(), 2):
+				_queue.append(ids[k])
+		else:
+			_queue.append("")
 		return false
-	quit(_audit())
-	return true
+	# Four frames per render: pose, then let the page SubViewports render their
+	# content and the containers pick it up, then audit.
+	var t: int = _frames - 2
+	var i: int = t / 4
+	if i >= _queue.size():
+		if _failures > 0:
+			print("\nFAIL: %d off-palette colours on the journal pages." % _failures)
+			print("      Either the colour is wrong, or a legal one is being composited")
+			print("      at alpha < 1 (see this file's header) — check the alpha first.")
+			quit(1)
+		else:
+			print("\nPASS: every page pixel is a ramp stop or Book.png's own art.")
+			quit(0)
+		return true
+	if t % 4 == 0 and not _queue[i].is_empty():
+		_journal.call(&"show_species", StringName(_queue[i]))
+		_photo_rects = _collect_photo_rects()
+	elif t % 4 == 3:
+		_failures += _audit(_queue[i])
+	return false
+
+
+# Each plate's photo rect, plate-local -> book space (the plate sits at the
+# page's Content origin: page rect + the 9px content inset).
+func _collect_photo_rects() -> Array[Rect2i]:
+	var out: Array[Rect2i] = []
+	var pages := {"PageLeft": PAGE_RECTS["left"], "PageRight": PAGE_RECTS["right"]}
+	for page_name: String in pages:
+		var content := _journal.get_node_or_null(
+			"Book/BookArt/Pages/%s/SubViewport/Content" % page_name) as Control
+		if content == null:
+			continue
+		for child: Node in content.get_children():
+			if not child.has_method(&"frame_rects") or not (child as Control).visible:
+				continue
+			var page_rect: Rect2i = pages[page_name]
+			for r: Rect2i in child.call(&"frame_rects"):
+				var at := page_rect.position + Vector2i(content.position) + r.position
+				out.append(Rect2i(at - PHOTO_EXEMPT_GROW, r.size + 2 * PHOTO_EXEMPT_GROW))
+	return out
+
+
+func _is_exempt(p: Vector2i) -> bool:
+	for r: Rect2i in _photo_rects:
+		if r.has_point(p):
+			return true
+	return false
 
 
 func _open_instantly(journal: CanvasLayer) -> void:
@@ -101,10 +181,13 @@ func _open_instantly(journal: CanvasLayer) -> void:
 	(journal.get_node("Dim") as ColorRect).modulate.a = 0.0
 
 
-func _audit() -> int:
+func _audit(label: String) -> int:
 	var img := _vp.get_texture().get_image()
 	if _out_dir != "":
-		img.save_png(_out_dir + "journal_palette_audit.png")
+		img.save_png(_out_dir + "journal_palette_audit%s.png"
+			% (("_" + label) if not label.is_empty() else ""))
+	if not label.is_empty():
+		print("\n=== %s" % label)
 
 	var allowed := _reduced_palette()
 	print("reduced palette: %d colours from %d ramps" % [allowed.size(), RAMP_PATHS.size()])
@@ -124,7 +207,9 @@ func _audit() -> int:
 		var total := 0
 		for y: int in range(rect.position.y, rect.end.y):
 			for x: int in range(rect.position.x, rect.end.x):
-				if SLOT_RECT.has_point(Vector2i(x, y)):
+				if _spread != "bitacora" and SLOT_RECT.has_point(Vector2i(x, y)):
+					continue
+				if _is_exempt(Vector2i(x, y)):
 					continue
 				var hex := img.get_pixel(ox + x, oy + y).to_html(false)
 				total += 1
@@ -141,13 +226,7 @@ func _audit() -> int:
 		for hex: String in _by_count(off):
 			print("    OFF %s x%d" % [hex, off[hex]])
 
-	if failures > 0:
-		print("\nFAIL: %d off-palette colours on the journal pages." % failures)
-		print("      Either the colour is wrong, or a legal one is being composited")
-		print("      at alpha < 1 (see this file's header) — check the alpha first.")
-		return 1
-	print("\nPASS: every page pixel is a ramp stop or Book.png's own art.")
-	return 0
+	return failures
 
 
 func _reduced_palette() -> Dictionary:

@@ -45,9 +45,19 @@ const WATER: StringName = &"water"
 ## altitude step, a bridge a gap): at the run's opening balance it has to be
 ## affordable, or a player whose starting cell has no wall nearby cannot build
 ## anything at all.
+##
+## The other plants sit at or under the frailejón: the two shrubs are the cheap
+## ground-cover restoration (hypericum and arcytophyllum are what a restoration
+## crew actually sows first), the other two Espeletia are the frailejón of a
+## different mountain and cost what it costs — a run only ever sells one of the
+## three (see EcosystemProfile).
 @export var unlock_costs: Dictionary[StringName, float] = {
 	&"ladder": 10.0,
 	&"frailejon": 10.0,
+	&"espeletia_barclayana": 10.0,
+	&"espeletia_hartwegiana": 10.0,
+	&"hypericum": 8.0,
+	&"arcytophyllum": 8.0,
 	&"bridge": 20.0,
 	&"fence": 30.0,
 }
@@ -61,7 +71,10 @@ const WATER: StringName = &"water"
 @export var placement_water_cost_per_tile: float = 1.0
 ## Types whose placement also costs water. Data, not a class check, so a future
 ## planted thing joins by being listed rather than by touching this file.
-@export var water_cost_types: Array[StringName] = [&"frailejon"]
+@export var water_cost_types: Array[StringName] = [
+	&"frailejon", &"espeletia_barclayana", &"espeletia_hartwegiana",
+	&"hypericum", &"arcytophyllum",
+]
 
 signal unlock_changed(type: StringName)
 ## A placement was actually PAID FOR — every build funnels through
@@ -83,6 +96,21 @@ func _ready() -> void:
 
 func is_unlocked(type: StringName) -> bool:
 	return _unlocked.has(type)
+
+
+## Whether `type` can be sold on THIS mountain. Structures always can. A plant
+## can only when the run's EcosystemProfile lists it as plantable — the
+## player restores what belongs here, not a Central-cordillera frailejón on
+## a Chingaza slope. With no ProceduralWorld (an authored map, a bare test
+## scene) there is no ecosystem and everything is available.
+func is_available(type: StringName) -> bool:
+	if not (ObjectPainter.data_for(type) is PlantObjectData):
+		return true
+	var pw: Node = get_tree().get_first_node_in_group(&"procedural_world")
+	if pw == null or not ("ecosystem" in pw):
+		return true
+	var eco: EcosystemProfile = pw.ecosystem
+	return eco == null or eco.can_plant(type)
 
 
 ## What `type` costs to unlock. The fallback covers anything unpriced.
@@ -118,7 +146,7 @@ func water_cost(type: StringName, count: int = 1) -> float:
 ## One-time purchase. False without spending when already owned (a double
 ## click on the shop entry must not charge twice) or when unaffordable.
 func try_unlock(type: StringName) -> bool:
-	if is_unlocked(type):
+	if is_unlocked(type) or not is_available(type):
 		return false
 	if not ResourceLedger.try_spend(TOKENS, unlock_cost_for(type),
 			StringName("unlock_" + String(type))):

@@ -23,8 +23,15 @@ extends SceneTree
 ##       --path . --script res://scripts/tools/audit_page_blocks.gd
 ##
 ## Args:
-##   --gap <n>   re-ask every section for this header_gap_px and report what it
-##               resolves to. The way to price a tightening before authoring it.
+##   --gap <n>        re-ask every section for this header_gap_px and report what it
+##                    resolves to. The way to price a tightening before authoring it.
+##   --species <ids>  which species to audit the bitacora sections at (comma
+##                    separated; default: every one the book can show). Those two
+##                    sections ink nothing until a species is set, so they are
+##                    audited once PER SPECIES after the run spread — a Spanish
+##                    fact that wraps one line longer than its English one is a
+##                    per-species, per-locale seam.
+##   --locale <id>    audit that locale's copy (en_GB / es_CO).
 
 # load()ed, not preload()ed: a preload resolves before _initialize() installs the
 # autoloads, and field_journal.gd then fails to compile on SeasonManager.
@@ -39,6 +46,8 @@ var _frames: int = 0
 var _journal: CanvasLayer
 var _gap: int = 0
 var _gap_set: bool = false
+var _species: PackedStringArray = PackedStringArray()
+var _locale: String = ""
 
 
 func _initialize() -> void:
@@ -51,6 +60,10 @@ func _initialize() -> void:
 		if argv[i] == "--gap" and i + 1 < argv.size():
 			_gap = int(argv[i + 1])
 			_gap_set = true
+		if argv[i] == "--species" and i + 1 < argv.size():
+			_species = argv[i + 1].split(",", false)
+		if argv[i] == "--locale" and i + 1 < argv.size():
+			_locale = argv[i + 1]
 
 
 func _process(_delta: float) -> bool:
@@ -62,6 +75,8 @@ func _process(_delta: float) -> bool:
 	# One frame for _ready, one for the sections to rebuild against real textures.
 	if _frames < 4:
 		return false
+	if not _locale.is_empty():
+		TranslationServer.set_locale(_locale)
 	_audit()
 	return true
 
@@ -78,6 +93,23 @@ func _audit() -> void:
 		if page == null:
 			continue
 		bad += _audit_page(page_name, page)
+	# The bitacora's two sections, once per species: their ink is the species'
+	# copy, so the audit above saw them empty.
+	var ids: PackedStringArray = _species
+	if ids.is_empty():
+		ids = _journal.call(&"browsable_species")
+	for id: String in ids:
+		if not bool(_journal.call(&"show_species", StringName(id))):
+			print("\n(%s is not a species the book can show)" % id)
+			continue
+		print("\n=== bitacora: %s" % id)
+		for page_name: String in ["PageLeft", "PageRight"]:
+			var page := pages.get_node_or_null(page_name) as PageWarp
+			var content := page.get_node_or_null("SubViewport/Content") as Control
+			for section: Node in content.get_children():
+				if section.has_method(&"ink_runs") \
+						and StringName(section.get(&"spread")) == &"bitacora":
+					bad += _audit_section(section as Control, int(page.row_block_px))
 	print("")
 	if bad > 0:
 		print("%d run(s) cross a seam they need not. See the legal tops above." % bad)
@@ -100,6 +132,9 @@ func _audit_page(page_name: String, page: PageWarp) -> int:
 	var bad: int = 0
 	for section: Node in content.get_children():
 		if not section.has_method(&"ink_runs"):
+			continue
+		# The bitacora's sections are audited per species below.
+		if StringName(section.get(&"spread")) == &"bitacora":
 			continue
 		bad += _audit_section(section as Control, block)
 	return bad

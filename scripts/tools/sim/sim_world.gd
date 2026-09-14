@@ -99,9 +99,15 @@ func regenerate(params: TerrainGenerationParams) -> void:
 	# exists for occupant registration, like the game.
 	var obj_rng := RandomNumberGenerator.new()
 	obj_rng.seed = params.seed ^ ObjectPainter.OBJECT_SEED_XOR
-	ObjectPainter.paint(grid, object_parent, pathfinder, obj_rng)
-
+	# begin_spawn / pick / guarantee / spawn, in ProceduralWorld's order: the
+	# spawn is picked before ensure_flagship_near writes its frailejón, so both
+	# worlds land on the same cell and the same extra plant per seed.
+	var spawn_ctx := ObjectPainter.begin_spawn(grid, object_parent, pathfinder, obj_rng)
 	spawn_cell = _spawn_picker._find_starting_cell(grid)
+	ObjectPainter.ensure_flagship_near(spawn_ctx, spawn_cell)
+	if not spawn_ctx.is_empty():
+		while not ObjectPainter.spawn_step(spawn_ctx, 0x7FFFFFFF):
+			pass
 
 
 ## Per-source painted-cell census inside the playable bounds — the simulator's

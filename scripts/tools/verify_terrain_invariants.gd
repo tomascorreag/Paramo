@@ -590,7 +590,10 @@ static func _check_objects_on_full_cube_or_flat(
 # An unknown kind would make ObjectPainter warn and skip — this check fails
 # fast at generation time so we don't ship a generator that flags kinds the
 # painter can't realize.
-const _KNOWN_OBJECT_KINDS: Array[StringName] = [&"rock", &"rock_snow", &"rock_moss", &"frailejon"]
+const _KNOWN_OBJECT_KINDS: Array[StringName] = [
+	&"rock", &"rock_snow", &"rock_moss",
+	&"frailejon", &"espeletia_barclayana", &"espeletia_hartwegiana", &"calamagrostis", &"chusquea", &"cortaderia", &"hypericum", &"arcytophyllum",
+]
 
 static func _check_object_kind_known(
 	grid: TerrainGrid, _params: TerrainGenerationParams

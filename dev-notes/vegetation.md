@@ -241,6 +241,26 @@ t=8.4.
   (`no_trample`'s grass sd is 0.14, one seed at 0.97). Same sign, different
   reason — do not treat the 0.18 result as confirming it.
 
+### Feet kill plants too (2026-08-28)
+
+`RegrowthManager.trample` forwards the same wear to whatever occupies the cell, duck-typed on a `trample(amount)` method — `Frailejon` is the only thing that has one; bridges, fences and rocks are silent. The plant accumulates damage, drops one growth stage per `PlantObjectData.trample_resistance` of it, and frees itself when it is trampled at stage 0. `_exit_tree` clears the occupant claim, so the cell is walkable and plantable again the next frame. Nothing regrows it: the ground is the mountain's to reclaim, the plant is the player's to replace.
+
+Three things about the shape, all deliberate:
+
+- **The plant hook runs BEFORE the grass ledger, not after.** The ledger gives up on anything that is not a grass-source tile (`_begin_tracking` returns `{}`), and plants stand on dirt too. A cell already worn bare must not shelter what is standing on it — they are two independent damage tracks on one cell. A burning cell is still fire's to resolve, on both.
+- **Damage heals at a flat 0.15/day** (`Frailejon._TRAMPLE_HEAL_PER_DAY`), the same number as the grass ledger's `base_recovery_per_day`, and it is NOT scaled by resistance. So break-even traffic is the same ~0.83 crossings a day for every species, and `trample_resistance` sets only how long the killing takes above that line. Scaling the heal by resistance was the first draft and it is backwards: it makes a tough plant recover fast, and puts a frailejón's break-even at ~5.7 crossings a day, which never happens.
+- **Damage re-arms the plant's `_process`.** A mature plant drops off the frame (`set_process(false)`); without the re-arm a trampled one could never heal and never resume growing.
+
+Resistances, and what a mature four-stage plant costs in crossings (`4 × resistance / 0.18`): *Calamagrostis* 0.3 → 7, *Arcytophyllum* 0.6 → 13, *Cortaderia* 0.8 → 18, *Chusquea* 1.2 → 27, *Hypericum* 1.5 → 33, the three *Espeletia* 3.0 → 67. The ordering is set against the grass: a cell wears bare in ~5.5 crossings, so a tussock flattens just before the ground under it does and a rosette long outlives the track.
+
+**Measured, 16 paired seeds, `defaults`, seed0 100** (`trample_resistance` 0 on every species is the off arm — that is what the field's 0 is for):
+
+- **36 plants destroyed per run** (min 7, max 87, zero in 0 of 16 seeds), against ~335 placed. So roughly a tenth of the mountain's flora goes to feet in a run, concentrated where the worn track already is.
+- **Nothing else moved.** Largest paired |t| among the real columns is `grass_frac_min` at −0.01 (t −1.98, differing in 6 of 16 seeds); tokens, appeal, fires, charred all flat. `placements_frailejon` +0.06 — the bot re-planted a freed slot about once in sixteen runs. `sim_ms` is −858 (t −3.35) and means nothing; see the arm-drift warning above.
+- The species mix of those 36 is **not measured**, but the arithmetic above makes it almost all ground cover: a rosette needs 67 crossings against a 0.83/day break-even, which is a route crossing the same cell every day for two months.
+
+So this is a **local, visible** mechanic rather than a balance lever, and it lands in the same place the worn apron does. That is the right outcome while fire still dominates every metric (see the firebreak result above): another fuel-removing mechanism would only have muddied it.
+
 The merge moved the sim's numbers (2026-08-09 re-baseline): appeal now gives
 partial credit for partly-regrown ground where the old model counted a cell fully
 non-natural until fully back, so appeal recovers sooner. **Old CSVs are not

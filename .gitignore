@@ -72,3 +72,8 @@ sim_out/
 # Preview-tool renders (--out). Under res://, so Godot would otherwise import
 # every capture into the project and litter .import files beside them.
 preview_out/
+
+# CC0 flora reference photos (scripts/tools/fetch_flora_photos.py --out).
+# Under res://, so Godot would otherwise import 80 JPEGs and litter .import
+# files beside them. Also excluded in BOTH export presets.
+flora_photos/

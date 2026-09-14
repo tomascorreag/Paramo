@@ -19,7 +19,7 @@ const _GROUP_ID_PREFIX: String = "group:"
 # before _ready(). Listing them explicitly here also makes the set of
 # registered actions easy to audit in one place.
 const _ACTION_INSPECT: GDScript = preload("res://scripts/systems/actions/action_inspect.gd")
-const _ACTION_PLANT_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_plant_frailejon.gd")
+const _ACTION_PLANT_SPECIES: GDScript = preload("res://scripts/systems/actions/action_plant_species.gd")
 const _ACTION_REMOVE_FRAILEJON: GDScript = preload("res://scripts/systems/actions/action_remove_frailejon.gd")
 const _ACTION_BUILD_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_build_bridge.gd")
 const _ACTION_REMOVE_BRIDGE: GDScript = preload("res://scripts/systems/actions/action_remove_bridge.gd")
@@ -28,6 +28,17 @@ const _ACTION_REMOVE_LADDER: GDScript = preload("res://scripts/systems/actions/a
 const _ACTION_BUILD_FENCE: GDScript = preload("res://scripts/systems/actions/action_build_fence.gd")
 const _ACTION_REMOVE_FENCE: GDScript = preload("res://scripts/systems/actions/action_remove_fence.gd")
 const _ACTION_REMOVE_ROCK: GDScript = preload("res://scripts/systems/actions/action_remove_rock.gd")
+
+# The species the player can sow, with the glyph each shows in the radial and
+# the hotbar. Ids match ObjectPainter's registry and UnlockState's prices;
+# grasses are deliberately absent — they colonise, they are not sown.
+const _PLANTABLE: Array[Dictionary] = [
+	{"id": &"frailejon", "icon": preload("res://assets/sprites/UX/icons/frailejon.tres")},
+	{"id": &"espeletia_barclayana", "icon": preload("res://assets/sprites/UX/icons/espeletia_barclayana.tres")},
+	{"id": &"espeletia_hartwegiana", "icon": preload("res://assets/sprites/UX/icons/espeletia_hartwegiana.tres")},
+	{"id": &"hypericum", "icon": preload("res://assets/sprites/UX/icons/hypericum.tres")},
+	{"id": &"arcytophyllum", "icon": preload("res://assets/sprites/UX/icons/arcytophyllum.tres")},
+]
 const _ACTION_EXTINGUISH_FIRE: GDScript = preload("res://scripts/systems/actions/action_extinguish_fire.gd")
 const _ACTION_IGNITE_FIRE: GDScript = preload("res://scripts/systems/actions/action_ignite_fire.gd")
 
@@ -64,7 +75,7 @@ var _interaction_accept: Callable
 var _ux_overlay: Node2D  # UXOverlay
 var _frailejon_scene: PackedScene
 
-# --- Debug toast (used by ActionInspect) -----------------------------------
+# --- Toast (used by ActionInspect) ------------------------------------------
 var _toast_layer: CanvasLayer
 var _toast_label: Label
 var _toast_tween: Tween
@@ -94,7 +105,12 @@ func _ready() -> void:
 
 	_registry = ActionRegistry.new()
 	_registry.register(_ACTION_INSPECT.new())
-	_registry.register(_ACTION_PLANT_FRAILEJON.new())
+	# One plant action per sellable species. Every one registers here; which
+	# of them the radial actually shows is decided by the unlock (and the
+	# unlock by the run's ecosystem — UnlockState.is_available), so an absent
+	# species is simply never unlockable rather than special-cased here.
+	for entry: Dictionary in _PLANTABLE:
+		_registry.register(_ACTION_PLANT_SPECIES.new(entry["id"], entry["icon"]))
 	_registry.register(_ACTION_REMOVE_FRAILEJON.new())
 	_registry.register(_ACTION_BUILD_BRIDGE.new())
 	_registry.register(_ACTION_BUILD_LADDER.new())
@@ -114,16 +130,6 @@ func _ready() -> void:
 	_interaction_accept = func(c: Vector2i) -> bool:
 		return pathfinder.is_terrain_walkable(c) or has_any_action(c)
 
-	# Cancel any in-flight walk-then-act when the player is redirected by a
-	# left-click. Our own approach walks call player.follow_path directly (not
-	# through ClickToMoveController), so path_dispatched fires only for genuine
-	# user clicks — no self-cancel.
-	var c2m := get_tree().get_first_node_in_group(
-		ClickToMoveController.GROUP_NAME
-	) as ClickToMoveController
-	if c2m:
-		c2m.path_dispatched.connect(_on_user_path_dispatched)
-
 
 func _unhandled_input(event: InputEvent) -> void:
 	if pathfinder == null or player == null:
@@ -138,7 +144,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	# Right-click while the player is moving = brake: stop where it is and drop
-	# any in-flight walk-then-act, WITHOUT opening a menu. The pending action
+	# any in-flight walk-then-act, WITHOUT opening a menu. During walk-then-act
+	# this is the ONLY way out — ClickToMoveController refuses left-clicks. The pending action
 	# must be cancelled before the movement ends so the arrival poll (_process)
 	# doesn't fire it. A second right-click, now that the player is static,
 	# brings up the action menu normally (handled below).
@@ -152,7 +159,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# whole of "no building before the FTUE's build step". Below the brake above
 	# on purpose: stopping a walk is part of the movement the FTUE has already
 	# taught by then. Not consumed, for the same reason as click-to-move.
-	if not TutorialGate.allows(TutorialGate.Action.BUILD):
+	# INSPECT opens the same menu earlier with only the magnifier in it (below).
+	var build_allowed := TutorialGate.allows(TutorialGate.Action.BUILD)
+	if not build_allowed and not TutorialGate.allows(TutorialGate.Action.INSPECT):
 		return
 
 	var global_pos := _event_global_position(mb)
@@ -165,6 +174,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	var ctx := _build_context(cell)
 	var actions := _registry.available_for(ctx)
+	if not build_allowed:
+		var inspect_only: Array[TileAction] = []
+		for a in actions:
+			if a.id == &"inspect":
+				inspect_only.append(a)
+		actions = inspect_only
 	if actions.is_empty():
 		# Resolved a tile (e.g. one you can move to) but no action applies —
 		# flash so the player knows the click registered.
@@ -211,6 +226,11 @@ func interaction_accept() -> Callable:
 ## gate: any available action makes the tile interactable (opens the menu / shows
 ## a reticle). Availability is each action's own call over the four inputs
 ## (proximity, occupants, tile type, inventory).
+## True while the player walks to perform an action picked from the menu.
+func is_walk_committed() -> bool:
+	return _pending_action != null
+
+
 func has_any_action(cell: Vector2i) -> bool:
 	if _registry == null:
 		return false
@@ -218,15 +238,18 @@ func has_any_action(cell: Vector2i) -> bool:
 
 
 ## True iff right-clicking `cell` would offer at least one non-debug action
-## (plant, build, remove, extinguish, …). Inspect is excluded — it's a
-## dev-only readout and shouldn't promote a tile from "movable" to "actionable"
-## in the UX. Used by UXOverlay to choose between the solid and dim circle rows.
-## Proximity is enforced by each action, so far cells return false naturally.
+## (plant, build, remove, identify, extinguish, …). Used by UXOverlay to choose
+## between the solid and dim circle rows. Proximity is enforced by each action,
+## so far cells return false naturally.
+##
+## Inspect used to be excluded here as a dev-only readout. It identifies a plant
+## into the journal now, which is as real a verb as planting one — and the cells
+## it applies to already carried the trowel, so the reticle does not change.
 func has_meaningful_action(cell: Vector2i) -> bool:
 	if _registry == null:
 		return false
 	for action in _registry.available_for(_build_context(cell)):
-		if action.id != &"inspect" and not action.debug_only:
+		if not action.debug_only:
 			return true
 	return false
 
@@ -245,6 +268,7 @@ func _build_context(cell: Vector2i) -> ActionContext:
 	ctx.traversal = traversal_placement_controller
 	ctx.pathfinder = pathfinder
 	ctx.unlocks = _unlocks_node()
+	ctx.flora_codex = _flora_codex_node()
 	# Cached BFS from the player's cell — lets is_offerable answer "can the player
 	# reach a cell to act from?" without a per-action flood fill.
 	ctx.reachable = pathfinder.reachable_from(player.current_cell)
@@ -262,6 +286,17 @@ func _unlocks_node() -> Node:
 	return _unlocks
 
 
+# The scene's FloraCodex, on the same lazy group lookup and the same null rule:
+# a scene without one has no discovery system, and ActionInspect treats every
+# species as already known there.
+var _codex: Node = null
+
+func _flora_codex_node() -> Node:
+	if _codex == null or not is_instance_valid(_codex):
+		_codex = get_tree().get_first_node_in_group(FloraCodex.GROUP)
+	return _codex
+
+
 # Partitions actions into top-level entries (group == &"") and submenu-wrapped
 # groups (group != &""). Group order follows registration order; within a
 # group, actions also keep registration order.
@@ -277,7 +312,9 @@ func _assemble_menu_items(actions: Array[TileAction], ctx: ActionContext) -> Arr
 	for a in actions:
 		var entry := {
 			"id": String(a.id),
-			"icon": a.icon,
+			# icon_for, not icon: inspect answers with a different glyph over a
+			# plant the journal has not recorded yet.
+			"icon": a.icon_for(ctx),
 			"enabled": a.is_enabled(ctx),
 		}
 		if a.group == &"":
@@ -323,8 +360,7 @@ func _close_menu() -> void:
 		_menu.closed.disconnect(_on_menu_closed)
 		_menu.queue_free()
 		_menu = null
-		# Keep the lock while a walk-then-act is pending — the marker rides the
-		# target tile until the player arrives (or the walk is cancelled).
+		# A walk-then-act has already swapped the lock for its committed pin.
 		if _ux_overlay and _pending_action == null:
 			_ux_overlay.unlock()
 
@@ -350,8 +386,10 @@ func _on_item_selected(id: String) -> void:
 	if not action.is_enabled(ctx):
 		_deny(_pending_cell)
 		return
-	# Already standing next to the target -> act immediately (unchanged UX).
-	if action.is_available(ctx):
+	# Already standing next to the target -> act immediately (unchanged UX). A
+	# traversal build acts immediately from anywhere: it opens the second click
+	# now, and TraversalPlacementController walks the player over once it is aimed.
+	if action.is_available(ctx) or action.executes_from_afar:
 		action.execute(ctx)
 		if _ux_overlay:
 			_ux_overlay.unlock()
@@ -365,10 +403,12 @@ func _on_item_selected(id: String) -> void:
 	_pending_action = action
 	_pending_target = _pending_cell
 	player.follow_path(approach)
-	# Keep a marker on the target tile for the duration of the walk. The menu's
-	# `closed` signal won't tear it down (guarded by _pending_action above).
+	# The menu's lock becomes the committed pin: the live circle on the target
+	# for the whole walk. The menu's `closed` signal can't tear it down
+	# (unlock is a no-op outside LOCKED).
 	if _ux_overlay:
-		_ux_overlay.lock_at(_pending_target)
+		_ux_overlay.unlock()
+		_ux_overlay.pin_destination(_pending_target, true)
 
 
 func _on_menu_closed() -> void:
@@ -384,7 +424,8 @@ func _on_menu_closed() -> void:
 # Watch for the pending walk to end. is_moving() stays true between steps and
 # while a path is queued, so a single true->false transition means the player
 # either arrived or the path aborted — either way, re-check and act (or deny).
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_toast_position(delta, false)
 	if _pending_action == null:
 		return
 	if player == null or player.is_moving():
@@ -398,10 +439,10 @@ func _process(_delta: float) -> void:
 	# time they arrive.
 	if action.is_available(ctx) and action.is_enabled(ctx):
 		action.execute(ctx)
-		# unlock() is a no-op if execute entered placement mode (bridge/ladder);
-		# for plant/remove it clears the walk marker.
+		# Player.arrived releases the pin too, but its frame order against this
+		# _process is not fixed; release_destination is idempotent.
 		if _ux_overlay:
-			_ux_overlay.unlock()
+			_ux_overlay.release_destination()
 	else:
 		_deny(target)
 
@@ -424,19 +465,16 @@ func _cancel_pending() -> void:
 		return
 	_pending_action = null
 	if _ux_overlay:
-		_ux_overlay.unlock()
+		_ux_overlay.release_destination()
 
 
-func _on_user_path_dispatched(_cells: Array[Vector2i]) -> void:
-	_cancel_pending()
-
-
-# Clear any lock and flash a denied reticle on `cell`. flash_denied only renders
-# in HOVER state, so unlock() must run first.
+# Clear any lock or walk pin and flash a denied reticle on `cell`. flash_denied
+# only renders in HOVER state, so both must be dropped first.
 func _deny(cell: Vector2i) -> void:
 	if _ux_overlay == null:
 		return
 	_ux_overlay.unlock()
+	_ux_overlay.release_destination()
 	if _ux_overlay.has_method(&"flash_denied"):
 		_ux_overlay.flash_denied(cell)
 
@@ -445,26 +483,46 @@ func _deny(cell: Vector2i) -> void:
 # Actions called via ActionContext (previously private)
 # ---------------------------------------------------------------------------
 
+## The historical entry point — the FTUE and the sim bot plant the frailejón
+## by name. Same path as every other species.
 func plant_frailejon(cell: Vector2i) -> void:
+	plant_species(cell, &"frailejon")
+
+
+func plant_species(cell: Vector2i, kind: StringName) -> void:
+	var data: WorldObjectData = ObjectPainter.data_for(kind)
+	if not (data is PlantObjectData):
+		push_warning("TileInteractionController.plant_species: '%s' is not a plant kind." % kind)
+		return
 	# Charge at commit — 1 token AND 1 water, one cell (see UnlockState:
 	# planting is the only placement that spends the reserve). Instancing never
 	# fails after this point (no validate step — _applies already vetted the
 	# cell), so no refund path is needed.
 	var unlocks := _unlocks_node()
 	if unlocks != null and unlocks.has_method(&"try_pay_placement"):
-		if not bool(unlocks.call(&"try_pay_placement", &"frailejon")):
+		if not bool(unlocks.call(&"try_pay_placement", kind)):
 			return
-	var frailejon: Frailejon = _frailejon_scene.instantiate()
-	frailejon.cell = cell
+
+	# Natural ground cover on the cell (the action accepted it via
+	# is_displaceable) is evicted by TileGrid.set_occupant when the new plant
+	# claims the cell in its _ready — nothing to do here.
+	var plant: Frailejon = _frailejon_scene.instantiate()
+	plant.cell = cell
+	# The scene's authored `data` is the frailejón; every other species is the
+	# same scene with its own .tres swapped in before _ready (the rock pattern).
+	plant.data = data
 
 	# Place the Node2D at the altitude-0 world point for the cell. The plant
 	# itself lifts its sprite visually in _ready() so the sort key stays
-	# altitude-independent (same pattern as Player). Frailejone registers
-	# itself as TileGrid occupant in _ready — Pathfinder reads its
-	# walk_penalty() during step-cost calc, so no explicit set_cell_penalty
-	# call is needed here.
-	world.add_child(frailejon)
-	frailejon.global_position = pathfinder.cell_to_world(cell)
+	# altitude-independent (same pattern as Player). It registers itself as
+	# TileGrid occupant in _ready — Pathfinder reads its walk_penalty() during
+	# step-cost calc, so no explicit set_cell_penalty call is needed here.
+	world.add_child(plant)
+	plant.global_position = pathfinder.cell_to_world(cell)
+	# The player did this, so it gets the flash; the scatter at load does not.
+	# It grows away from where they stand.
+	plant.play_placed_flash(
+		player.global_position if player != null else plant.global_position)
 
 
 func remove_frailejon(cell: Vector2i) -> void:
@@ -539,24 +597,67 @@ func is_player_on_traversal(t: Traversal) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Debug toast (used by ActionInspect)
+# Toast (used by ActionInspect)
 # ---------------------------------------------------------------------------
 
-## Shows `text` as a bottom-screen label for `duration` seconds, then fades.
-## Cheap stand-in for a proper tile-info panel; tied to ActionInspect for now.
-func show_debug_toast(text: String, duration: float) -> void:
+## Names something at the bottom of the screen for `duration` seconds, then
+## fades. `key` is a TRANSLATION KEY, and it is assigned to the Label as-is: a
+## Control re-translates whatever sits in `text` on
+## NOTIFICATION_TRANSLATION_CHANGED, so the toast follows a locale change for
+## free, where `tr(key)` would freeze it in the language it was raised in.
+## Print one already-translated line at the bottom of the screen for `duration`
+## seconds, then fade it.
+##
+## Takes TEXT, not a translation key, because its one caller composes a sentence
+## from two keys (a phrasing template and a species name) and there is no key
+## that names the result. The cost is the usual one: a Label holding a finished
+## string does not re-translate itself on a locale change. That is accepted here
+## and nowhere else — the line is on screen for 2.5s and the locale is chosen at
+## the title screen, so the window in which it could go stale does not occur in
+## play. Anything longer-lived must store the KEY and let Control translate it.
+func show_message(text: String, duration: float) -> void:
 	_ensure_toast()
 	_toast_label.text = text
 	_toast_label.modulate.a = 1.0
+	var was_visible: bool = _toast_label.visible
 	_toast_label.visible = true
+	# A fresh caption appears where it belongs; one already up slides there.
+	_update_toast_position(0.0, not was_visible)
 	if _toast_tween and _toast_tween.is_valid():
 		_toast_tween.kill()
 	_toast_tween = create_tween()
 	_toast_tween.tween_interval(duration)
 	_toast_tween.tween_property(_toast_label, "modulate:a", 0.0, 0.35)
 	_toast_tween.tween_callback(func() -> void: _toast_label.visible = false)
-	# Also echo to stdout so the info is visible when UI is off.
-	print("[inspect] ", text)
+
+
+## The toast's resting gap to the bottom of the screen, and its box height.
+const _TOAST_BOTTOM_PX: float = 8.0
+const _TOAST_HEIGHT_PX: float = 20.0
+## How fast a caption rides up over (or back down from) the FTUE strip.
+const _TOAST_LIFT_SPEED: float = 8.0
+var _toast_lift: float = _TOAST_BOTTOM_PX
+
+
+## While the FTUE strip is up the caption sits ABOVE it (the strip is at the
+## bottom of the screen, exactly where the caption goes), and slides back down
+## when the strip leaves. Pulled from the tutorial's `caption_floor` rather
+## than pushed, so nothing here exists when there is no tutorial.
+func _update_toast_position(delta: float, snap: bool) -> void:
+	if _toast_label == null or not is_instance_valid(_toast_label) or not _toast_label.visible:
+		return
+	var target: float = _TOAST_BOTTOM_PX
+	var tut := get_tree().get_first_node_in_group(TutorialController.GROUP)
+	if tut != null and tut.has_method(&"caption_floor"):
+		target = maxf(target, float(tut.call(&"caption_floor")))
+	if snap:
+		_toast_lift = target
+	else:
+		_toast_lift = lerpf(_toast_lift, target, 1.0 - exp(-_TOAST_LIFT_SPEED * delta))
+	# Whole pixels: the label's text is a pixel font.
+	var bottom: float = -roundf(_toast_lift)
+	_toast_label.offset_bottom = bottom
+	_toast_label.offset_top = bottom - _TOAST_HEIGHT_PX
 
 
 func _ensure_toast() -> void:

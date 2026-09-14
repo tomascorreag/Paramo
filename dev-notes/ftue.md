@@ -9,20 +9,39 @@ concessions in systems it depends on.
 
 ## The shape
 
-| Step | Copy key | Advances on |
-|---|---|---|
-| 1 | `NARRATIVE_WELCOME` | dwell, or any key/click |
-| 2 | `NARRATIVE_CHARGE` | dwell, or any key/click |
-| 3 | `TUTORIAL_MOVE` | `ClickToMoveController.path_dispatched`, **twice** |
-| 4 | `TUTORIAL_JOURNAL` | `FieldJournal.opened` |
-| 5 | `TUTORIAL_SHOP` | `UnlockState.unlock_changed` |
-| 6 | `TUTORIAL_CLOSE_JOURNAL` | `FieldJournal.closed` |
-| 7 | `TUTORIAL_BUILD_*` | `TraversalPlacementController.placement_began`, or `UnlockState.placement_paid` |
-| 8 | `TUTORIAL_ENDPOINT_*` | `UnlockState.placement_paid` (skipped unless a placement is open) |
-| 9 | *(no copy — the strip is gone)* | a fixed `_ROAM_SECONDS` (12) hold |
-| 10 | `TUTORIAL_FIRE_FOLLOW` | **polled**: the fire's cell entering the frame |
-| 11 | `TUTORIAL_FIRE_DOUSE` | `FireManager.tile_extinguished`, or `tile_burned` on that cell |
-| 12 | `NARRATIVE_CLOSING` | dwell, or any key/click |
+| Step | id | Copy key | Advances on |
+|---|---|---|---|
+| 1 | `welcome` | `NARRATIVE_WELCOME` | dwell, or any key/click |
+| 2 | `charge` | `NARRATIVE_CHARGE` | dwell, or any key/click |
+| 3 | `move` | `TUTORIAL_MOVE` | `ClickToMoveController.path_dispatched`, **twice** |
+| 4 | `discover` | `TUTORIAL_DISCOVER_FRAILEJON` | `FloraCodex.discovered` with an Espeletia (skipped if one is known) |
+| 5 | `journal` | `TUTORIAL_JOURNAL` | `FieldJournal.opened` |
+| 6 | `bitacora` | `TUTORIAL_BITACORA` | `FieldJournal.spread_changed` to `bitacora` (skipped if already there) |
+| 7 | `shop` | `TUTORIAL_SHOP_FRAILEJON` | `UnlockState.unlock_changed` with the frailejón |
+| 8 | `close_journal` | `TUTORIAL_CLOSE_JOURNAL` | `FieldJournal.closed` |
+| 9 | `build` | `TUTORIAL_BUILD_<species>` | `UnlockState.placement_paid` (or `placement_began`) |
+| 10 | `discover_more` | `TUTORIAL_DISCOVER_MORE` | `FloraCodex.discovered`, any species (skipped if two are known) |
+| 11 | `shop_ladder` | `TUTORIAL_SHOP_LADDER` | `UnlockState.unlock_changed` with the ladder |
+| 12 | `close_journal_ladder` | `TUTORIAL_CLOSE_JOURNAL` | `FieldJournal.closed` |
+| 13 | `build_ladder` | `TUTORIAL_BUILD_LADDER` | `TraversalPlacementController.placement_began`, or `UnlockState.placement_paid` |
+| 14 | `build_endpoint` | `TUTORIAL_ENDPOINT_LADDER` | `UnlockState.placement_paid` (skipped unless a placement is open) |
+| 15 | `roam` | *(no copy — the strip is gone)* | a fixed `_ROAM_SECONDS` (12) hold |
+| 16 | `fire_follow` | `TUTORIAL_FIRE_FOLLOW` | **polled**: the fire's cell entering the frame |
+| 17 | `fire_douse` | `TUTORIAL_FIRE_DOUSE` | `FireManager.tile_extinguished`, or `tile_burned` on that cell |
+| 18 | `closing` | `NARRATIVE_CLOSING` | dwell, or any key/click |
+
+**The ladder half is disabled (2026-09-14).** Steps 11–13 carry `"disabled": true`: `_step_applies` steps over them and `_granted_mask` / `_granted_purchases` ignore their `grants` / `sells`, so the ladder never goes on sale during the FTUE. `build_endpoint` skips itself too, since no placement can be open. The copy, wiring and tests stay; remove the flag to restore. The 25-token opening balance was priced for the ladder and now leaves 14 spare.
+
+**Discovery comes before building (2026-09-14).** Discovery gates the shop, so the loop taught first is the one every later purchase goes through: identify a frailejón, read its page in the bitácora (whose tab only exists once something is identified), buy it on the resources page, plant it. Then an open objective (identify any second species, grasses included) says what discovery is for, and only then the ladder, which is the old FTUE's build half with its second-click step. Steps that repeat a verb share its completion wiring through a `"kind"` on the step (`discover_more` is kind `discover`, `shop_ladder` kind `shop`, …), because ids must stay unique; `test_tutorial.gd` asserts every kind names wiring that exists.
+
+**The first right click opens a menu with one entry.** `TutorialGate.Action.INSPECT` is granted by `discover`, and `TileInteractionController` opens the tile menu when INSPECT *or* BUILD is allowed, filtering it down to `inspect` while BUILD is still withheld. Without the filter the step that teaches identifying also teaches removing a rock.
+
+**The shop sells the shopping list and nothing else.** A step can carry `"sells"` (cumulative, like `"grants"`; `_FRAILEJON` expands to every registered Espeletia, of which the mountain sells one) and `_show_step` passes the union to `TutorialGate.restrict_purchases`. `JournalShopInput` asks `TutorialGate.allows_purchase(id)` at the hover and at the buy. The reason is money: the run opens with 25 tokens and the list is 23 (frailejón 10 + 1 tile, ladder 10 + 2 tiles), with income only at day end. A player who bought a chite on the way would reach the ladder step unable to finish it. `release()` lifts the list with the rest of the gate.
+
+**A frailejón is guaranteed near the spawn.** level1's seed is random and the scatter gives ~33 frailejón cells a map, none promised nearby, so step 4 could point at nothing. `ObjectPainter.ensure_flagship_near(ctx, spawn)` runs between `begin_spawn` (which rolls the kinds) and the spawn rows: it takes the nearest Espeletia already within `FLAGSHIP_RADIUS` (5) cells on the spawn's altitude or, with none, flags the nearest open or grass cell at `FLAGSHIP_MIN_DISTANCE` (2) or more with the mountain's own species (`flagship_species`: its first plantable Espeletia). Either way it records the cell in `ctx["mature"]` so `_spawn_row` spawns it at its last growth stage (a sprout is a few texels; its stage draw is still consumed). **MEASURED 2026-09-14**, 40 seeds on level1's terrain params through `SimWorld`, all three ecosystems: 40/40 had a mature frailejón within 5 cells, reachable from the spawn; 4 of them at ring 5. Two things follow from where it sits:
+
+- **The spawn is picked once, before the guarantee.** `_find_starting_cell` reads object flags; the new flag can shrink the chosen plateau and move a re-run pick. `ProceduralWorld._ensure_flagship` stores the pick in `_start_cell` and `_place_player_on_walkable` reuses it.
+- **`SimWorld` makes the same calls in the same order**, so the game and the sim still agree per seed. But the extra plant and its rng draw shift growth stages and rock variants after it, so a before/after sim pair across this change is not paired.
 
 **No line leaves the screen inside `_MIN_ON_SCREEN` (2.5s)**, however fast it is
 satisfied. Several steps can be completed by an action already in flight — a
@@ -109,6 +128,7 @@ step 8 asks for the second click. Concretely:
 - **Escape or a right click drops the placement without building.** Step 8 then
   rewinds to step 7 (`_on_placement_ended` → `_show_step(_step - 1)`) rather than
   waiting forever on a click the player can no longer make.
+- **The placement opens from anywhere, and the walk comes after the aim** (2026-09-12). The build actions carry `TileAction.executes_from_afar`, so picking one on a far tile enters `AWAITING_ENDPOINT` at once. A valid second click either builds on the spot (player already beside the origin) or enters `APPROACHING`: the ghost stays, the player walks to a cell beside the origin that the validator will accept them on (never inside a fence run or a bridge span), and the traversal is re-validated, **charged** and built on arrival. `is_placing()` is true in both modes, so step 8 stays up during the walk and `placement_paid` still completes it, just later. Right click / Escape stop the walk and cancel; a left-click move cancels through `ClickToMoveController.path_dispatched`; both emit `placement_ended(built = false)`, so step 8 rewinds as above.
 
 That rewind is why `TraversalPlacementController` gained **two** signals rather
 than one. `cancel()` is its single teardown for success, cancellation AND
@@ -152,7 +172,7 @@ run ever introduces. The arc is one scripted meeting with it.
 ### The quiet beat
 
 Step 9 has **no copy at all**, and that is its content. `"quiet": true` fades the
-strip *and the skip button* away and leaves them away for 12 s. An FTUE that
+strip away and leaves it away for 12 s; the skip button stays. An FTUE that
 never lets go teaches the player to wait for the next line rather than to look at
 the world — and the aura only works on a player who has stopped watching the
 bottom of the screen. It is also what buys the arc its distance: the fire is lit
@@ -163,19 +183,15 @@ the step INDEX for the same reason.
 
 ### Where the fire is lit
 
-`_pick_fire_cell` ranks on **one number**: how far beyond the edge of the screen
-a cell sits, in screen-heights, signed — the same metric `FireAuraOverlay`
-shapes its glow with (`_cell_offscreen_distance` is its `sd`, computed the same
-way, corners included). Candidates must be
+**Changed 2026-09-14: the pick is by WALK, not by screen distance.** The old rule (reachable, and closest to 0.35 screen-heights off the edge) lit fires across rivers and across the map: reachable only says a walk exists, and a cell just over the water is reachable by a bridge thirty steps upstream. Now `_pick_fire_cell` asks `Pathfinder.walk_costs_from(player, _FIRE_MAX_WALK = 30)` (a bounded Dijkstra over the same edges and costs `find_path` uses) and `_rank_fire_cells` (pure, tested without a viewport) takes, among candidates that are
 
-- **reachable** — from `Pathfinder.reachable_from(player.current_cell)`, so the
-  answer can never be a fire across a ravine the player cannot walk to,
 - **burnable** — `FireManager.can_ignite`, so never water, rock or dirt,
-- at least `_FIRE_MIN_CELLS` (4) away, a guard against a camera state that makes
-  a neighbour read as off-screen,
+- at least `_FIRE_MIN_CELLS` (4) away,
+- **not a detour** — walk cost ≤ `_FIRE_MAX_DETOUR` (2) × Chebyshev distance, which is the river rule,
 
-and the winner is the one closest to `_FIRE_TARGET_OFFSCREEN` (0.35) inside the
-band [0.10, 0.60].
+the **cheapest walk** inside the off-screen band [0.10, 0.60] (`sd`, the same signed metric `FireAuraOverlay` shapes its glow with; ties to the smaller `sd`). In practice that is a fire just past the edge in the direction the terrain lets the player go straight. If the band is empty the cheapest non-detour walk at all is taken, on screen or not. The old fallback, the FARTHEST burnable cell, is gone: it was the across-the-map fire.
+
+The band's rationale below still holds; the 0.35 target no longer exists.
 
 **0.60 is the load-bearing number: the aura's `REACH` is 0.9, past which a fire
 contributes nothing to the strip at all.** A fire lit beyond it is a line telling
@@ -248,9 +264,7 @@ hangs.
 No new `TutorialGate` bit. Dousing goes through the tile action menu, which
 `BUILD` opened three steps earlier — there is nothing left to withhold.
 
-Every step that shows a panel carries a **hold to skip tutorial** button in its
-own row under it (the quiet beat shows neither — for those seconds there is no
-tutorial on screen to end), centred, with `_SKIP_GAP` (5px) of clear air between
+A **hold to skip tutorial** button sits in its own row under the strip for the whole FTUE: it fades in once in `_begin` and never fades out — not on the hand-off beats, not on the quiet step (since 2026-09-12; before that it followed the strip's fades). Centred, with `_SKIP_GAP` (5px) of clear air between
 the two — they are
 separate objects (one is the tutorial talking, the other is a control that ends
 it) and touching edges read as one widget. It ends the whole FTUE; the tutorial
@@ -278,7 +292,7 @@ world.
 ## TutorialGate: a verb doesn't exist until its step
 
 `scripts/ui/tutorial_gate.gd`, a static class (no autoload — CLAUDE.md's UI
-non-goals). Four bits: `MOVE`, `JOURNAL`, `SHOP`, `BUILD`. Each instruction step
+non-goals). Five bits: `MOVE`, `INSPECT`, `JOURNAL`, `SHOP`, `BUILD`, plus a shop allowlist (`restrict_purchases` / `allows_purchase`, see the step table above). Each instruction step
 carries the one it teaches in `"grants"`, and `_show_step` sets the mask to the
 union of every step **up to and including** the one on screen. The opening
 narrative grants nothing, so the run starts with the player able to read and
@@ -289,8 +303,9 @@ everything after it is an unrestricted game.
 |---|---|---|
 | `MOVE` | `ClickToMoveController._unhandled_input`, `UXOverlay._process` | left-click doesn't path, and no hover reticle is drawn |
 | `JOURNAL` | `FieldJournal._input` (`toggle_journal`) | Space doesn't open the book |
-| `SHOP` | `JournalShopInput._try_buy` | the page is readable but sells nothing |
-| `BUILD` | `TileInteractionController._unhandled_input` | no tile action menu, so no placement |
+| `INSPECT` | `TileInteractionController._unhandled_input` | no tile action menu at all (with it but without `BUILD`: a menu holding only the magnifier) |
+| `SHOP` | `JournalShopInput._try_buy` | the page is readable but sells nothing; with it, only the allowlist sells |
+| `BUILD` | `TileInteractionController._unhandled_input` | no placement entries in the tile menu |
 
 Two rules hold at all four sites:
 
@@ -333,7 +348,7 @@ Spread (`_roll_spread`) and the public `ignite()` are untouched on purpose:
 there is nothing to spread from on day 0, and gating `ignite()` would silence
 the debug ignite action and the balance simulator's scripted burns.
 
-**Unlocks are priced per type, and the run opens with 15 tokens.** Was one flat
+**Unlocks are priced per type, and the run opens with 25 tokens** (15 until 2026-09-14, when the FTUE started buying a frailejón AND a ladder on day one; the 15-token reasoning below is kept for the history). Was one flat
 price of 20 for everything and a 10-token opening balance, which made the
 tutorial's last step literally uncompletable. Now:
 
@@ -386,7 +401,16 @@ TraversalPlacementController). `test_tutorial.gd` asserts those signals still
 exist by name, because a rename would leave a step that silently never
 completes.
 
-**Layer TUTORIAL (150) is above JOURNAL (140)** because steps 3 and 4 are read
+**Pointing, 2026-09-14.** Four presentation cues on top of the copy, none of which change what completes a step:
+
+- **The discover step pulses the nearest frailejón toward white** (`Frailejon.set_highlight`, driven by `_update_pulse` at up to `_PULSE_MAX` 0.35 over `_PULSE_PERIOD` 2.2 s). It rides the flash material (the same per-plant duplicate and `flash_amount` mix as SpawnFlash, colour `BUILD_COLOR`), so it sways with the plant and is alpha-only under the palette rule. The plant is picked once when the line appears, so it doesn't hop as the player walks. A real flash outranks it: `set_highlight` only records the amount while a tween runs, which is what lets the gold discovery flash play out when the step ends.
+- **Captions ride above the strip.** `TileInteractionController`'s toast asks `TutorialController.caption_floor()` each frame and eases up over the strip, back down when it leaves (the quiet step, the end). Read off the strip's layout rect, not its alpha, so a hand-off fade doesn't bounce the caption.
+- **The dock side follows the spread** (it slides, `_DOCK_SPEED`): beside the left page on the bitácora, so the species plate reads, and beside the right page on resources, so the shop does.
+- **The book bobs what the step names.** `FieldJournal.set_cue(tab, entries)` (the tutorial says what; the book animates it on its own `PROCESS_MODE_ALWAYS` clock, `CUE_PERIOD` 1.6 s). The fore-edge tab travels ±`JournalForeEdge.WIGGLE_PX` (2, off the paper) with its hit rect; shop swatches ±`JournalKnownSet.WIGGLE_PX` (1), no further than the hover lift, so no new warp-block crossings. `_cue_for` decides: the bitácora step bobs the tab; a shop step bobs the tab back to resources while on the bitácora, and its entries once the shop shows.
+
+**While the book is open the strip docks beside a page** (`_update_dock`, per frame off `FieldJournal.page_right_rect()`), because centred it covered the shop row the steps are asking about. **MEASURED 2026-09-14** with the shop step up: centred at 480×270 the strip spans y 209–244 against the frailejón swatch at 187–210 plus its buy tag below; at 360×202 (1440×810 windowed) 141–176 against 153–176, fully covered. Moving it DOWN was the first idea and does not fit: at 360×202 there are 26 px under the row for a 35 px strip and an 18 px skip row. The right page starts at x 264 / 204 and the strip is 200 wide, so docking puts it at x 62–262 / 2–202, over the bottom of the left page (the calendar, or the species plate on the bitácora spread), which none of the book steps point at. Those 360×202 numbers predate the book fitting the window (journal.md, "Fitting the window"): at 1440×810 the book now draws at 3 device pixels per texel, so the right page starts at logical x 198 and the left page ends at 162.75. The dock clamps to the screen, giving the strip x 0–200 on resources and 160–360 on the bitácora, 2–3 logical px over each page's spine edge (computed from the measured page rects, not rendered).
+
+**Layer TUTORIAL (150) is above JOURNAL (140)** because several steps are read
 with the book open, and `PROCESS_MODE_ALWAYS` + `TWEEN_PAUSE_PROCESS` keep the
 strip and its fade alive while the journal holds `get_tree().paused`.
 

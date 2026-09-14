@@ -132,7 +132,7 @@ func test_drawn_swatches_do_not_collide() -> void:
 	var boxes: Array[Rect2] = []
 	for i in buildings._swatches.size():
 		var r: TextureRect = buildings._swatches[i]
-		var ink := JournalKnownSet._ink_rect(r.texture)
+		var ink := JournalKnownSet.ink_rect(r.texture)
 		boxes.append(Rect2(r.position + ink.position, ink.size))
 	for i in range(1, boxes.size()):
 		assert_true(boxes[i].position.x >= boxes[i - 1].end.x,
@@ -444,6 +444,48 @@ func test_buying_takes_the_buy_line_down_without_a_mouse_move() -> void:
 	assert_eq(_tooltip().price, 0, "and nothing left to charge")
 
 
+func test_a_cued_entry_bobs_and_the_others_stay() -> void:
+	var rest0: Vector2 = flora._swatches[0].position
+	var rest1: Vector2 = flora._swatches[1].position
+	flora.set_wiggle([&"frailejon"], 1)
+	assert_eq(flora._swatches[0].position, rest0 + Vector2(0, 1))
+	assert_eq(flora._swatches[1].position, rest1, "an entry nobody named stays put")
+	flora.set_wiggle([], 0)
+	assert_eq(flora._swatches[0].position, rest0)
+
+
+func test_the_cue_bob_is_whole_texels_and_moves_the_tab() -> void:
+	for i in 40:
+		var o: int = FieldJournal.cue_offset(i * 0.1, JournalForeEdge.WIGGLE_PX)
+		assert_between(o, -JournalForeEdge.WIGGLE_PX, JournalForeEdge.WIGGLE_PX)
+	assert_lte(JournalKnownSet.WIGGLE_PX, JournalKnownSet.HOVER_LIFT_PX,
+			"a swatch bob must not travel further than the hover lift the page is laid out for")
+	var fore := journal.find_children("*", "JournalForeEdge", true, false)[0] as JournalForeEdge
+	var t := fore.tab(&"bitacora")
+	var y: int = fore.tab_rect(t).position.y
+	fore.set_wiggle(2)
+	assert_eq(fore.tab_rect(t).position.y, y + 2, "the tab and its hit rect bob together")
+	fore.set_wiggle(0)
+
+
+func test_the_tutorial_can_sell_one_thing_only() -> void:
+	# The FTUE's budget is exactly its shopping list, so while it names what is
+	# on sale, the other entries neither lift nor sell.
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
+	var ladder: int = Array(buildings.entry_ids).find("ladder")
+	var other: int = 1 if ladder == 0 else 0
+	assert_gt(ladder, -1, "the buildings page sells a ladder")
+	TutorialGate.restrict_purchases([&"ladder"])
+	assert_false(shop.handle_click(_click_point(buildings, other)),
+			"an entry the tutorial is not selling must not sell")
+	assert_false(_unlocks.is_unlocked(StringName(buildings.entry_ids[other])))
+	shop.handle_hover(_click_point(buildings, other))
+	assert_eq(buildings._hovered, -1, "and must not lift")
+	assert_true(shop.handle_click(_click_point(buildings, ladder)))
+	assert_true(_unlocks.is_unlocked(&"ladder"))
+
+
 func test_the_tutorial_gate_takes_the_tag_with_it() -> void:
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()
@@ -488,9 +530,14 @@ func test_no_price_is_printed_until_something_is_hovered() -> void:
 func test_an_owned_entry_prints_no_price_even_hovered() -> void:
 	ResourceLedger.set_amount(TOKENS, 40.0)
 	shop._refresh_states()
-	shop.handle_click(_click_point(buildings, 0))
-	shop.handle_hover(_click_point(buildings, 0))
+	# A PLANT: its read verb (the bitacora page) outlives the purchase, so the
+	# tag stays up with nothing to charge on it. A building has no page, so an
+	# owned one gets no tag at all — that case is in the right-click tests.
+	shop.handle_click(_click_point(flora, 0))
+	shop.handle_hover(_click_point(flora, 0))
 	assert_true(_tooltip().visible, "the info verb outlives the purchase")
+	assert_true(_tooltip().readable)
+	assert_false(_tooltip().buyable)
 	assert_eq(_tooltip().price, 0, "an owned entry is not free, it is done")
 
 
@@ -538,3 +585,60 @@ func test_without_an_unlock_state_the_page_is_inert() -> void:
 	assert_almost_eq(float(mat.get_shader_parameter(&"dim")), 1.0, 0.001,
 			"with no economy every swatch renders owned")
 	assert_false(shop.handle_click(_click_point(buildings, 0)))
+
+
+# --- right click reads -------------------------------------------------------
+
+func test_right_clicking_a_plant_opens_its_bitacora_page() -> void:
+	# The read verb: the same arithmetic as the click, so the entry under the
+	# info glyph is the one whose page opens. No codex in the tree, so every
+	# species is readable.
+	var fj := journal as FieldJournal
+	assert_eq(fj.spread(), &"run")
+	assert_true(shop.handle_read(_click_point(flora, 1)))
+	assert_eq(fj.spread(), &"bitacora")
+	assert_true(fj.shows(flora.entry_id_at(1)), "the species is on one of the two open pages")
+
+
+func test_right_clicking_a_building_does_nothing() -> void:
+	var fj := journal as FieldJournal
+	assert_false(shop.handle_read(_click_point(buildings, 0)),
+		"a ladder has no page to turn to, and the event is not consumed")
+	assert_eq(fj.spread(), &"run")
+
+
+func test_left_click_still_buys_beside_the_read_verb() -> void:
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
+	assert_true(shop.handle_click(_click_point(flora, 0)))
+	assert_true(_unlocks.is_unlocked(flora.entry_id_at(0)))
+	assert_eq((journal as FieldJournal).spread(), &"run", "buying turns no page")
+
+
+func test_hidden_sections_take_no_clicks() -> void:
+	# The bitacora's plate sits over the same texels the shop row does. With
+	# the run spread hidden, a click there must buy nothing and read nothing.
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
+	var fj := journal as FieldJournal
+	fj.show_spread(&"bitacora")
+	var before: float = ResourceLedger.get_amount(TOKENS)
+	assert_false(shop.handle_click(_click_point(flora, 0)))
+	assert_eq(ResourceLedger.get_amount(TOKENS), before, "nothing charged")
+	assert_false(shop.handle_read(_click_point(flora, 0)))
+	shop.handle_hover(_click_point(flora, 0))
+	assert_eq(flora._hovered, -1, "nothing lifts on a hidden row")
+
+
+func test_the_read_line_is_only_offered_over_species() -> void:
+	ResourceLedger.set_amount(TOKENS, 40.0)
+	shop._refresh_states()
+	shop.handle_hover(_click_point(flora, 0))
+	assert_true(_tooltip().visible)
+	assert_true(_tooltip().readable, "a plant has a page: right click reads it")
+	shop.handle_hover(_click_point(buildings, 0))
+	assert_true(_tooltip().visible, "the ladder is for sale")
+	assert_false(_tooltip().readable, "but it has no page to read")
+	# An owned building has nothing to read AND nothing to buy: no tag at all.
+	assert_true(shop.handle_click(_click_point(buildings, 0)))
+	assert_false(_tooltip().visible, "an owned building has no verb left")

@@ -64,6 +64,21 @@ signal generation_finished
 ##
 ## seed_override = -1  → use generation_params.seed
 @export var seed_override: int = -1
+## ecosystem_override = &""  → ObjectPainter draws the ecosystem from the seed.
+## Set to a profile id (`chingaza`, `guerrero`, `nevados`) to pin which real
+## paramo this map is; level1 pins `chingaza` so the FTUE's frailejón is
+## always on sale.
+@export var ecosystem_override: StringName = &""
+
+## The ecosystem the last generation placed — the pinned override, or the one
+## ObjectPainter drew from the seed. Read by UnlockState.is_available (group
+## `procedural_world`) to limit the shop to this mountain's species. Null
+## until the object pass has run.
+var ecosystem: EcosystemProfile = null
+
+# The spawn cell picked before the object pass's last write (see
+# _ensure_flagship); (-1, -1) when no object pass ran this generation.
+var _start_cell: Vector2i = Vector2i(-1, -1)
 
 @export_group("Wiring")
 ## Ground TileMapLayers indexed by altitude. Drag the layers in low-to-high.
@@ -201,7 +216,14 @@ func regenerate() -> void:
 		# editor mode (Pathfinder is a placeholder) and when `world` is
 		# unwired (defensive — emits a single error).
 		if world != null:
-			_OBJECT_PAINTER.paint(grid, world, pathfinder, _object_rng(params))
+			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(
+					grid, world, pathfinder, _object_rng(params),
+					_OBJECT_PAINTER.profile_by_id(ecosystem_override))
+			ecosystem = grid.ecosystem
+			_ensure_flagship(spawn_ctx, grid)
+			if not spawn_ctx.is_empty():
+				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, 0x7FFFFFFF):
+					pass
 
 	_place_player_on_walkable(grid)
 
@@ -273,7 +295,10 @@ func regenerate_async() -> void:
 			if overlay != null:
 				overlay.set_status("LOADING_PLANTING")
 			var spawn_ctx: Dictionary = _OBJECT_PAINTER.begin_spawn(
-					grid, world, pathfinder, _object_rng(params))
+					grid, world, pathfinder, _object_rng(params),
+					_OBJECT_PAINTER.profile_by_id(ecosystem_override))
+			ecosystem = grid.ecosystem
+			_ensure_flagship(spawn_ctx, grid)
 			if not spawn_ctx.is_empty():
 				while not _OBJECT_PAINTER.spawn_step(spawn_ctx, SPAWN_ROWS_PER_FRAME):
 					if overlay != null:
@@ -477,10 +502,21 @@ func _compute_lake_center(grid: TerrainGrid) -> Vector2i:
 	return Vector2i(sx / n, sy / n)
 
 
+# The FTUE's first step points at a frailejón, so one must stand near where the
+# player will spawn. The spawn pick reads the grid's object flags, and the
+# guarantee writes one more — which can shrink the chosen plateau and move a
+# re-run pick. So the spawn is picked once, HERE, and `_place_player_on_walkable`
+# reuses it (SimWorld makes the same call in the same order).
+func _ensure_flagship(spawn_ctx: Dictionary, grid: TerrainGrid) -> void:
+	_start_cell = _find_starting_cell(grid)
+	_OBJECT_PAINTER.ensure_flagship_near(spawn_ctx, _start_cell)
+
+
 func _place_player_on_walkable(grid: TerrainGrid) -> void:
 	if player == null:
 		return
-	var cell: Vector2i = _find_starting_cell(grid)
+	var cell: Vector2i = _start_cell if _start_cell.x >= 0 else _find_starting_cell(grid)
+	_start_cell = Vector2i(-1, -1)
 	if cell.x < 0:
 		push_warning("ProceduralWorld: no walkable cell found; leaving player at authored position.")
 		return
