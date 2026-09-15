@@ -3,10 +3,10 @@
 // On the first user interaction, plays a Strudel arrangement through the vendored
 // engine, but it does NOT play the file's full stack verbatim. The director reads
 // the layer list from the song's final stack(...), starts with the base layer
-// alone, then folds one random instrument back into the mix every ADD_EVERY cycles
-// until the whole arrangement is sounding. ADD_EVERY defaults to 4, so the mix
-// fills in over ~7 minutes of ojos_azules — slow enough that the build-up is
-// still happening while a first-time player walks through the tutorial. Each
+// alone for BASE_HOLD cycles, then folds one random instrument back into the mix
+// every ADD_EVERY cycles until the whole arrangement is sounding. Defaults are 4
+// and 1: the flute plays solo for four loops while a first-time player starts the
+// tutorial, then the other six layers enter one loop apart (full mix ~3 min in). Each
 // addition re-evaluates the song with a larger stack(...); the Cyclist scheduler
 // swaps the pattern in place without resetting its clock, so layers enter
 // seamlessly.
@@ -16,7 +16,8 @@
 // the <script> tag (see CFG below); the layer set is parsed from the song itself.
 // Cadence is counted in CYCLES via the scheduler, so it adapts to any tempo or
 // song length with no seconds-per-cycle math. Defaults reproduce ojos_azules:
-// base = "melody", one instrument added every 4 cycles (1 cycle == one melody loop).
+// base = "melody" alone for 4 cycles, then one instrument added every cycle
+// (1 cycle == one melody loop).
 //
 // The song file is never modified — only the final stack() it ends with is
 // reconstructed here (see parseSong). Strudel's randomness is seeded by cycle
@@ -58,20 +59,23 @@
   // different song drops in without editing this file. Defaults reproduce the
   // ojos_azules behavior. Example:
   //   <script src=".../paramo-music.js"
-  //           data-song="other.strudel.js" data-add-every="2" data-base-layer="lead">
+  //           data-song="other.strudel.js" data-base-hold="2" data-add-every="2"
+  //           data-base-layer="lead">
   // Timing is expressed in CYCLES (not seconds): the build-up counts the
   // scheduler's cycle position, so it adapts to any tempo/song length on its own —
-  // no cycle-length-in-seconds is ever needed. ADD_EVERY is "cycles per added
-  // layer" (1 cycle == the whole loop for ojos, ~18s). It defaults to 4 loops per
-  // layer so the arrangement is still filling in during the tutorial; the seven
-  // layers of ojos_azules reach the full mix ~7 min in instead of ~1.8 min.
+  // no cycle-length-in-seconds is ever needed (1 cycle == the whole loop for ojos,
+  // ~18s). BASE_HOLD is how long the base layer plays alone (4 loops, so the solo
+  // flute covers the start of the tutorial); ADD_EVERY is cycles per added layer
+  // after that. Seven layers: full mix at 4 + 6 = 10 loops, ~3 min.
   var CFG = (SELF_EL && SELF_EL.dataset) || {};
   var SONG_URL = BASE + (CFG.song || "ojos_azules.strudel.js");
   var BASE_LAYER = CFG.baseLayer || "melody";
-  var ADD_EVERY = (function () {
-    var n = parseFloat(CFG.addEvery);
-    return (isFinite(n) && n > 0) ? n : 4;   // cycles between layer additions
-  })();
+  function positiveCfg(raw, dflt) {
+    var n = parseFloat(raw);
+    return (isFinite(n) && n > 0) ? n : dflt;
+  }
+  var BASE_HOLD = positiveCfg(CFG.baseHold, 4);   // cycles the base layer plays alone
+  var ADD_EVERY = positiveCfg(CFG.addEvery, 1);   // cycles between later layer additions
 
   var repl = null;       // set once initStrudel resolves
   var songCode = null;   // set once the song file is fetched
@@ -85,8 +89,9 @@
 
   // --- Music director: progressive instrument layering ---
   // The song's final stack(...) lists every layer (parsed, not hardcoded). We
-  // don't play it verbatim; instead we start with the base layer alone and fold
-  // one random instrument back in every ADD_EVERY cycles until the full mix is
+  // don't play it verbatim; instead we start with the base layer alone for
+  // BASE_HOLD cycles, then fold one random instrument back in every ADD_EVERY
+  // cycles until the full mix is
   // sounding. Re-evaluating with a larger stack is seamless: the Strudel scheduler
   // (Cyclist) swaps the pattern in place without resetting its clock, so layers
   // enter without a restart/click.
@@ -186,9 +191,9 @@
       revealIndex = 1;
       evalActive();                           // start with the base layer alone
 
-      // Schedule the first addition on the next cycle boundary so layers enter
-      // aligned to the start of a melody loop.
-      nextAt = Math.ceil((currentCycle() + 0.001) / ADD_EVERY) * ADD_EVERY;
+      // Schedule the first addition on the next BASE_HOLD boundary so layers enter
+      // aligned to the start of a melody loop; later ones follow every ADD_EVERY.
+      nextAt = Math.ceil((currentCycle() + 0.001) / BASE_HOLD) * BASE_HOLD;
       startPoll();
 
       playing = true;
