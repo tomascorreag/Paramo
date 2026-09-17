@@ -320,6 +320,7 @@ attached, and it was noise.
   mechanism. So route noise pays for itself in firebreaks, which is a statement
   about fire being overtuned rather than a reason to keep it — its actual
   justification is visual.
+- Crowd halved (2026-09-15), 12 paired seeds, seed0 4000: `base_visitors_per_day` 6 → 3 with `tokens_per_visitor` 2 → 4, so the product — the daily yield — is unchanged by construction. It held: `tokens_final` −1.5 (t=−0.4), `tokens_visitors` −1.7 (t=−0.5), unlock days identical in 12/12. `visitors_walked` 97 → 48 (t=−33.6) and `plants_trampled` 39 → 23 (t=−3.4), so half the bodies do about 60% of the plant damage, not 50% — a party still concentrates on one track. The only ecological move is `fires_ignited` +277 (t=2.3, up in 8/12): fewer feet means fewer bare firebreak cells, the same mechanism as the route-noise and trample results. `charred_end`, `grass_frac_end` and `appeal_min` all inside noise. Halving the crowd is therefore a **presentation** change with a fire-side cost, not an economy change.
 - Two scenarios price the features: `no_wander` (`wander_chance` 0) removes the
   route noise (the most expensive thing a visitor does per body — every waypoint
   is another A* on spawn and on every re-route) and takes the waypoint stops and

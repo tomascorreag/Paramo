@@ -228,15 +228,7 @@ t=8.4.
   ~53 visitors wearing 0.06 a step is small next to ~550 charred cells. The
   arithmetic against `base_recovery_per_day`: a cell heals 0.15-0.65 a day, so at
   0.06 it needed 3+ crossings **every day** just to break even.
-- At `trample_per_step` 0.18 (`base_visitors_per_day` 6), 12 paired seeds, and the
-  **sign is the surprise**: trampling makes the mountain **healthier**.
-  `fires_ignited` −374 (t=−8.4, lower in 12/12 seeds), `charred_end` −98 (t=−2.2),
-  `grass_frac_min` +0.03 (t=+2.2); tokens flat (+0.8, t=0.5). The firebreak
-  mechanism is real and free — it was just too small to measure at 0.06.
-  Trampling is therefore **not** currently a cost the player answers; at this rate
-  it is fire mitigation. Read that as a statement about **fire** being overtuned
-  (~1800-2200 ignitions a run) rather than about feet: any mechanism that removes
-  fuel wins while fire dominates. **Fix fire before tuning trample against it.**
+- At `trample_per_step` 0.18 (`base_visitors_per_day` 6 — halved to 3 on 2026-09-15, which cut `plants_trampled` 39 → 23 and raised `fires_ignited` by 277; see [visitors.md](visitors.md)), 12 paired seeds, and the **sign is the surprise**: trampling makes the mountain **healthier**. `fires_ignited` −374 (t=−8.4, lower in 12/12 seeds), `charred_end` −98 (t=−2.2), `grass_frac_min` +0.03 (t=+2.2); tokens flat (+0.8, t=0.5). The firebreak mechanism is real and free — it was just too small to measure at 0.06. Trampling is therefore **not** currently a cost the player answers; at this rate it is fire mitigation. Read that as a statement about **fire** being overtuned (~1800-2200 ignitions a run) rather than about feet: any mechanism that removes fuel wins while fire dominates. **Fix fire before tuning trample against it.**
 - A 4-seed A/B at 0.06 also said trampling improved grass, and that one was noise
   (`no_trample`'s grass sd is 0.14, one seed at 0.97). Same sign, different
   reason — do not treat the 0.18 result as confirming it.
