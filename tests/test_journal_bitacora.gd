@@ -289,7 +289,7 @@ func test_the_name_is_a_title_face_heading_in_its_own_block() -> void:
 	# The journal's title face, as on every other heading, set with
 	# JournalTitle's inset: a 17-row line box from row 1, one block.
 	assert_eq(left.active_name_font().resource_path,
-		"res://assets/fonts/FantasticBoogaloo-GDlq.ttf")
+		"res://assets/fonts/bitmap/fantastic_boogaloo_16.res")
 	assert_eq(left.name_font_size, 16)
 	assert_eq(left.name_row_px(), BLOCK)
 	assert_eq(left.font_size % 8, 0, "Tiny5's native em is 8")

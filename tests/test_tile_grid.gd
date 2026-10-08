@@ -619,7 +619,7 @@ func _make_tile_set(paints: Dictionary) -> Array:
 	ts.set_custom_data_layer_type(0, TYPE_STRING)
 
 	var src := TileSetAtlasSource.new()
-	var image := Image.create(_TILE_SIZE.x * 8, _TILE_SIZE.y * 8, false, Image.FORMAT_RGBA8)
+	var image := Image.create_empty(_TILE_SIZE.x * 8, _TILE_SIZE.y * 8, false, Image.FORMAT_RGBA8)
 	image.fill(Color.WHITE)
 	src.texture = ImageTexture.create_from_image(image)
 	src.texture_region_size = _TILE_SIZE
@@ -716,7 +716,7 @@ func test_build_empty_tile_kind_stores_blocked_entry() -> void:
 	ts.set_custom_data_layer_name(0, _TILE_KIND_FIELD)
 	ts.set_custom_data_layer_type(0, TYPE_STRING)
 	var src := TileSetAtlasSource.new()
-	var image := Image.create(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
+	var image := Image.create_empty(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color.WHITE)
 	src.texture = ImageTexture.create_from_image(image)
 	src.texture_region_size = _TILE_SIZE
@@ -863,7 +863,7 @@ func test_build_tileset_without_tile_kind_records_nothing() -> void:
 	var ts := TileSet.new()
 	ts.tile_size = _TILE_SIZE
 	var src := TileSetAtlasSource.new()
-	var image := Image.create(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
+	var image := Image.create_empty(_TILE_SIZE.x * 2, _TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color.WHITE)
 	src.texture = ImageTexture.create_from_image(image)
 	src.texture_region_size = _TILE_SIZE

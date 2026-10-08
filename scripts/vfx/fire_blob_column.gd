@@ -247,7 +247,7 @@ func editor_refresh(ceiling: float) -> void:
 static func _shared_quad_texture() -> ImageTexture:
 	if _quad_tex != null:
 		return _quad_tex
-	var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(1, 1, false, Image.FORMAT_RGBA8)
 	img.fill(Color.WHITE)
 	_quad_tex = ImageTexture.create_from_image(img)
 	return _quad_tex

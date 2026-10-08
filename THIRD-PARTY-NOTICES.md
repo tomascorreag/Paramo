@@ -44,8 +44,9 @@ re-adding one is a decision, not a detail.
 ### Drum samples — `docs/music/samples/uzu-drumkit/`
 - **License:** The Unlicense (public domain).
 - **Source:** <https://github.com/tidalcycles/uzu-drumkit>
-- 21 WAVs: all variants of the six keys the arrangement plays (`bd`, `sd`, `cr`,
-  `oh`, `rd`, `sh`). Details in
+- 21 samples: all variants of the six keys the arrangement plays (`bd`, `sd`, `cr`,
+  `oh`, `rd`, `sh`). Upstream ships WAV; most are re-encoded losslessly to FLAC
+  here, the audio itself unchanged. Details in
   [`docs/music/samples/README.md`](./docs/music/samples/README.md).
 
 ### Flora plates — `assets/sprites/flora/photos/*.png`

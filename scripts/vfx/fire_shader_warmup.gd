@@ -228,6 +228,6 @@ func _material_for(shader: Shader, param: StringName, value: float) -> ShaderMat
 
 
 func _white_texture(px: int) -> ImageTexture:
-	var img := Image.create(px, px, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(px, px, false, Image.FORMAT_RGBA8)
 	img.fill(Color.WHITE)
 	return ImageTexture.create_from_image(img)

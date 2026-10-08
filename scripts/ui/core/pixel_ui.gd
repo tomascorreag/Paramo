@@ -32,7 +32,7 @@ static func frame_stylebox(border: Color, fill: Color) -> StyleBoxTexture:
 	if _frame_cache.has(key):
 		return _frame_cache[key]
 
-	var img := Image.create(3, 3, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(3, 3, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	img.set_pixel(1, 0, border)
 	img.set_pixel(0, 1, border)

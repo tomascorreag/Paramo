@@ -231,7 +231,7 @@ func _compare(a: Image, ctl: Image, b: Image) -> void:
 ## Pixels differing by more than --tol, plus the worst channel delta. Writes a
 ## mask: red where changed, the source dimmed elsewhere for context.
 func _diff(a: Image, b: Image, path: String) -> Array:
-	var diff := Image.create(a.get_width(), a.get_height(), false, Image.FORMAT_RGB8)
+	var diff := Image.create_empty(a.get_width(), a.get_height(), false, Image.FORMAT_RGB8)
 	var changed: int = 0
 	var worst: int = 0
 	for y in a.get_height():

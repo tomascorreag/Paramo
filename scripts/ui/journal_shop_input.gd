@@ -8,7 +8,7 @@ extends Control
 ##
 ## No SubViewport input forwarding, no push_input: the page content is static
 ## layout, so a click is resolved by ARITHMETIC — BookHit local -> PageRight
-## local (the SubViewportContainer is 1:1 with its viewport) -> Content ->
+## local (the page's ViewportPanel is 1:1 with its viewport) -> Content ->
 ## section local -> JournalKnownSet.entry_at. Hit-testing happens in UNWARPED
 ## page space; the page warp displaces these rows by at most a few texels near
 ## the spine, which a 40x36 cell absorbs (accepted simplification, documented
@@ -41,7 +41,7 @@ extends Control
 ## something. The info half is not a promise about affording anything, so it shows
 ## over owned and unaffordable entries too.
 
-## The right page's SubViewportContainer, whose local space equals its
+## The right page's ViewportPanel, whose local space equals its
 ## viewport's canvas space.
 @export var page_right: Control = null
 ## PageRight/SubViewport/Content — the sections' parent inside the viewport.

@@ -10,7 +10,7 @@ extends Node2D
 # Blocks movement on its cell — TileGrid.is_walkable returns false for any
 # cell with a Rock occupant.
 #
-# Rendering mirrors `scripts/tools/frailejon.gd`: Sprite2D + reparented
+# Rendering mirrors `scripts/objects/frailejon.gd`: Sprite2D + reparented
 # Shadow Sprite2D using `shadow_oval.gdshader`. Per-instance shader params
 # (visual_y_offset, roughness, cutoff_x) are sampled from the Pathfinder once
 # at spawn — rocks don't move or grow, so a single sample is enough.

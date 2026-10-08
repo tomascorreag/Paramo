@@ -356,7 +356,7 @@ func _save(name: String) -> void:
 		CROP_SIZE.x, CROP_SIZE.y
 	)
 	var sub := img.get_region(crop)
-	var big := Image.create(
+	var big := Image.create_empty(
 		sub.get_width() * PIXEL_SCALE, sub.get_height() * PIXEL_SCALE, false, sub.get_format()
 	)
 	for y in big.get_height():

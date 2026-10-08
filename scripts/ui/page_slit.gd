@@ -1,6 +1,6 @@
 @tool
 class_name PageSlit
-extends SubViewportContainer
+extends ViewportPanel
 
 ## A slot cut through a journal page: renders its contents into a SubViewport,
 ## then draws that through assets/shaders/page_slit.gdshader, which masks

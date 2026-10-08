@@ -190,7 +190,7 @@ fire lighting, graph change), then prices each `day_completed` listener by hand.
 - A measured run is ~30 real seconds against a 240-second game day, so the clock
   must stay inside opening hours or nobody spawns and it measures an empty map.
 
-## The web build — `scripts/tools/profile_web.gd`
+## The web build — `scripts/debug/profile_web.gd`
 
 **The** tool for "is the web build fast enough, and what is costing". Every other
 tool here is a `--script` SceneTree, which cannot exist on web (no command line;

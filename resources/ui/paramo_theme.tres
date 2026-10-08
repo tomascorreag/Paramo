@@ -1,6 +1,6 @@
 [gd_resource type="Theme" format=3 uid="uid://dwg1b0tio8ymu"]
 
-[ext_resource type="FontFile" uid="uid://vgqs6kp2kuxg" path="res://assets/fonts/Tiny5-Regular.ttf" id="1_tiny5"]
+[ext_resource type="FontFile" path="res://assets/fonts/bitmap/tiny5_8.res" id="1_tiny5"]
 [ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_panel.tres" id="2_panel"]
 [ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_surface.tres" id="3_surface"]
 [ext_resource type="StyleBox" path="res://resources/ui/styleboxes/solid_hover.tres" id="4_hover"]

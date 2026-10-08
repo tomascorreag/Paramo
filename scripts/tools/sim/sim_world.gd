@@ -60,7 +60,7 @@ func _ready() -> void:
 	# suppressed by giving it layers first; bounds set per run).
 	add_child(pathfinder)
 
-	_spawn_picker = load("res://scripts/tools/procedural_world.gd").new()
+	_spawn_picker = load("res://scripts/systems/procedural_world.gd").new()
 
 
 func _exit_tree() -> void:

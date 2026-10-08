@@ -193,7 +193,7 @@ static func _load_palette() -> Array[Color]:
 # experiment in what the palette does to a photograph, and the simplest
 # mapping is the one whose result can be reasoned about.
 static func _snap_to_palette(img: Image, palette: Array[Color]) -> Image:
-	var out := Image.create(img.get_width(), img.get_height(), false, Image.FORMAT_RGB8)
+	var out := Image.create_empty(img.get_width(), img.get_height(), false, Image.FORMAT_RGB8)
 	for y: int in img.get_height():
 		for x: int in img.get_width():
 			var c := img.get_pixel(x, y)

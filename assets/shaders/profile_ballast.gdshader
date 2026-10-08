@@ -1,7 +1,7 @@
 shader_type canvas_item;
 
 // CALIBRATED FULLSCREEN LOAD — a measurement instrument, not a visual effect.
-// Used only by scripts/tools/profile_web.gd; nothing in the game references it.
+// Used only by scripts/debug/profile_web.gd; nothing in the game references it.
 //
 // WHY IT EXISTS. The web build is vsync-locked: the browser drives the main loop
 // from requestAnimationFrame, so every frame reads as the refresh interval until

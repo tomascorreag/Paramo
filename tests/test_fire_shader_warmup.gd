@@ -16,7 +16,7 @@ const FIRE_VFX_SOURCES: Array[String] = [
 	"res://scripts/vfx/burning_cell_vfx.gd",
 	"res://scripts/vfx/fire_blob_column.gd",
 	"res://scripts/vfx/fire_aura_overlay.gd",
-	"res://scripts/tools/frailejon.gd",
+	"res://scripts/objects/frailejon.gd",
 ]
 
 # Fire materials attached in a SCENE rather than by a script, which a source

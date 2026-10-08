@@ -325,7 +325,7 @@ func _crop() -> Image:
 	var n: int = maxi(1, int(round(float(img.get_width()) / float(root.get_visible_rect().size.x))))
 	var cx: int = img.get_width() / 2
 	var cy: int = img.get_height() / 2
-	var out := Image.create(CROP.x, CROP.y, false, Image.FORMAT_RGBA8)
+	var out := Image.create_empty(CROP.x, CROP.y, false, Image.FORMAT_RGBA8)
 	for y in CROP.y:
 		for x in CROP.x:
 			var px: int = cx + (x - CROP.x / 2) * n
@@ -357,7 +357,7 @@ func _strip(stills: Array[Image]) -> Image:
 	var gap: int = 2
 	var w: int = stills.size() * (CROP.x * PIXEL_SCALE + gap)
 	var h: int = CROP.y * PIXEL_SCALE
-	var big := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var big := Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
 	big.fill(Palette.PANEL_BG)
 	for i in stills.size():
 		var s: Image = stills[i]

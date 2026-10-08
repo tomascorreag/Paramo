@@ -406,7 +406,7 @@ func _live_visitors() -> Array[Visitor]:
 # to judge a two-tone ramp on — the shade rung is a handful of texels.
 func _save(img: Image, name: String) -> void:
 	img.save_png("%svisitors_%s.png" % [_out_dir, name])
-	var big := Image.create(
+	var big := Image.create_empty(
 		img.get_width() * UPSCALE, img.get_height() * UPSCALE, false, img.get_format())
 	for y in big.get_height():
 		for x in big.get_width():

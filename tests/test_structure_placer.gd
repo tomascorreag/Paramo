@@ -61,7 +61,7 @@ func _build_tile_set(kinds: Array[StringName]) -> TileSet:
 	ts.set_custom_data_layer_type(0, TYPE_STRING)
 
 	var src := TileSetAtlasSource.new()
-	var image := Image.create(_TILE_SIZE.x * 8, _TILE_SIZE.y * 8, false, Image.FORMAT_RGBA8)
+	var image := Image.create_empty(_TILE_SIZE.x * 8, _TILE_SIZE.y * 8, false, Image.FORMAT_RGBA8)
 	image.fill(Color.WHITE)
 	src.texture = ImageTexture.create_from_image(image)
 	src.texture_region_size = _TILE_SIZE

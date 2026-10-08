@@ -10,18 +10,16 @@ out. The zip is committed; `engine/.gdignore` keeps the editor from scanning it 
 
 MEASURED 2026-10-08 on the live site, fresh profile, no service worker: a first
 visit transferred 11.51 MB before the player did anything, and 9.57 MB of that
-was `index.wasm`, the stock engine. The game's own data (`index.pck`) is 1.57 MB.
-Nothing in the pck is worth chasing next to the engine.
+was `index.wasm`, the stock engine.
 
-| | stock | stripped |
-|---|---|---|
-| `index.wasm` raw | 37.69 MB | 22.08 MB |
-| `index.wasm` gzip -6 (≈ what Pages serves) | 9.43 MB (served: 9.57) | 5.20 MB |
-| first visit, projected | 11.51 MB | ≈ 7.3 MB |
+| first visit, before any input | engine (gzip) | pck (gzip) | total |
+|---|---|---|---|
+| stock template (live, measured) | 9.57 MB | 1.57 MB | 11.51 MB |
+| stripped v1 (staging, measured) | 5.28 MB | 1.57 MB | 7.22 MB |
+| stripped v2 (this note; local export, projected at Pages' gzip) | ≈4.45 MB | ≈1.25 MB | ≈5.8 MB |
 
-The projection swaps only the wasm; Pages served the stock wasm ~1.5% above
-`gzip -6`, so expect ~5.28 MB on the wire. Confirm on the live site after the
-first deploy (DevTools → Network, disable cache, or `performance.getEntriesByType`).
+v2's projection uses the local export's `gzip -6` sizes scaled by what Pages added
+over `gzip -6` on v1 (+1.6% wasm, +0.2% pck). Confirm on staging.
 
 ## What is stripped (`engine/paramo_web.py`)
 
@@ -31,32 +29,69 @@ modules kept below.
 
 - `disable_3d`, physics 2D and 3D, navigation 2D and 3D, XR. Routing is
   `AStar2D` (core); nothing has a collision shape or a tile physics/navigation layer.
-- `modules_enabled_by_default=no`, then back on: `gdscript`, `freetype` (TTF faces),
-  `text_server_fb`, `noise` (`FastNoiseLite`), `webp` (the lossy bitácora photographs).
-  Gone: the advanced text server (ICU/HarfBuzz), svg, every image decoder except
-  png/webp, ogg/vorbis/mp3/theora (all audio is QOA-compressed WAV, which is core),
-  regex (tools only), networking, mbedtls, gltf and the 3D modules.
+- `disable_advanced_gui` (MEASURED −487 KB gzip). Removes dialogs, `PopupMenu`,
+  `OptionButton`, `RichTextLabel`, `Tree`, `TextEdit`... and `SubViewportContainer`,
+  which the journal pages used to extend. They now extend `ViewportPanel`
+  (`scripts/ui/viewport_panel.gd`), which reproduces the container for
+  `stretch = false`: draw each SubViewport child's texture at its own size, render
+  it only while visible, report its size as the minimum. Input forwarding is not
+  reproduced; the journal never used it (pages are `mouse_filter = IGNORE` with
+  `gui_disable_input` viewports, and `JournalShopInput` maps clicks itself). Read the
+  `#ifndef ADVANCED_GUI_DISABLED` block in `scene/register_scene_types.cpp` before
+  adding a control: a grep for the obvious widgets missed `SubViewportContainer`
+  the first time.
+- `deprecated=no` (MEASURED −98 KB gzip). Drops every binding Godot wraps in
+  `#ifndef DISABLE_DEPRECATED`. Desktop and GUT still have them, so a deprecated
+  call only fails on web, as a script parse error at load. The first build hit
+  `Image.create()` in four shipped scripts (now `Image.create_empty()`).
+  `engine/find_deprecated_uses.py <godot src> .` lists every shipped use of the
+  188 deprecated bindings; run it after a Godot upgrade.
+- `modules_enabled_by_default=no`, then back on: `gdscript`, `text_server_fb`,
+  `noise` (`FastNoiseLite`), `webp` (every Lossless texture is stored as lossless
+  WebP, plus the lossy bitácora photographs). Gone: FreeType, the advanced text
+  server (ICU/HarfBuzz), svg, every image decoder except png/webp,
+  ogg/vorbis/mp3/theora (all audio is QOA-compressed WAV, which is core), regex
+  (tools only), networking, mbedtls, gltf and the 3D modules.
+- No FreeType (MEASURED −233 KB gzip). The shipped fonts are bitmap bakes, see below.
 - `brotli=no` (no WOFF2 fonts), `minizip=no` (the pck is loaded directly).
 - `lto=full`. `optimize` stays at the web platform's own `size` (-Os): Godot's
   comment in `platform/web/detect.py` puts -Oz at ~100 KiB smaller for a runtime cost.
 
-**Rejected: `disable_advanced_gui`.** MEASURED: saves another ~0.5 MB gzip, but it also
-removes `SubViewportContainer`, which `page_warp.gd` and `page_slit.gd` extend
-and the HUD's `SeasonGaugeHolder` node is. The first stripped build booted with the journal and HUD
-failing to compile. A grep for "advanced" widgets (`PopupMenu`, `OptionButton`,
-...) missed it; read the `#ifndef ADVANCED_GUI_DISABLED` block in
-`scene/register_scene_types.cpp` before trying again. A class-level build profile
-(`build_profile=`) that disables only the unused advanced classes is untried.
+**Rejected: dropping `webp`.** −95 KB engine, but every lossless texture would have
+to be re-stored as PNG and the pck grows by about as much.
 
-**Known cost:** without the svg module the default theme's icons are empty. Every
+**Known cost:** without svg the default theme's icons are empty. Every
 player-facing control is styled by `paramo_theme.tres`; the only default-themed
 controls are the `CheckButton`s in the debug overlay, which lose their toggle glyph
-on web.
+on web. Without FreeType, outlines on text cannot be drawn: `profile_web.gd`'s
+overlay loses its outline.
 
-**Text on the fallback server:** Latin copy with `á`/`ñ` renders correctly (language
-gate and loading screen checked in a browser). It has no shaping or ligatures,
-which neither face uses. Re-check wrapping in both locales if a non-Latin locale is
-ever added; that would need `text_server_adv` back.
+## Fonts: bitmap bakes
+
+`assets/fonts/bitmap/tiny5_8.res` and `fantastic_boogaloo_16.res` are what the theme
+and the journal use. `scripts/tools/bake_bitmap_fonts.gd` writes them from the TTFs:
+every glyph the face has, rasterised once at the face's em, fixed-size with
+integer-only scaling. Fixed-size fonts skip the display's oversampling, so the text
+server never asks for a size that was not baked. The TTFs stay in the repo as the
+source and are dropped from the export (`assets/fonts/*.ttf`).
+
+Consequences:
+- A face is only legal at whole multiples of its baked size. Tiny5 always was (8 px
+  em); FantasticBoogaloo, a true outline face, was legal at any size as a TTF and
+  now only at 16, 32...
+- No kerning. The web build never had any: its fallback text server reads only the
+  legacy `kern` table, and neither face has one (Tiny5 kerns through GPOS).
+- A glyph the face lacks draws as a missing glyph, as it did on web before (no
+  system fonts there).
+
+MEASURED: `scripts/tools/verify_bitmap_fonts.gd` draws every string in
+`paramo.csv` (both locales) plus a glyph line with the TTF and with the bake, at
+every size used, at 1× and under 4× oversampling: 1290 renders, 0 differing pixels.
+It runs on the HarfBuzz text server, because the official editor binaries do not
+include the fallback one. That is the stricter test: the rasters come from the same
+FreeType, and HarfBuzz additionally applies the TTF's GPOS kerning and GSUB.
+
+Re-run the bake after swapping a TTF or its import settings, then the verify tool.
 
 ## Rebuilding
 
@@ -74,13 +109,35 @@ git clone --depth 1 https://github.com/emscripten-core/emsdk.git ../emsdk
 source ../emsdk/emsdk_env.sh && pip install scons
 
 engine/build_web_template.sh ../godot-4.6.1-src    # ~4 min on an M1, writes engine/templates/
+python3 engine/find_deprecated_uses.py ../godot-4.6.1-src .
 ```
 
 The web platform's `get_flags()` overrides `target` and `optimize` from a profile
 file, so the script passes `platform`/`target` on the command line. Builds are on
-macOS; the committed zip (sha256 `e70eef6f…18e9`) came from 4.6.1-stable
-`14d19694e` with emscripten 4.0.11.
+macOS with emscripten 4.0.11 from 4.6.1-stable `14d19694e`.
 
 Verify a rebuild in a browser, not just by exporting: the export succeeds with a
 missing class. Serve the export, open the console, and expect no
 "Cannot get class" / "Parse Error" lines before `RunController: run started`.
+
+## What else ships less (2026-10-08)
+
+- `scripts/tools/*` and the three test scenes are in `exclude_filter` (−295 KB
+  pck gzip). The runtime scripts that lived there moved to `scripts/systems/`
+  (`procedural_world`, `ground_layer_configurator`), `scripts/objects/`
+  (`frailejon`) and `scripts/debug/` (`web_profile_boot`, `profile_web`).
+  `tests/test_export_exclusions.gd` fails if shipped code reaches an excluded file
+  through the resource graph from `main.tscn`, a path string, or a tool class_name.
+- The music engine (255 KB) is no longer in the HTML head; `paramo-music.js` loads
+  it on the first interaction, when the music starts anyway. The drum samples are
+  lossless FLAC (`docs/music/samples/README.md`).
+
+## Not done, measured
+
+- Brotli. Pages only gzips. Brotli-11 would take the engine to ≈2.95 MB and, with
+  `script_export_mode=1` (uncompressed tokens, which gzip does not care about), the
+  pck to ≈0.9 MB. Chrome/Edge cannot decompress brotli in the page
+  (`DecompressionStream`), so on Pages it needs a ~98 KB wasm decoder and a custom
+  shell, and the engine loses streaming compilation. Cloudflare Pages reportedly
+  compresses at level 4 (≈4.6 MB for the v1 engine), which is worse.
+- An extra `wasm-opt -Oz` pass: −130 KB gzip, ≈0 under brotli.

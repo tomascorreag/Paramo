@@ -1,6 +1,6 @@
 @tool
 class_name PageWarp
-extends SubViewportContainer
+extends ViewportPanel
 
 ## One journal page: renders its content into a SubViewport, then draws that
 ## through assets/shaders/page_warp.gdshader so the content bends onto the page

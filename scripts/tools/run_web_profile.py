@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run scripts/tools/profile_web.gd inside a real browser, unattended.
+"""Run scripts/debug/profile_web.gd inside a real browser, unattended.
 
     python scripts/tools/run_web_profile.py
     python scripts/tools/run_web_profile.py --headless --fires 80

@@ -511,7 +511,7 @@ func _build_coord_tile_set() -> Array:
 	ts.set_custom_data_layer_name(0, _COORD_TILE_KIND_FIELD)
 	ts.set_custom_data_layer_type(0, TYPE_STRING)
 	var src := TileSetAtlasSource.new()
-	var image := Image.create(_COORD_TILE_SIZE.x * 2, _COORD_TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
+	var image := Image.create_empty(_COORD_TILE_SIZE.x * 2, _COORD_TILE_SIZE.y * 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color.WHITE)
 	src.texture = ImageTexture.create_from_image(image)
 	src.texture_region_size = _COORD_TILE_SIZE

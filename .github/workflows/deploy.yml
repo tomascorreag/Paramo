@@ -82,8 +82,8 @@ jobs:
         run: sed -i "s/Paramo-sw-cache-/Paramo-staging-sw-cache-/g" "${EXPORT_DIR}/index.service.worker.js"
 
       # The export's head_include references music/* static assets that Godot does
-      # NOT bundle (the engine bundle + paramo-music.js, which in turn fetches the
-      # song file, the soundfonts and the drum samples). Copy them from docs/music/
+      # NOT bundle (paramo-music.js, which on the first interaction fetches the
+      # engine bundle, the song file, the soundfonts and the drum samples). Copy them from docs/music/
       # into the export output so the deployed build can load them; drop the
       # dev-only preview page.
       - name: Bundle music assets

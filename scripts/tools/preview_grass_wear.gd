@@ -389,7 +389,7 @@ func _save(name: String) -> void:
 	var sub := img.get_region(crop)
 	# NEAREST, because the difference between two adjacent rungs is a few texels
 	# of blade height and a smooth upscale averages exactly that away.
-	var big := Image.create(
+	var big := Image.create_empty(
 		sub.get_width() * PIXEL_SCALE, sub.get_height() * PIXEL_SCALE, false, sub.get_format())
 	for y in big.get_height():
 		for x in big.get_width():

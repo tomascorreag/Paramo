@@ -51,7 +51,7 @@ const MARKER := Color8(0x44, 0x70, 0x2D, 0xFF)
 const BG := Color8(0x14, 0x23, 0x3A, 0xFF)
 ## Body face for the type specimen this tool prints on the page (see _add_specimen).
 ## load()ed rather than preload()ed for the same autoload reason as JOURNAL_PATH.
-const _BODY_FONT := "res://assets/fonts/Tiny5-Regular.ttf"
+const _BODY_FONT := "res://assets/fonts/bitmap/tiny5_8.res"
 
 var _out_dir: String = "user://"
 var _tol: int = 1

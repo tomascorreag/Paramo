@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://j1qr8tqv5f2o"]
 
-[ext_resource type="Script" uid="uid://cb1dpudg3qej4" path="res://scripts/tools/frailejon.gd" id="2"]
+[ext_resource type="Script" uid="uid://cb1dpudg3qej4" path="res://scripts/objects/frailejon.gd" id="2"]
 [ext_resource type="Shader" uid="uid://gml4omvafwt0" path="res://assets/shaders/shadow_oval.gdshader" id="3"]
 [ext_resource type="Resource" uid="uid://c4w9j3pq8m1nx" path="res://resources/objects/frailejon.tres" id="4"]
 

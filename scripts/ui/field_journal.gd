@@ -397,7 +397,7 @@ func _sync_page_viewports() -> void:
 # --- Spreads -----------------------------------------------------------------
 
 # Every tagged section under both pages' Content, plus anything tagged
-# directly under Pages — the season slit is a SubViewportContainer beside the
+# directly under Pages — the season slit is a ViewportPanel beside the
 # pages, not a section inside one, and it belongs to the run spread too.
 func _collect_sections() -> void:
 	_sections.clear()

@@ -10,11 +10,11 @@
 [ext_resource type="Script" uid="uid://x7dfs44812m3" path="res://scripts/ui/page_slit.gd" id="8_slit"]
 [ext_resource type="Shader" uid="uid://c88n8ti56qvxq" path="res://assets/shaders/page_slit.gdshader" id="9_slitsh"]
 [ext_resource type="Script" uid="uid://dhciw5330fbbu" path="res://scripts/ui/run_calendar.gd" id="10_cal"]
-[ext_resource type="FontFile" uid="uid://bfoy6hrfhuy7t" path="res://assets/fonts/FantasticBoogaloo-GDlq.ttf" id="11_title"]
+[ext_resource type="FontFile" path="res://assets/fonts/bitmap/fantastic_boogaloo_16.res" id="11_title"]
 [ext_resource type="Script" uid="uid://llfjwj6xucbe" path="res://scripts/ui/journal_resources.gd" id="12_res"]
 [ext_resource type="Texture2D" uid="uid://coe5b20mflg00" path="res://assets/sprites/UX/icons/water_small.tres" id="14_water"]
 [ext_resource type="Texture2D" uid="uid://beyudk1uthn0j" path="res://assets/sprites/UX/icons/money_small.tres" id="15_money"]
-[ext_resource type="FontFile" uid="uid://vgqs6kp2kuxg" path="res://assets/fonts/Tiny5-Regular.ttf" id="16_tiny5"]
+[ext_resource type="FontFile" path="res://assets/fonts/bitmap/tiny5_8.res" id="16_tiny5"]
 [ext_resource type="Script" uid="uid://cdnm8m3obine8" path="res://scripts/ui/journal_known_set.gd" id="17_known"]
 [ext_resource type="Script" uid="uid://cuhv3wpitx6uo" path="res://scripts/ui/journal_shop_input.gd" id="17_shop"]
 [ext_resource type="Shader" uid="uid://csf5f2xufxrdy" path="res://assets/shaders/journal_ink.gdshader" id="18_inksh"]
@@ -190,7 +190,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 
-[node name="PageLeft" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1626829862]
+[node name="PageLeft" type="Control" parent="Book/BookArt/Pages" unique_id=1626829862]
 texture_filter = 1
 texture_repeat = 1
 material = SubResource("ShaderMaterial_page_l")
@@ -270,7 +270,7 @@ font = ExtResource("16_tiny5")
 name_font = ExtResource("11_title")
 ink_material = SubResource("ShaderMaterial_ink")
 
-[node name="PageRight" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1780670663]
+[node name="PageRight" type="Control" parent="Book/BookArt/Pages" unique_id=1780670663]
 texture_filter = 1
 texture_repeat = 1
 material = SubResource("ShaderMaterial_page_r")
@@ -381,7 +381,7 @@ font = ExtResource("16_tiny5")
 name_font = ExtResource("11_title")
 ink_material = SubResource("ShaderMaterial_ink")
 
-[node name="SeasonGaugeHolder" type="SubViewportContainer" parent="Book/BookArt/Pages" unique_id=1423454152 node_paths=PackedStringArray("page")]
+[node name="SeasonGaugeHolder" type="Control" parent="Book/BookArt/Pages" unique_id=1423454152 node_paths=PackedStringArray("page")]
 texture_filter = 1
 texture_repeat = 1
 material = SubResource("ShaderMaterial_slit")

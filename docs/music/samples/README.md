@@ -33,6 +33,25 @@ nowhere else.
 minus its `_base` (the base URL is passed as `S.samples`' second argument, which
 overrides it).
 
+## Format: FLAC, lossless
+
+Upstream ships WAV. Every integer-PCM file here is re-encoded to FLAC (changed
+2026-10-08), because GitHub Pages only gzips and gzip does little on PCM: the six
+files the song actually plays (index 0 of each key, see below) went from 362 KB
+on the wire to 241 KB. The conversion is lossless and was checked file by file:
+decode the FLAC back to PCM at the source bit depth and the `data` chunk is
+byte-identical to the WAV's. Every browser's `decodeAudioData` reads FLAC, and
+Strudel's loader does not look at extensions.
+
+Still WAV: `sh/10` and `tb/10` (32-bit float, which FLAC cannot hold; `sh` is
+5 KB) and `misc/11`, `misc/14`, `sd/12` (macOS `afconvert` cannot open them; none
+is played). Rejected: Opus/AAC/MP3. Several times smaller, but lossy, and
+encoder priming delays drum onsets unless every browser trims it.
+
+```
+afconvert -f flac -d flac in.wav out.flac      # macOS; then point the manifests at .flac
+```
+
 ## Licence
 
 **uzu-drumkit — The Unlicense (public domain).**
@@ -50,6 +69,8 @@ Paths come from the upstream manifest; each file is that repo's raw URL:
 manifest: https://strudel.b-cdn.net/uzu-drumkit.json
 files:    https://raw.githubusercontent.com/tidalcycles/uzu-drumkit/main/<path from the manifest>
 ```
+
+Refetched files arrive as WAV; re-encode them as above.
 
 ## `.gdignore`
 

@@ -19,8 +19,12 @@ disable_physics_3d = "yes"
 disable_navigation_2d = "yes"
 disable_navigation_3d = "yes"
 disable_xr = "yes"
-# NOT disable_advanced_gui: it also removes SubViewportContainer, which the
-# journal pages (page_warp.gd, page_slit.gd) and the season gauge are built on.
+# Dialogs, PopupMenu, OptionButton, RichTextLabel, Tree, TextEdit, and
+# SubViewportContainer, which the journal pages used to extend; they now extend
+# ViewportPanel (scripts/ui/viewport_panel.gd) instead.
+disable_advanced_gui = "yes"
+# Compatibility shims for renamed/removed APIs. Every scene and script is 4.6.
+deprecated = "no"
 
 # Fonts are TTF (no WOFF2); the pck is loaded directly, not from a zip.
 brotli = "no"
@@ -29,7 +33,8 @@ minizip = "no"
 # Every module off, then back on only what the game reads at runtime.
 modules_enabled_by_default = "no"
 module_gdscript_enabled = "yes"
-module_freetype_enabled = "yes"  # Tiny5 / FantasticBoogaloo TTFs
+# No freetype: the shipped fonts are bitmap bakes (scripts/tools/bake_bitmap_fonts.gd),
+# drawn from their glyph cache. A TTF loaded at runtime would draw nothing.
 module_text_server_fb_enabled = "yes"  # Latin-only copy: no ICU / HarfBuzz needed
 module_noise_enabled = "yes"  # FastNoiseLite in terrain and weather
 module_webp_enabled = "yes"  # lossy-imported bitácora photographs

@@ -31,7 +31,7 @@
 [ext_resource type="Script" uid="uid://bxivfefcu5f78" path="res://scripts/systems/traversal_placement_controller.gd" id="24_tpc"]
 [ext_resource type="PackedScene" uid="uid://dq8bridge000" path="res://scenes/traversals/bridge.tscn" id="25_brscn"]
 [ext_resource type="PackedScene" uid="uid://dq8ladder000" path="res://scenes/traversals/ladder.tscn" id="26_ldscn"]
-[ext_resource type="Script" uid="uid://d116hvslo5lvy" path="res://scripts/tools/ground_layer_configurator.gd" id="27_glcfg"]
+[ext_resource type="Script" uid="uid://d116hvslo5lvy" path="res://scripts/systems/ground_layer_configurator.gd" id="27_glcfg"]
 [ext_resource type="Script" uid="uid://py1twn3iy3xb" path="res://scripts/systems/free_camera_controller.gd" id="28_fcam"]
 [ext_resource type="Script" uid="uid://chfvu4rhrlxnf" path="res://scripts/systems/altitude_fog_controller.gd" id="29_afog"]
 [ext_resource type="PackedScene" path="res://scenes/ui/title_intro.tscn" id="30_titleintro"]

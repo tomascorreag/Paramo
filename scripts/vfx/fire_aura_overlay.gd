@@ -96,7 +96,7 @@ func _ready() -> void:
 	_smoothed = PackedFloat32Array()
 	_smoothed.resize(BINS)
 
-	_img = Image.create(BINS, 1, false, Image.FORMAT_RF)
+	_img = Image.create_empty(BINS, 1, false, Image.FORMAT_RF)
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter(&"aura_tex", _tex)
 

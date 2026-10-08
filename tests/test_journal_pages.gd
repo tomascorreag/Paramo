@@ -34,17 +34,19 @@ const CONTENT_AMPLITUDE_PX := 5.0
 ## 99.9% on 64 (16px) against only 49% on 128. A size that is not a multiple of the
 ## em duplicates ~one pixel row per em at a different place in every glyph, and the
 ## line staggers — which reads as the typeface having character, not as a bug.
+##
+## The shipped faces are bitmap bakes of the TTFs (scripts/tools/bake_bitmap_fonts.gd),
+## fixed-size with integer-only scaling, so their legal sizes are multiples of the
+## size they were baked at. FantasticBoogaloo is a true outline face (~8% of points
+## on any grid) and was legal at any size as a TTF; baked at 16, it no longer is.
 const FONT_EM_PX := {
-	"res://assets/fonts/Tiny5-Regular.ttf": 8,
-	"res://assets/fonts/Eggmode-Pd8g.ttf": 16,
-	# A true outline face (~8% of points on any grid): no native em, legal at
-	# any size, so 1.
-	"res://assets/fonts/FantasticBoogaloo-GDlq.ttf": 1,
+	"res://assets/fonts/bitmap/tiny5_8.res": 8,
+	"res://assets/fonts/bitmap/fantastic_boogaloo_16.res": 16,
 }
 ## Body copy is the theme's Tiny5; the title face is reserved for TITLES
 ## (FantasticBoogaloo since 2026-09-11, Eggmode before).
-const BODY_FONT := "res://assets/fonts/Tiny5-Regular.ttf"
-const TITLE_FONT := "res://assets/fonts/FantasticBoogaloo-GDlq.ttf"
+const BODY_FONT := "res://assets/fonts/bitmap/tiny5_8.res"
+const TITLE_FONT := "res://assets/fonts/bitmap/fantastic_boogaloo_16.res"
 ## Every sprite printed on a page goes through this, so it can only ever emit a
 ## colour one of the four ink ramps contains.
 const INK_SHADER := "res://assets/shaders/journal_ink.gdshader"
@@ -240,7 +242,7 @@ func test_page_text_is_in_phase_with_the_row_blocks() -> void:
 				"%s/%s: offset_top must land on the line grid" % [name_, label.name])
 
 
-func _labels_on(page: SubViewportContainer) -> Array[Label]:
+func _labels_on(page: ViewportPanel) -> Array[Label]:
 	var out: Array[Label] = []
 	for child in page.get_node("SubViewport/Content").get_children():
 		if child is Label:
