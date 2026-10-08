@@ -25,6 +25,7 @@ Every command assumes the project root as cwd and this executable:
 | [flora.md](flora.md) | Eight plant species, three ecosystems: placement rules, calibration, budget |
 | [performance.md](performance.md) | Every profiler and benchmark, and what they found |
 | [balance-sim.md](balance-sim.md) | Monte Carlo balance simulator |
+| [web-engine.md](web-engine.md) | The size-stripped web export template: what is compiled out, rebuilding it |
 | [interviews/](interviews/) | Conversaciones con habitantes de páramo: fuentes crudas y lecciones de diseño |
 
 **Reading a finding:** anything marked MEASURED was really run. Findings that

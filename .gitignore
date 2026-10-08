@@ -12,6 +12,9 @@ exports/
 *.pck
 !docs/index.pck
 *.zip
+# ...except the size-stripped web export template the Web presets point at
+# (built by engine/build_web_template.sh, see dev-notes/web-engine.md)
+!engine/templates/web_nothreads_release.zip
 
 # Godot editor swap/temp files
 *.tscn[0-9]*.tmp
