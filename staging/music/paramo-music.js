@@ -30,8 +30,9 @@
 //   - Web export: the export head_include adds this script; same-origin fetch.
 //   - Dev preview: docs/music/dev-music.html (serve docs/ over http).
 //
-// Requires strudel/web-sf-1.3.0.js (custom @strudel/web + soundfonts bundle;
-// exposes window.initStrudel / setSoundfontUrl / registerSoundfonts).
+// Loads strudel/web-sf-1.3.0.js itself on the first interaction (custom
+// @strudel/web + soundfonts bundle; exposes window.initStrudel / setSoundfontUrl /
+// registerSoundfonts), unless the host page already included it.
 //
 // API facts (verified against @strudel/web 1.3.0):
 //   - initStrudel(opts) returns a Promise resolving to the repl.
@@ -109,10 +110,52 @@
     if (el) el.textContent = msg;
   }
 
+  // The engine bundle is NOT in the page head (changed 2026-10-08). It is 255 KB
+  // on the wire, and nothing can sound before the first interaction anyway, so it
+  // loads on that interaction instead of competing with the game's own download.
+  // A host page that already includes it (docs/music/dev-music.html) is used as is.
+  var ENGINE_URL = BASE + "strudel/web-sf-1.3.0.js";
+  var bootPromise = null;
+
+  function loadEngine() {
+    if (typeof window.initStrudel === "function") return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = ENGINE_URL;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error("failed to load " + ENGINE_URL)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  // Once per page: load the engine, init it, fetch the song, then play if a start
+  // was asked for meanwhile.
+  function boot() {
+    if (bootPromise) return bootPromise;
+    // 2) Fetch the song text in parallel with engine load + init (same-origin).
+    var songRet = fetch(SONG_URL).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status + " fetching " + SONG_URL);
+      return r.text();
+    });
+    bootPromise = Promise.all([loadEngine().then(initEngine), songRet]).then(function (vals) {
+      repl = vals[0];
+      songCode = vals[1];
+      if (!repl || typeof repl.evaluate !== "function") {
+        reportError("no repl returned from initStrudel()");
+        return;
+      }
+      updateDebug();
+      if (wantPlaying) play();   // unlocked before we were ready
+    }).catch(function (e) {
+      reportError("init/song load failed: " + e.message +
+        " (the dev preview must be served over http, not file://)");
+    });
+    return bootPromise;
+  }
+
   // 1) Boot the engine and prebake the sample/soundfont registry.
-  var initRet;
-  try {
-    initRet = window.initStrudel({
+  function initEngine() {
+    return window.initStrudel({
       prebake: function () {
         window.setSoundfontUrl(BASE + "soundfonts");
         window.registerSoundfonts();
@@ -144,29 +187,7 @@
         ]);
       },
     });
-  } catch (e) {
-    reportError("initStrudel threw: " + e.message);
   }
-
-  // 2) Fetch the song text in parallel with engine init (same-origin).
-  var songRet = fetch(SONG_URL).then(function (r) {
-    if (!r.ok) throw new Error("HTTP " + r.status + " fetching " + SONG_URL);
-    return r.text();
-  });
-
-  Promise.all([Promise.resolve(initRet), songRet]).then(function (vals) {
-    repl = vals[0];
-    songCode = vals[1];
-    if (!repl || typeof repl.evaluate !== "function") {
-      reportError("no repl returned from initStrudel()");
-      return;
-    }
-    updateDebug();
-    if (wantPlaying) play();   // unlocked before we were ready
-  }).catch(function (e) {
-    reportError("init/song load failed: " + e.message +
-      " (the dev preview must be served over http, not file://)");
-  });
 
   function play() {
     if (!repl || songCode == null) return;   // not ready; start() set wantPlaying
@@ -331,7 +352,7 @@
 
   // --- Control surface ---
   window.ParamoMusic = {
-    start: function () { if (playing) return; wantPlaying = true; play(); },
+    start: function () { if (playing) return; wantPlaying = true; boot(); play(); },
     stop: function () { wantPlaying = false; playing = false; stopPoll(); revealOrder = null; if (repl) repl.stop(); updateDebug(); },
     // Master volume, 0..1.5 (1.0 = authored loudness). Live: sets the superdough
     // output gain directly, so a dragged slider responds without a re-evaluate.
@@ -353,4 +374,11 @@
   }
   window.addEventListener("pointerdown", unlock);
   window.addEventListener("keydown", unlock);
+
+  // The AudioContext is now created after that first gesture, once the engine has
+  // loaded, not inside it. Browsers with sticky activation let it run; one that
+  // wants a gesture of its own gets it from whatever the player does next.
+  function resumeOnGesture() { if (playing) resumeAudio(); }
+  window.addEventListener("pointerdown", resumeOnGesture);
+  window.addEventListener("keydown", resumeOnGesture);
 })();

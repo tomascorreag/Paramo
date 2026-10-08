@@ -51,8 +51,8 @@ available. The packages above are published at:
 
 ## How Paramo uses it
 
-`../paramo-music.js` loads this bundle via the web export's `head_include`,
-redirects soundfonts to the same-origin `../soundfonts/` directory
+`../paramo-music.js` (the only script in the web export's `head_include`) loads
+this bundle itself on the player's first interaction, redirects soundfonts to the same-origin `../soundfonts/` directory
 (`setSoundfontUrl`), and `repl.evaluate()`s the arrangement
 `../ojos_azules.strudel.js`. The Paramo game (Godot → WASM) talks to this engine
 only through its public JS API, and the engine is kept as a separate served file
