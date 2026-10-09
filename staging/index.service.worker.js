@@ -1,10 +1,11 @@
+// PATCHED by scripts/tools/patch_service_worker.gd
 // This service worker is required to expose an exported Godot project as a
 // Progressive Web App. It provides an offline fallback page telling the user
 // that they need an Internet connection to run the project if desired.
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1791496725|4305974';
+const CACHE_VERSION = '1791571468|4163100';
 /** @type {string} */
 const CACHE_PREFIX = 'Paramo-staging-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
@@ -21,7 +22,7 @@ const CACHEABLE_FILES = ["index.wasm","index.pck"];
 const FULL_CACHE = CACHED_FILES.concat(CACHEABLE_FILES);
 
 self.addEventListener('install', (event) => {
-	event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CACHED_FILES)));
+	event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(FULL_CACHE)));
 });
 
 self.addEventListener('activate', (event) => {
@@ -79,7 +80,7 @@ async function fetchAndCache(event, cache, isCacheable) {
 		response = ensureCrossOriginIsolationHeaders(response);
 	}
 
-	if (isCacheable) {
+	if (isCacheable && response.ok) {
 		// And update the cache
 		cache.put(event.request, response.clone());
 	}
@@ -104,8 +105,8 @@ self.addEventListener(
 			event.respondWith((async () => {
 				// Try to use cache first
 				const cache = await caches.open(CACHE_NAME);
-				if (isNavigate) {
-					// Check if we have full cache during HTML page request.
+				{
+					// Check if we have full cache on EVERY request, not only the HTML page.
 					/** @type {Response[]} */
 					const fullCache = await Promise.all(FULL_CACHE.map((name) => cache.match(name)));
 					const missing = fullCache.some((v) => v === undefined);
@@ -117,6 +118,9 @@ self.addEventListener(
 						} catch (e) {
 							// And return the hopefully always cached offline page in case of network failure.
 							console.error('Network error: ', e); // eslint-disable-line no-console
+							if (!isNavigate) {
+								throw e;
+							}
 							return caches.match(OFFLINE_URL);
 						}
 					}

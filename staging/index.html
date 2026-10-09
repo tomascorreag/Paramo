@@ -93,7 +93,7 @@ body {
 		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
 <link rel="manifest" href="index.manifest.json">
-<script defer src="music/paramo-music.js"></script>
+<script>(function(){var K='paramo-stale-build-reload';function mismatch(m){m=String(m||'');return m.indexOf('missing Wasm export')>=0||m.indexOf('LinkError')>=0;}function recover(m){if(!mismatch(m)||sessionStorage.getItem(K))return;sessionStorage.setItem(K,'1');var scope=new URL('.',location.href).href,jobs=[];if(navigator.serviceWorker)jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.filter(function(r){return r.scope===scope;}).map(function(r){return r.unregister();}));}));if(window.caches)jobs.push(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k.indexOf('Paramo-')===0;}).map(function(k){return caches.delete(k);}));}));Promise.all(jobs).then(function(){return Promise.all(['index.js','index.wasm','index.pck'].map(function(f){return fetch(f,{cache:'no-cache'}).then(function(r){return r.arrayBuffer();});}));}).then(function(){location.reload();},function(){location.reload();});}window.addEventListener('unhandledrejection',function(e){var r=e.reason;recover(r&&(r.name+': '+r.message));});window.addEventListener('error',function(e){recover(e.message);});var ce=console.error;console.error=function(){recover(Array.prototype.join.call(arguments,' '));return ce.apply(console,arguments);};})();</script><script defer src="music/paramo-music.js"></script>
 	</head>
 	<body>
 		<canvas id="canvas">
@@ -112,7 +112,7 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":2452528,"index.wasm":19157033},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":2452864,"index.wasm":19157033},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"serviceWorker":"index.service.worker.js"};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
