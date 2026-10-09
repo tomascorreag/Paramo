@@ -384,16 +384,19 @@ func _ready() -> void:
 	visible = false
 
 
-# Two gates before the first line shows: the opening cinematic must be gone
+# Three gates before the first line shows: the opening cinematic must be gone
 # (TitleIntro hides the HUD for its duration and frees itself at the end, so its
-# group emptying is the honest "the player has the world now" signal), and the
-# run must actually be ACTIVE — RunController holds start_run() until the
-# language gate is answered.
+# group emptying is the honest "the player has the world now" signal), the
+# camera pan must have landed (it runs pan_additional_duration past the
+# cinematic, and a line over a moving camera is read by nobody), and the run
+# must actually be ACTIVE — RunController holds start_run() until the language
+# gate is answered.
 func _process(delta: float) -> void:
 	if _finished:
 		return
 	if not _running:
 		if get_tree().get_nodes_in_group(&"title_intro").is_empty() \
+				and not _opening_pan_active() \
 				and SeasonManager.phase == SeasonManager.Phase.ACTIVE:
 			_begin()
 		return
@@ -583,6 +586,13 @@ func _tick_fire_follow() -> void:
 
 
 # --- Lifecycle --------------------------------------------------------------
+
+## No player (tests, tool scenes) counts as landed, so the gate never wedges.
+func _opening_pan_active() -> bool:
+	var player: Node = get_tree().get_first_node_in_group(&"player")
+	return player != null and player.has_method(&"is_opening_pan_active") \
+			and player.call(&"is_opening_pan_active")
+
 
 func _begin() -> void:
 	_running = true

@@ -132,6 +132,46 @@ missing class. Serve the export, open the console, and expect no
   it on the first interaction, when the music starts anyway. The drum samples are
   lossless FLAC (`docs/music/samples/README.md`).
 
+## Returning players: one build, never two
+
+Changing the engine exposed a bug in Godot 4.6's generated service worker. It
+caches `index.js` at install but `index.wasm` / `index.pck` only when a page it
+controls fetches them later, and it checks that its cache is complete for the HTML
+request alone. A player whose cache holds an old `index.js` and no wasm got new
+HTML from the network, the old `index.js` from the cache and the new wasm from the
+network, and the load died at the end of the progress bar with
+`Aborted(Assertion failed: missing Wasm export: _emwebxr_on_input_event)`.
+REPRODUCED locally (stock live build, then this branch's build, HTTP cache expired),
+and seen on staging.
+
+Two fixes, both needed:
+
+- **`scripts/tools/patch_service_worker.gd`**, run by CI on every deploy. Install
+  caches every file (`addAll` is all-or-nothing, so a worker version holds one
+  complete build), the completeness check runs for every request, only OK
+  responses are cached, and the offline page only answers navigations. Every
+  replacement must match exactly once or the deploy fails, so a Godot upgrade that
+  changes the generated file cannot ship an unpatched worker. Local exports to
+  `docs/` are not patched.
+- **The stale-build guard**, inline in both presets' `head_include`. Workers already
+  installed keep the old behaviour until replaced, and the HTML always comes from
+  the network, so the guard always arrives. On `missing Wasm export` or a
+  `LinkError` it unregisters this scope's worker, deletes the `Paramo-*` caches,
+  revalidates `index.js` / `index.wasm` / `index.pck` (`cache: 'no-cache'`, bodies
+  read so the HTTP cache keeps them) and reloads, once per tab session.
+
+MEASURED with a logging server that sends Pages' `max-age=600`:
+
+| case | result |
+|---|---|
+| first visit, patched worker | each file downloaded once; install reuses the page's HTTP-cached copies |
+| second visit, HTTP cache cleared | js / wasm / pck all from the worker cache, 0 bytes from the server |
+| old stock worker, deploy, revisit | one failed start, guard reload, game starts; extra cost one `index.js` (≈72 KB gzip) and two 304s |
+| patched worker, deploy of a different engine, revisit | old build served whole and starts, new build downloaded once in the background; next visit runs the new build from cache |
+
+Rejected: `skipWaiting()` in the new worker. It would take over mid-load, after the
+page has its `index.js` and before the wasm arrives, which is this bug again.
+
 ## Not done, measured
 
 - Brotli. Pages only gzips. Brotli-11 would take the engine to ≈2.95 MB and, with

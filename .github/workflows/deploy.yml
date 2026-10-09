@@ -70,6 +70,13 @@ jobs:
           godot --headless --verbose --export-release "Web" "${EXPORT_DIR}/index.html"
           test -f "${EXPORT_DIR}/index.html" # fail the job if the export produced nothing
 
+      # The generated service worker can serve one build's index.js with another
+      # build's index.wasm to a returning player ("missing Wasm export"). The patch
+      # makes each worker cache one complete build; it fails the job if the
+      # generated file no longer matches what it expects. See dev-notes/web-engine.md.
+      - name: Patch service worker
+        run: godot --headless --path . --script res://scripts/tools/patch_service_worker.gd -- "${EXPORT_DIR}/index.service.worker.js"
+
       # --- staging only -----------------------------------------------------------
       # The generated service worker derives its cache key from the project name
       # ("Paramo-sw-cache-"). Cache Storage is per-ORIGIN, shared across scopes, and

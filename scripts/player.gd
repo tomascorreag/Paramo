@@ -668,6 +668,12 @@ func snap_camera_over_player() -> void:
 	_camera.position.x = _camera_pan_target_world().x
 
 
+# True until the opening pan hands the camera back (or is skipped). The FTUE
+# waits on this so its first line lands on a still camera.
+func is_opening_pan_active() -> bool:
+	return _camera_panning
+
+
 # Release the opening pan clock. Called by TitleIntro when the player clicks
 # through the "click to begin" gate so the pan begins exactly as the cinematic
 # starts. No-op when there's no gate (the pan was already running).
