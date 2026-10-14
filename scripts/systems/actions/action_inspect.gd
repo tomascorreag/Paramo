@@ -115,8 +115,10 @@ func execute(ctx: ActionContext) -> void:
 	var data: WorldObjectData = ObjectPainter.data_for(species)
 	if ctx.tile_interaction == null or data == null or data.name_key == &"":
 		return
-	ctx.tile_interaction.show_message(
-		line_for(data, first_sighting), _DISPLAY_DURATION)
+	var line := line_for(data, first_sighting)
+	ctx.tile_interaction.show_message(line, _DISPLAY_DURATION)
+	# The coordinator says it out loud too (CoordinatorVoice); no voice node, no sound.
+	ctx.tile_interaction.get_tree().call_group(CoordinatorVoice.GROUP, &"say", line)
 
 
 ## The sentence the coordinator says on identifying `data`. Public so tests can

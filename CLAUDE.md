@@ -57,6 +57,7 @@ New `class_name` scripts need `$G --path . --headless --import` once before a he
 | `benchmark_pathfinder.gd` / `benchmark_visitors.gd` | Price routing / the visitor system | [perf](dev-notes/performance.md) |
 | `sim/balance_sim.gd` | Monte Carlo balance runs. **Run after any balance change.** | [sim](dev-notes/balance-sim.md) |
 | `sync_music.gd` | Copy `music/*.strudel.js` into `docs/music/` before a web export | see Music |
+| `voice_lab/index.html` + `voice_lab/tools/make_fixture.mjs` / `bench_voice.gd` | Tune the coordinator's voice (open from disk); rewrite the parity fixture **after touching the lab front end, the voice JSON or the inspect/narrative copy**; price the synth | [voice](dev-notes/voice.md) |
 
 ## Standing findings
 
@@ -108,6 +109,11 @@ One line each; the measurement and the rejected alternatives are in the linked n
 - Pausing the tree does not silence hotkeys on a `PROCESS_MODE_ALWAYS` node; ask `PauseMenu.is_blocking()` first, not `get_tree().paused`, which the journal also sets.
 - The pause panel does not grow to its content; `custom_minimum_size` is the content box and the tallest view sets it.
 - A Container resets a child's `rotation` and `scale` every layout pass; wrap a rotated glyph in a plain `Control`.
+
+**Voice** ([voice](dev-notes/voice.md))
+- The coordinator speaks live: `CoordinatorVoice` (group `coordinator_voice`, `say(text)`) synthesizes tract-lite (Pink Trombone's glottis + tract shaper over an 8-section waveguide at 16 kHz) into an `AudioStreamGenerator`, ~63 ms of GDScript per second of speech on desktop. Full Pink Trombone is ~490 ms and cannot.
+- `scripts/systems/voice/` is a port of `voice_lab/js`; `test_voice.gd` holds it to the lab's plan for every voiced line. Tune in the lab, copy into `resources/voices/coordinator.tres`, re-run `make_fixture.mjs`.
+- The generator plays as STREAM on web (sample mode can't play one); clean playback on the threadless web build is SPIKE-GATED. Never render lines into runtime `AudioStreamWAV`s: they leak on web.
 
 **Balance** ([sim](dev-notes/balance-sim.md))
 - Compare arms seed by seed, 12+ paired seeds for anything downstream of fire. Never price code changes off the sim's wall clock (12% arm drift).

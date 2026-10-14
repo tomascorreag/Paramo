@@ -1,0 +1,49 @@
+[gd_resource type="Resource" script_class="VoiceProfile" format=3]
+
+[ext_resource type="Script" path="res://scripts/data/voice_profile.gd" id="1_voice"]
+
+; The coordinator's voice, from voice_lab's exported docs/voice_visitor-1.json
+; ("coordinator (exported)" preset in voice_lab/index.html). Lab-only settings
+; (lo-fi, Klatt, cheap engine, chorus) have no field here; the game always plays
+; tract-lite at synth_rate. output_gain: 1/30 of the calibrated 1.8 (which put the
+; 90th-percentile raw peak, 0.419, at 0.75), set by ear in game in two steps
+; (1/3, then 1/10 of that): a sustained voice reads far louder than its peaks suggest.
+[resource]
+script = ExtResource("1_voice")
+seed = "visitor-1"
+base_pitch = 200.0
+formant_scale = 1.1
+speed = 1.35
+tense = 0.0
+breath = 0.0
+accent_st = 3.0
+rise_st = 6.0
+fall_st = 3.0
+declination = 1.5
+wander = 1.25
+word_gap_ms = 5.0
+coartic_ms = 25.0
+scramble = 0.05
+flat_pitch = 1.0
+quantize = 1
+even_rhythm = 0.75
+chop_ms = 0.0
+softness = 0.75
+final_consonants = 1
+jitter = 1.5
+shimmer = 3.0
+vib_rate = 5.5
+vib_depth = 1.0
+creak = 0.05
+glottal_source = 0
+natural_wobble = true
+pure_voice = true
+tract_speed = 35.0
+tract_lead_ms = 15.0
+fric_boost = 2.5
+plosive_click = 1.0
+tract_damping = 0.996
+synth_rate = 16000.0
+warmth = 0.1
+reverb_mix = 0.05
+output_gain = 0.06

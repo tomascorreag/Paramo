@@ -633,6 +633,8 @@ func _show_step(index: int) -> void:
 	_fade_strip_to(0.0 if _is_quiet() else 1.0)
 	if _is_narrative():
 		_start_dwell()
+		# The narrative is the coordinator talking: voice it (CoordinatorVoice).
+		get_tree().call_group(CoordinatorVoice.GROUP, &"say", tr(_label.text))
 	elif _is_quiet():
 		_arm_step_timer(_ROAM_SECONDS)
 

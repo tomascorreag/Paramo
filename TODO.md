@@ -34,3 +34,4 @@
 - [x] ignore hotkeys (like space key for journal) when paused — pausing the tree does not silence a `PROCESS_MODE_ALWAYS` node, and two of them were listening: Space opened the journal over the pause menu, any key burned an FTUE line. Both now check a `PauseMenu.is_blocking()` static flag (not `get_tree().paused` — the journal pauses too, and its own Space must still close it). New `test_pause_hotkeys.gd`. See [ui](dev-notes/ui.md).
 - [x] fix fps stutter spike when fire comes on screen.
 - [x] For the FTUE, wait for the initial camera pan to complete before showing the first tutorial message and the hold to skip message (slight delay compared to current timing) — `TutorialController` gained a third start gate, `Player.is_opening_pan_active()`; the pan outlives the cinematic by `pan_additional_duration` (4 s), which is the new delay. Skipping the title card snaps the pan, so the strip still appears at once there.
+- [ ] Add mumble speak to the dialogue
